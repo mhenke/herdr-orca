@@ -38,18 +38,47 @@ Explorer and Source Control are one stack, toggled from the tab bar and remember
 
 Verified: 280 / 280 columns rendered, panel hidden and shown again, no layout errors.
 
-## What Orca has that this does not
+## Panel-by-panel check against Orca's source
 
-Reverse-engineered from Orca's renderer, and each one is a real gap rather than a styling detail.
+Verified by reading Orca's renderer, not from screenshots. "Herdr" is what exists in Herdr App today.
 
-| Surface | Orca's right-click / actions |
-| --- | --- |
-| Worktree row | Update, status, Open in…, Copy Path, Copy Worktree Name, Pin/Unpin, Mark Read/Unread, New group from project, Move to group, New Child Worktree, Open/Remove parent, Sleep (and subtree), Delete (Remove Project on a primary) |
-| File row | New File, New Folder, Copy, Copy (Relative) Path(s), Duplicate, Add as Project, Open in Terminal, View File, Open in Orca Browser, Markdown Preview, Download, Collapse Folder, Find in Folder, Open in…, Reveal, Rename, Delete |
-| Terminal | Copy, Paste, Select All, Add to chat, Set Title, Clear Screen, Reset Terminal, Copy Pane/Terminal/Session ID, Split Right/Down, Equalize Pane Sizes, Collapse/Expand Pane, Continue in Chat UI, Fork Agent Session |
-| Tab | Pin/Unpin, Close, Close Others, Change Title, Tab Color (10 colours) |
+### Left sidebar
 
-Herdr's shipped mods cover a slice of this: `spaces` has a right-click menu (Rename, New worktree, Remove worktree, Open worktree) and the terminal menu has Copy, Paste, Split Right/Down, Zoom, Close. The shipped `files` mod has **no right-click at all**, so the biggest Orca gap is file actions.
+| Orca surface | Orca source | Herdr |
+| --- | --- | --- |
+| Search (worktree + browser-tab palette) | `SidebarNav.tsx:91` | `picker` mod, `ctrl-shift-k` |
+| Tasks | `SidebarTaskNavButton.tsx` (GitHub/GitLab/Jira/Linear) | none. `herdr-tsk` exists only as a **TUI** plugin |
+| Automations | `SidebarNav.tsx` `showAutomationsButton` | none |
+| Artifacts / Skills / Agent Dashboard | `SidebarNav.tsx` | none |
+| Orca Mobile | `SidebarNav.tsx` `showMobileButton` | none |
+| Projects (grouped worktrees) | `SidebarHeader.tsx` (`groupBy === 'repo' ? 'Projects' : 'Workspaces'`), `worktree-list/` | `spaces` mod, 280px |
+| Agents | `SidebarHeader.tsx` activity view toggle | `agents` mod |
+
+The header's `Projects`/`Workspaces` title is a **groupBy toggle**, not a separate panel.
+
+### Right sidebar activity bar
+
+From `use-right-sidebar-activity-items.ts` and `right-sidebar-panel-content.tsx`. Visibility comes from `right-sidebar-activity-visibility.ts`: `gitOnly` hides in folder workspaces, `folderOnly` shows only there, `sshOnly` needs an SSH host.
+
+| Orca activity | Icon | Shown when | Herdr |
+| --- | --- | --- | --- |
+| Explorer (files + search views) | Files | always | `files`. No search view |
+| Agents (AI vault / session history) | AgentSessionHistoryIcon | always | `agents` is in the left sidebar instead |
+| Attached worktrees | Workflow | folder workspaces | none |
+| PR Checks | ListChecks | folder workspaces | reviewr (TUI only) |
+| Source Control | GitBranch | git repos | `changes` |
+| Checks | ListChecks | git repos | reviewr (TUI only) |
+| Ports | Plug | SSH host | none |
+| Plugin panels | — | `pluginSystemEnabled` | none |
+
+The activity bar is an icon rail whose position is user-set (`top` or `side`, 40px when side) — `activity-bar-position-menu.tsx`.
+
+### Gaps that are real
+
+- **Explorer search**: Orca's explorer has `files` and `search` views (`rightSidebarExplorerView`). Herdr's `files` has no search.
+- **Checks / PR Checks**: Orca has them in-app; Herdr's equivalents are `persiyanov.reviewr` in the TUI.
+- **Ports, Attached worktrees, plugin panels**: nothing in Herdr.
+- **Tasks, Automations, Artifacts, Skills, Mobile, AI vault**: nothing in Herdr.
 
 ## Known limits
 
