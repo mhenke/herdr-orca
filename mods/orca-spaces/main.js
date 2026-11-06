@@ -5,19 +5,10 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
-
-function find(node, id) {
-  if (node?.id === id) return node;
-  for (const child of node?.children ?? []) {
-    const found = find(child, id);
-    if (found) return found;
-  }
-  return null;
-}
-
-// The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
-const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
+import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
+import { projectMark, tint } from "./project.js";
+import { tip, tipMark } from "./tip.js";
+import { stopsInit, stop, focusRoot, enter } from "./focus.js";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 // `ps`: panes(), read once by the caller (each read copies every pane).
@@ -25,28 +16,20 @@ function place(s, ps) {
   const tabs = new Set((s.tabs ?? []).map((c) => c.id));
   return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
 }
-const rowHeight = ({ tree }) => (tree ? 28 : 30);
 const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
 const base = (path) => path.replace(/\/+$/, "").split("/").pop();
+
 // Changes made outside Herdr (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
 const FALLBACK = 60000;
 
-// What a stored color name looks like on an avatar (the same in every mod
-// that draws space avatars): one strong color per hue, light and dark alike.
-const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
-
-// A space speaks up only when something in it needs you.
-export function glyph(status) {
-  return status === "blocked" || status === "done" ? "●" : "·";
-}
-
-export function tone(t, status) {
-  return t[status] ?? t.unknown;
-}
-
 export default class Spaces extends View {
   init(_props, cx) {
+    stopsInit(this, cx, "entry");
+    // pane.go onto this list (mod.json's "focusable"): the keyboard starts at the heading's button.
+    cx.spawn(async (cx) => {
+      for (;;) if (await nextCommand() === "focus") enter(this, cx, "space-new");
+    });
     this.git = {}; // where() -> { name, branch, ahead, behind, repo, linked }, null: not a repo
     this.checked = {}; // where() -> when it was last looked at
     this.unsure = new Set(); // where()s git couldn't answer for (a machine away)
@@ -65,6 +48,7 @@ export default class Spaces extends View {
     this.reconnecting = JSON.parse(localStorage.getItem("machines.reconnecting") ?? "{}");
     for (const state of Object.values(this.reconnecting)) state.busy = false;
     this.folded = new Set(JSON.parse(localStorage.getItem("machines.folded") ?? "[]"));
+    this.foldedRepos = new Set(JSON.parse(localStorage.getItem("repos.folded") ?? "[]"));
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     // `git status` walks the whole tree, on another machine a process there:
@@ -269,14 +253,17 @@ export default class Spaces extends View {
     const placed = new Set(); // repos whose worktrees are listed (under the first of its spaces)
     for (const r of list) {
       if (nested(r)) continue;
-      out.push({ ...r, tree: null });
+      const top = { ...r, tree: null, kids: 0 };
+      out.push(top);
       if (!r.g || r.g.linked || placed.has(r.g.repo)) continue;
       placed.add(r.g.repo);
       const kids = list.filter((k) => nested(k) && k.g.repo === r.g.repo);
-      kids.forEach((k, n) => out.push({ ...k, tree: n === kids.length - 1 ? "└─" : "├─" }));
+      top.kids = kids.length;
+      const folded = this.foldedRepos.has(r.g.repo);
+      kids.forEach((k, n) => out.push({ ...k, folded, tree: n === kids.length - 1 ? "└─" : "├─" }));
     }
-    // Simulate the batch so later indexes include earlier moves. An attempted
-    // write can lose a sync conflict: allow the echo to settle before retrying.
+    // space.next/prev and ctrl-N follow the model, so it keeps the rows' order, folded rows included: folding moves nothing.
+    // Simulate the batch so later indexes include earlier moves. An attempted write can lose a sync conflict: let its echo settle before retrying.
     const order = sp.map(w => w.id);
     const target = out.map(r => r.w.id);
     const key = JSON.stringify([order, target, machines()]);
@@ -294,63 +281,103 @@ export default class Spaces extends View {
       }
       this.ordering.machines = [...moved];
     }
-    return out.filter(r => this.shown.has(r.w.id));
+    return out.filter(r => this.shown.has(r.w.id) && !r.folded);
+  }
+
+  toggleRepo(repo, cx) {
+    this.foldedRepos.has(repo) ? this.foldedRepos.delete(repo) : this.foldedRepos.add(repo);
+    localStorage.setItem("repos.folded", JSON.stringify([...this.foldedRepos]));
+    cx.notify();
   }
 
   // The rows, under a header per machine once one isn't this computer.
-  grouped(t, collapsed) {
-    const rows = this.ordered();
-    const draw = (r) => (collapsed ? this.compact(r, t) : this.row(r, t));
+  // A button's icon and text brighten together: a hover style reaches the text but not the svg, so it's state, as in the inbox.
+  glow(id) {
+    return (on, cx) => {
+      if (on) this.hot = id;
+      else if (this.hot === id) this.hot = null;
+      cx.notify();
+    };
+  }
+
+  grouped(t) {
+    const rows = this.ordered(), ps = panes();
+    const draw = (r) => this.row(r, t, ps);
     const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name), ...Object.keys(this.reconnecting)])].sort();
     const loading = m => {
       const layout = machines().find(k => k.name === m)?.layout;
       return layout === "loading" || (!layout && this.machines.some(k => k.name === m && k.state === "connected"))
         || spaces().some(s => (s.machine ?? null) === m && !this.shown.has(s.id));
     };
-    const loadingRow = m => div().id(`machine-loading-${m ?? "local"}`).h(28).flex_none().px(8).text_size(12).text_color(t.dim).child(collapsed ? "…" : "Loading…");
+    const loadingRow = m => div().id(`machine-loading-${m ?? "local"}`).h(30).flex_none().px(8).text_size(13).text_color(t.dim).child("Loading…");
     if (!remote.length) return loading(null) && !rows.length ? [loadingRow(null)] : rows.map(draw);
     const machineNames = [null, ...remote];
-    return machineNames.flatMap((m) => {
+    return machineNames.flatMap((m, i) => {
       const mine = rows.filter((r) => (r.w.machine ?? null) === m);
       const repair = this.reconnecting[m];
       const machine = this.machines.find(k => k.name === m) ?? repair?.machine;
       const connected = !m || machine?.state === "connected";
       const rebuilt = this.rebuilt(machine) || !!repair;
       const folded = this.folded.has(m);
-      const head = h_flex().id(`machine-${m ?? "local"}`).h(26).flex_none().px(collapsed ? 2 : 8).gap(7).items_center().text_size(11).text_color(t.dim)
-        .cursor_pointer().hover(s => s.bg(t.hover))
+      // Drawn as the agents list's group headers, each 8px below what's above it, the heading included: right under it,
+      // its + and chevron crowded the heading's buttons, a column of icons unevenly spaced.
+      // Its + and chevron stand under the heading's two buttons, in slots built as those are (26px, 2px apart, 10px from the edge), so any zoom rounds them alike.
+      const head = h_flex().id(`machine-${m ?? "local"}`).pt(8).h(30).flex_none().pl(8).pr(2).gap(4).items_center()
+        .text_size(12).font_medium().text_color(t.dim)
+        .role("button").accessibility_label(`${folded ? "Expand" : "Collapse"} ${m ?? "This computer"}`)
+        .on_hover((on, cx) => {
+          // By the row's id: this computer's m is null, which a cleared field would equal.
+          if (on) this.overMachine = `machine-${m ?? "local"}`;
+          else if (this.overMachine === `machine-${m ?? "local"}`) this.overMachine = null;
+          cx.notify();
+        })
         .on_click((_e, cx) => {
           folded ? this.folded.delete(m) : this.folded.add(m);
           localStorage.setItem("machines.folded", JSON.stringify([...this.folded]));
           cx.notify();
         })
-        .child(svg(`mods/workspace-chrome/${m ? "server" : "monitor"}.svg`).size(13).flex_none())
-        .when(!collapsed, el => el.child(div().flex_1().truncate().child(m ?? "This computer"))
-          .when(!connected && !rebuilt, el => el.child(div().flex_none().child((machine?.state ?? "asleep").replace(/_/g, " "))))
-          .when(rebuilt, el => el.child(h_flex().flex_none().gap(3).items_center()
-            .child(div().max_w(140).truncate().child(repair?.error || "rebuilt ·"))
-            .child(div().id(`machine-connect-${m}`).text_color(repair?.error ? t.blocked : t.muted)
-              .hover(s => s.text_color(t.foreground))
-              .tooltip(repair?.error || "This machine was rebuilt or replaced. Click to connect to the new one.")
-              .on_click((_e, cx) => { cx.stop_propagation(); this.reconnect(machine, cx); })
-              .child(repair?.busy ? "Connecting…" : "Connect"))))
-          .when(connected, el => el.child(div().id(`machine-add-${m ?? "local"}`).flex_none().px(4).rounded(4).hover(s => s.bg(t.hover).text_color(t.foreground))
-            .on_click((_e, cx) => { cx.stop_propagation(); run("space.new", { machine: m ?? "" }); }).child("+")))
-          .child(div().size(6).rounded(3).flex_none().bg(connected ? t.ansi2 : t.dim))
-          .child(svg(`mods/workspace-chrome/chevron-${folded ? "right" : "down"}.svg`).size(11).flex_none()));
-      const empty = h_flex().id(`machine-new-${m ?? "local"}`).h(28).flex_none().px(8).gap(7).items_center().rounded(7)
-        .text_size(12).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
+        // -1: the glyph's own inset, so its edge meets the heading and the spaces' marks.
+        .child(svg(`mods/t3-inbox/${m ? "server" : "monitor"}.svg`).size(14).ml(-1).flex_none())
+        // The dot describes the machine, so it follows its name, however short.
+        .child(h_flex().flex_1().min_w(0).gap(6).items_center()
+          .child(div().min_w(0).truncate().child(m ?? "This computer"))
+          .child(tipMark(this, t, `machine-state-${m ?? "local"}`, connected ? "Connected" : (machine?.state ?? "asleep").replace(/_/g, " ").replace(/^./, c => c.toUpperCase()), div().size(6).rounded_full().flex_none().bg(connected ? t.ansi2 : t.dim))))
+        .when(!connected && !rebuilt, el => el.child(div().flex_none().child((machine?.state ?? "asleep").replace(/_/g, " "))))
+        .when(rebuilt, el => el.child(h_flex().flex_none().gap(3).items_center()
+          .child(div().max_w(140).truncate().child(repair?.error || "rebuilt ·"))
+          .child(tip(this.hot, t, `machine-connect-${m}`, `Connect ${m}`, stop(this, t, `machine-connect-${m}`, div().id(`machine-connect-${m}`).text_color(repair?.error ? t.blocked : t.muted)
+            .hover(s => s.text_color(t.foreground)).on_hover(this.glow(`machine-connect-${m}`))
+            .role("button").accessibility_label(`Connect ${m}`)
+            .on_click((_e, cx) => { cx.stop_propagation(); this.reconnect(machine, cx); })
+            .child(repair?.busy ? "Connecting…" : "Connect"), 4)))))
+        .child(h_flex().flex_none().gap(2).items_center()
+          .when(connected, el => el.child(tip(this.hot, t, `machine-add-${m ?? "local"}`, "New space here", stop(this, t, `machine-add-${m ?? "local"}`, div().id(`machine-add-${m ?? "local"}`).w(26).h(20).flex_none().flex().items_center().justify_center().rounded(4)
+            .text_color(this.hot === `machine-add-${m ?? "local"}` ? t.foreground : t.dim).on_hover(this.glow(`machine-add-${m ?? "local"}`))
+            .role("button").accessibility_label("New space here")
+            .on_click((_e, cx) => { cx.stop_propagation(); run("space.new", { machine: m ?? "" }); }).child(svg("mods/orca-spaces/plus.svg").size(12)), 4),
+            // The key makes a space on the current space's machine: it names this + only on that one.
+            { action: (spaces().find(s => s.active)?.machine ?? null) === m ? "space.new" : null })))
+          // An indicator, not a button: the whole row folds, so it lights with the row and has no label of its own.
+          .child(div().id(`machine-fold-${m ?? "local"}`).w(26).flex_none().flex().items_center().justify_center()
+            .text_color(this.overMachine === `machine-${m ?? "local"}` ? t.foreground : t.dim)
+            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none())));
+      const empty = stop(this, t, `machine-new-${m ?? "local"}`, h_flex().id(`machine-new-${m ?? "local"}`).h(30).flex_none().px(8).gap(8).items_center().rounded(8)
+        .text_size(13).text_color(this.hot === `machine-new-${m ?? "local"}` ? t.foreground : t.dim).hover(s => s.bg(t.hover)).on_hover(this.glow(`machine-new-${m ?? "local"}`))
+        .role("button").accessibility_label("New space here")
         .on_click(() => run("space.new", { machine: m ?? "" }))
-        .child(svg("mods/workspace-chrome/plus.svg").size(12)).when(!collapsed, el => el.child("New space there"));
-      if (!collapsed && rebuilt) return [head];
-      return [head, ...(folded ? [] : mine.length ? mine.map(draw) : [loading(m) ? loadingRow(m) : empty])];
+        // Laid out as a space's row: the + in the mark's 18px, the words where a name starts.
+        .child(div().size(18).flex_none().flex().items_center().justify_center().child(svg("mods/orca-spaces/plus.svg").size(12))).child("New space here"), 8);
+      const heading = stop(this, t, `machine-${m ?? "local"}`, head, 8);
+      if (rebuilt) return [heading];
+      return [heading, ...(folded ? [] : mine.length ? mine.map(draw) : [loading(m) ? loadingRow(m) : empty])];
     });
   }
 
   // Only what's unusual, after the name: "herdr \u00b7 spike \u21912 \u21931". The repo or
   // branch goes when the name already says it (a worktree is named after its branch),
   // and master/main go: nearly every space is on one.
-  gitTail(g, tree, name, t) {
+  gitTail(g, tree, name, t, id) {
+    const n = (count, what) => `${count} commit${count === 1 ? "" : "s"} to ${what}`;
     const raw = g.branch ?? "detached";
     const same = (a) => a.toLowerCase() === name.toLowerCase();
     const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
@@ -359,30 +386,33 @@ export default class Spaces extends View {
     return h_flex()
       .flex_1()
       .min_w(0)
-      .gap(5)
+      .gap(4)
       .justify_end()
       .items_center()
-      .text_size(11.5)
+      .text_size(11)
       .text_color(t.dim)
       .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
-      .when(g.ahead > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
-      .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
+      .when(g.ahead > 0, (el) => el.child(tipMark(this, t, `ahead-${id}`, n(g.ahead, "push"), div().text_color(t.ansi2).child(`\u2191${g.ahead}`))))
+      .when(g.behind > 0, (el) => el.child(tipMark(this, t, `behind-${id}`, n(g.behind, "pull"), div().text_color(t.ansi1).child(`\u2193${g.behind}`))));
   }
 
-  row({ w, i, g, tree }, t) {
-    const on = w.active;
+  row({ w, i, g, tree, kids = 0 }, t, ps) {
     const fromIndex = this.pressed === null ? -1 : spaces().findIndex(s => s.id === this.pressed);
-    const colors = shared("space.colors") ?? {};
-    const color = colors[w.id] ?? "ansi6";
-    const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color]);
-    return v_flex()
+    const on = w.active;
+    // A checkout with worktrees folds them as an agent folds its sub-agents: an arrow at the
+    // end, and folded, the count; dim, brightening when hovered.
+    const folded = kids > 0 && this.foldedRepos.has(g.repo);
+    const foldId = `space-fold-${w.id}`, lit = this.hot === foldId ? t.foreground : t.dim;
+    return stop(this, t, `space-${w.id}`, v_flex()
       .relative()
       .id(`space-${w.id}`)
       .px(8)
-      .h(rowHeight({ tree }))
+      .h(30)
       .flex_none()
       .justify_center()
       .rounded(8)
+      .role("button")
+      .accessibility_label(w.name)
       .when(on, (el) => el.bg(t.selected))
       .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
       .when(this.pressed === w.id && this.over !== w.id, (el) => el.opacity(0.5))
@@ -415,53 +445,69 @@ export default class Spaces extends View {
         cx.notify();
       })
       .on_mouse_down("right", () => this.menu(w))
+      // The same tree lines as sub-agents: from the checkout's avatar center, turning into the branch icon.
+      .when(tree === "├─", el => el.child(div().absolute().left(16.25).top(0).bottom(0).w(1.5).bg(t.input)))
+      .when(Boolean(tree), el => el.child(div().absolute().left(16.25).top(-4).h(19).w(9.75).border_l(1.5).border_b(1.5).rounded_bl(6).border_color(t.input)))
       .child(
         h_flex()
-          .gap(9)
+          .w_full().min_w(0)
+          .gap(8)
           .items_center()
-          .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
-          .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
-          .child(div().flex_shrink(0).max_w(150).truncate().text_color(t.foreground).child(w.name))
-          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),
-      );
-  }
-
-  compact({ w, i }, t) {
-    return h_flex()
-      .id(`space-${w.id}`)
-      .h(26)
-      .flex_none()
-      .justify_center()
-      .gap(4)
-      .when(w.active, (el) => el.bg(t.raised))
-      .hover((s) => s.bg(t.hover))
-      .on_click(() => run("space.select", { id: w.id }))
-      .child(div().text_color(w.active ? t.foreground : t.muted).child(String(i + 1)))
-      .child(div().text_color(tone(t, w.status)).child(glyph(w.status)));
+          .when(Boolean(tree), el => el.pl(20).child(h_flex().size(18).flex_none().items_center().justify_center()
+            .child(svg("mods/orca-spaces/git-branch.svg").size(16).text_color(t.dim))))
+          .when(!tree, el => el.child(projectMark(w, 18, t, ps)))
+          .child(div().min_w(0).max_w(150).truncate().text_color(t.foreground).child(w.name))
+          .child(g ? this.gitTail(g, tree, w.name, t, w.id) : div().flex_1())
+          // -3: its chevron stands in the column of the heading's last button and a machine's chevron, 23 from the edge.
+          .when(kids > 0, el => el.child(tip(this.hot, t, foldId, folded ? "Expand worktrees" : "Collapse worktrees", stop(this, t, foldId, div().id(foldId).h(20).min_w(20).mr(-3).px(4).gap(3).flex_none().flex().items_center().justify_center().rounded(4)
+            // raised: the row under it already shows hover or selected.
+            .text_size(11).text_color(lit)
+            .role("button").accessibility_label(folded ? "Expand worktrees" : "Collapse worktrees")
+            .on_hover((over, cx) => {
+              if (over) this.hot = foldId;
+              else if (this.hot === foldId) this.hot = null;
+              cx.notify();
+            })
+            // Pressing it neither selects nor drags the space.
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            .on_click((_e, cx) => { cx.stop_propagation(); this.toggleRepo(g.repo, cx); })
+            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none().text_color(lit))
+            .when(folded, el => el.child(String(kids))), 4)))),
+      // A space goes by its mouse-up, which a key isn't.
+      ), 8, { enter: () => run("space.select", { id: w.id }) });
   }
 
   render() {
     const t = theme();
-    const collapsed = narrow();
-    const palette = ["ansi6", "ansi3", "ansi4", "ansi5", "ansi2", "ansi1"];
     const sp = spaces();
-    const ids = new Set(sp.map(p => p.id));
-    const kept = Object.fromEntries(Object.entries(shared("space.colors") ?? {}).filter(([id]) => ids.has(id)));
-    let changed = Object.keys(kept).length !== Object.keys(shared("space.colors") ?? {}).length;
-    for (const p of sp) {
-      if (kept[p.id] || p.name === "~") continue;
-      const uses = c => Object.values(kept).filter(v => v === c).length;
-      kept[p.id] = palette.reduce((best, c) => uses(c) < uses(best) ? c : best);
-      changed = true;
-    }
-    if (changed) setShared("space.colors", kept);
-    return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
-        .when(!collapsed, el => el.child("Spaces"))
-        .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
-          .on_click(() => run("space.new")).child(svg("mods/workspace-chrome/plus.svg").size(14))))
-      .child(v_flex().flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar().mode("always")
-        .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
-        .children(this.grouped(t, collapsed)));
+    // The shipped mods (the Terminals picker) still color spaces from "space.colors": the same color, from the name.
+    const colors = Object.fromEntries(sp.filter(p => p.name !== "~").map(p => [p.id, tint(p.name, false)]));
+    if (JSON.stringify(colors) !== JSON.stringify(shared("space.colors") ?? {})) setShared("space.colors", colors);
+    const asks = props()?.newMenu && machines().length > 1;
+    const tool = (id, label, icon, fn, more) => tip(this.hot, t, id, label, stop(this, t, id, div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(this.hot === id ? t.foreground : t.dim).on_hover(this.glow(id)).role("button").accessibility_label(label).hover(s => s.bg(t.hover))
+      .on_click(fn).child(svg(`mods/orca-spaces/${icon}.svg`).size(14))), more);
+    return focusRoot(this, v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
+      .child(h_flex().id("spaces-heading").h(32).flex_none().pl(16).pr(10).items_center().justify_between().text_size(12).font_medium().text_color(t.dim)
+        .child(div().text_color(t.muted).child("Spaces"))
+        // The same two as Inbox's top row, so switching modes moves nothing.
+        .child(h_flex().flex_none().gap(2).items_center()
+          .child(tool("space-new", "New space", "folder-plus", (_e, cx) => {
+            this.hot = null;
+            // The layout's menu asks which machine, as its mod.json places it; the shipped one can't, so docked alone it's the active space's.
+            if (asks) openOverlay({ mod: props().newMenu, kind: "popup", at: "top", offset: 40, width: 576, height: 420, props: { pick: true } });
+            else run("space.new");
+            cx.notify();
+          }, { action: asks ? null : "space.new" }))
+          .child(tool("space-new-tab", "New tab", "square-pen", (_e, cx) => { this.hot = null; run("mod.open", { name: props()?.newMenu ?? "new-menu" }); cx.notify(); }))))
+      .child(v_flex().id("space-list").flex_1().min_h(0).overflow_y_scroll()
+        .on_mouse_up("left", (_e, cx) => { this.pressed = this.over = null; cx.notify(); })
+        // Herdr reports no release outside the sidebar, so leaving ends a drag, as in the inbox.
+        .on_hover((on, cx) => {
+          if (on || this.pressed === null) return;
+          this.pressed = this.over = null;
+          cx.notify();
+        })
+        .child(v_flex().id("space-content").w_full().flex_none().px(8).pb(8)
+          .children(this.grouped(t)))));
   }
 }
