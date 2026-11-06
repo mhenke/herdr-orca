@@ -31,6 +31,8 @@ None of the above is rebuilt.
 | Nav rows | 13px, `px-2 py-1.5` | `SidebarNav.tsx:87,97,129` |
 | Font | Geist | `assets/main.css:190` |
 | Dark tokens | bg `#0a0a0a`, fg `#f0f0f0`, card `#171717`, muted `#262626`, accent `#404040`, border `rgb(255 255 255 / .07)` | `assets/main.css:336-380` |
+| Terminal dark palette | Ghostty Default Style Dark | `src/shared/terminal-themes/defaults.ts`, chosen by `default-global-settings.ts:95` |
+| Terminal light palette | Builtin Tango Light | same, `:100` |
 | Checks visibility | `gitOnly: true` — git repos only | `use-right-sidebar-activity-items.ts:117` |
 
 ## Package shape
@@ -41,7 +43,7 @@ Follows herdr-t3: `layouts/ mods/ keys.json themes/ README.md RECIPE.md preview.
 - `scripts/sync.sh` is kept: herdr-t3 has one (`herdr-t3/scripts/sync.sh`), and it copies rather than symlinks because "Herdr App doesn't load a mod's own SVGs through a symlink".
 - A mod cannot import outside its own folder (`herdr-t3/scripts/sync.sh:10`), so the clipboard helper lives as `mods/<mod>/clip.js`, copied into each mod that needs it — the same way herdr-t3 duplicates `focus.js` and `name.js`.
 - Settings (fonts, sounds) are **documented** in the README for the person to apply, not written by the package.
-- Orca's colours ship as `themes/orca-dark.json`, matching how herdr-t3 ships `t3-code-dark.json`.
+- Orca's colours ship as `extras/themes/orca-dark.json` and `orca-light.json`, matching how herdr-t3 ships `t3-code-dark.json` and installs `extras/themes/*.json` (`herdr-t3/scripts/sync.sh:52`).
 
 ## Where each kind of change belongs
 

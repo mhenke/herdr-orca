@@ -27,16 +27,26 @@ The centre 320 minimum is a rule Herdr can't express: it has no "max = window mi
 ## Install
 
 ```sh
-cp layouts/orca.json layouts/orca.svg ~/.config/herdr-app/layouts/
-cp keys.json ~/.config/herdr-app/            # merge into yours if you have one
+sh scripts/sync.sh
 herdr-app do layout.switch '{"name":"orca"}'
 ```
 
-Restart the app after adding a layout file: a running window keeps the set it loaded at start.
+`scripts/sync.sh` copies `layouts/`, `mods/` (once they exist) and `extras/themes/` into `~/.config/herdr-app` as real copies, not symlinks. Restart the app after the first sync: a running window keeps the layout set it loaded at start.
 
 Explorer and Source Control are one stack, toggled from the tab bar and remembered per space by the shipped `tabs` mod, which finds the `panel` and `panel-body` nodes by id. Opening either shows the right column; pressing the active one again hides it. `ctrl-shift-b` toggles the left sidebar, `ctrl-shift-e` the right column.
 
 Verified: 280 / 280 columns rendered, panel hidden and shown again, no layout errors.
+
+## Themes
+
+`extras/themes/` carries Orca's own two terminal palettes, taken from its defaults:
+
+| Theme | Orca's name | Source |
+| --- | --- | --- |
+| `orca-dark` | Ghostty Default Style Dark | `terminal-themes/defaults.ts` |
+| `orca-light` | Builtin Tango Light | same |
+
+The layout follows the system's light or dark mode with `"theme": { "light": "orca-light", "dark": "orca-dark" }`.
 
 ## Panel-by-panel check against Orca's source
 

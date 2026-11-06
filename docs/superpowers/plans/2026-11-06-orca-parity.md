@@ -35,7 +35,8 @@
   mods/orca-spaces/            # clone of `spaces`    + clip.js + icons (points at orca-menu)
   mods/orca-files/             # clone of `files`     + clip.js + icons + search
   mods/orca-tabs/              # clone of `tabs`      + clip.js + icons (activity strip)
-  themes/orca-dark.json        # Orca's dark tokens as a Herdr theme
+  extras/themes/orca-dark.json   # Orca's Ghostty-default palette + dark tokens
+  extras/themes/orca-light.json  # Orca's Tango Light palette + light tokens
   scripts/sync.sh              # copy package -> $HERDR_APP_HOME
   README.md  RECIPE.md  preview.png
 ```
@@ -66,7 +67,7 @@ app=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
 mkdir -p "$app/layouts" "$app/mods" "$app/themes"
 
 cp "$src"/layouts/orca.json "$src"/layouts/orca.svg "$app/layouts/"
-cp "$src"/themes/*.json "$app/themes/" 2>/dev/null || true
+cp "$src"/extras/themes/*.json "$app/themes/"
 for m in "$src"/mods/*/; do
   n=$(basename "$m")
   rm -rf "$app/mods/$n"
@@ -113,7 +114,7 @@ Expected: `[]`
 In `layouts/orca.json`, beside `"background": "canvas"`:
 
 ```json
-  "theme": "orca-dark",
+  "theme": { "light": "orca-light", "dark": "orca-dark" },
   "ui_font": "Geist",
   "font_size": 14,
   "colors": {
@@ -134,22 +135,18 @@ Change the `main` node's pane `"radius": 10` to `"radius": 2`.
 
 Do not set `ansi`: that would shift every terminal program's colours.
 
-- [ ] **Step 3: Write the theme file (Task 3 owns the palette; this task only needs the name to resolve)**
+- [ ] **Step 3: Use Orca's own terminal palette**
 
-Create `themes/orca-dark.json`:
+`extras/themes/orca-dark.json` and `extras/themes/orca-light.json` already exist in this repo, taken verbatim from Orca's defaults:
 
-```json
-{
-  "background": "#0a0a0a",
-  "foreground": "#f0f0f0",
-  "selection": "#404040",
-  "cursor": "#f0f0f0",
-  "ansi": [
-    "#1f1f1f", "#f87171", "#86efac", "#fde68a", "#93c5fd", "#d8b4fe", "#67e8f9", "#e5e5e5",
-    "#525252", "#fca5a5", "#a7f3d0", "#fef3c7", "#bfdbfe", "#e9d5ff", "#a5f3fc", "#fafafa"
-  ]
-}
-```
+| Theme | Orca name | Source |
+| --- | --- | --- |
+| `orca-dark` | Ghostty Default Style Dark | `src/shared/terminal-themes/defaults.ts` |
+| `orca-light` | Builtin Tango Light | same file |
+
+These are Orca's `terminalThemeDark` / `terminalThemeLight` defaults (`src/shared/default-global-settings.ts:95,100`). The `ansi` array is Orca's palette in order (black, red, green, yellow, blue, magenta, cyan, white, then the eight brights); `colors` carries Orca's UI tokens (`#0a0a0a` canvas, `#171717` surface, `#262626` raised, `rgb(255 255 255 / .07)` border).
+
+Do not substitute a hand-picked palette: an invented one was wrong in an earlier draft and changed every program's colours.
 
 - [ ] **Step 4: Sync and verify**
 
