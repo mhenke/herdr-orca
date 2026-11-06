@@ -14,4 +14,21 @@ for m in "$src"/mods/*/; do
   rm -rf "$app/mods/$n"
   cp -r "$m" "$app/mods/$n"
 done
+
+# Merge this layout's key section into the person's keys.json; every other
+# section is left exactly as it was.
+if [ -f "$app/keys.json" ]; then
+  merged=$(python3 - "$src/keys.json" "$app/keys.json" <<'PY'
+import json, sys
+mine = json.load(open(sys.argv[1]))
+theirs = json.load(open(sys.argv[2]))
+for section, binds in mine.items():
+    theirs.setdefault(section, {}).update(binds)
+json.dump(theirs, open(sys.argv[2], "w"), indent=2)
+PY
+)
+else
+  cp "$src/keys.json" "$app/keys.json"
+fi
+
 echo "synced to $app"

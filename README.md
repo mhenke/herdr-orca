@@ -1,76 +1,56 @@
-# herdr-orca
+# Herdr Orca
 
-An [Orca](https://github.com/stablyai/orca)-shaped window for Herdr App, reverse-engineered from Orca's renderer source rather than from screenshots.
+An [Orca](https://github.com/stablyai/orca)-like layout for Herdr App: Orca's three columns, its activity rail, project cards and file menus.
 
-Orca's three columns map onto Herdr's model. The look and the column frame are the layout; four mods carry Orca's menus, file actions and activity rail.
+![Herdr Orca](preview.png)
 
-| Orca | Orca source | Here |
-| --- | --- | --- |
-| Left nav | `components/sidebar/`, `sidebarWidth: 280` | `orca-spaces` + shipped `agents` |
-| Explorer | `components/right-sidebar/file-explorer/`, `rightSidebarTab: 'explorer'` | `orca-files` |
-| Source control | `right-sidebar/source-control/` | shipped `changes` |
-| Center | tab bar + framed panes | `orca-tabs` + shipped `pane` |
+## Philosophy
 
-## Numbers, from Orca's source
+**Keep the workspace where your hand expects it.**
 
-| Thing | Orca | Notes |
-| --- | --- | --- |
-| Left sidebar | 280px, min 220, max 500 | `ui-slice-agent-actions.ts:48`, `sidebar/index.tsx:47-48` |
-| Right sidebar | 280px, min 220 | `right-sidebar-state.ts:41`, `right-sidebar-width.ts:1` |
-| Right activity bar | 40px | `RIGHT_SIDEBAR_SIDE_ACTIVITY_BAR_WIDTH` |
-| Center minimum | 320px | `RIGHT_SIDEBAR_MIN_NON_SIDEBAR_AREA` |
-| Right sidebar default tab | `explorer` | `right-sidebar-state.ts:42` |
-| Nav rows | 13px, `px-2 py-1.5`, gap 2, radius 6 | `SidebarNav.tsx:87,97,129` |
+Orca's shape is one window: a project list on the left, the work in the middle, the repository on the right. Herdr can draw that shape without forking it, so this package is a layout plus four small mods rather than a second application.
 
-The centre 320 minimum is a rule Herdr can't express: it has no "max = window minus sibling" size. Ours caps the panel at 900 instead.
+Every number here was read from Orca's renderer source, not estimated from a screenshot. The table in [RECIPE.md](RECIPE.md) cites the files.
+
+## Features
+
+- **Three columns at Orca's widths**: left sidebar 280 (min 220, max 500), right panel 280 (min 220), 1px dividers, 2px pane corners. The center reads flat, as Orca's does.
+- **Project cards in the sidebar**: each space draws its project's mark — the repo's own icon when it has one, else a monogram in a stable color — with its branch and ahead/behind where they matter. Linked worktrees fold under their checkout. Drag a row to reorder it.
+- **Activity rail**: 36×36 buttons with 16px icons at the right of the tab strip, matching Orca's activity bar. Explorer is always there; Source Control appears only in a git repository, which is Orca's `gitOnly` rule. Pressing the active one hides the column again; each space remembers its own choice.
+- **Space menu**: right-click a space for Rename, Copy Path, Copy Worktree Name, Open in Terminal, New/Open/Remove worktree and Close.
+- **File row menu**: right-click any file or folder for New File, New Folder, Copy Path, Copy Relative Path, Open in Terminal, Reveal, Rename and Delete. New and Rename ask for the name in place.
+- **File search**: a query field above the tree runs `rg` and lists matches by line; click one to open it. Capped at 200 hits.
+- **Orca's palettes**: `orca-dark` (Ghostty Default Style Dark, Orca's default) and `orca-light` (Builtin Tango Light), plus Orca's greys for the panels.
 
 ## Install
+
+By hand: copy `layouts/orca.json`, `layouts/orca.svg`, every `mods/orca-*` into `~/.config/herdr-app/`, `extras/themes/*.json` into `~/.config/herdr-app/themes/`, and merge `keys.json` into yours.
+
+Or run the script, which does all four and merges the key section without touching your other bindings:
 
 ```sh
 sh scripts/sync.sh
 herdr-app do layout.switch '{"name":"orca"}'
 ```
 
-`scripts/sync.sh` copies `layouts/`, `mods/` and `extras/themes/` into `~/.config/herdr-app` as real copies, not symlinks. Restart the app after the first sync: a running window keeps the layout set it loaded at start.
+Restart the app after the first sync: a running window keeps the layout set it loaded at start. Mod edits reload on save; a new mod folder needs a restart.
 
-Explorer and Source Control are one stack, toggled by the 36px activity rail at the right of the tab bar and remembered per space by `orca-tabs`, the only writer of the `panel` and `panel-body` nodes. Source Control appears only in a git repo, matching Orca's `gitOnly` rule. Opening an activity shows the right column; pressing the active one again hides it. `ctrl-shift-b` toggles the left sidebar, `ctrl-shift-e` the right column.
+How it should look and behave, and every number's source: [RECIPE.md](RECIPE.md).
 
-Verified: 280 / 280 columns rendered, panel hidden and shown again, no layout errors.
+## Keys
 
-## Mods
+The layout's own, in the `layout:orca` section of `keys.json`. `sync.sh` merges them; they win over the same action in `global`.
 
-Four mods, each a clone of a shipped one so upstream behaviour (spaces ordering, worktree grouping, file tree, tab drag) is inherited rather than reimplemented. Their diffs are deliberately small so a re-clone after a Herdr upgrade stays cheap.
-
-| Mod | Clone of | What Orca adds |
+| Key | Command | Does |
 | --- | --- | --- |
-| `orca-spaces` | `spaces` | Opens `orca-menu` for a space instead of `menu`, passing the folder |
-| `orca-menu` | `menu` | Copy Path, Copy Worktree Name, Open in Terminal |
-| `orca-files` | `files` | Row context menu (New File/Folder, Copy Path, Copy Relative Path, Open in Terminal, Reveal, Rename, Delete) and a bounded `rg` search view |
-| `orca-tabs` | `tabs` | The 36×36 activity rail with 16px icons; Files always, Changes only in a git repo |
+| `ctrl-shift-b` | `layout.toggle:sidebar` | Shows or hides the left sidebar |
+| `ctrl-shift-e` | `layout.toggle:panel` | Shows or hides the right panel |
 
-A mod cannot import outside its own folder, so `clip.js` (clipboard + reveal) is copied into each mod that needs it — the same way `herdr-t3` duplicates `name.js`.
-
-Herdr delivers `<mod>.<command>` to that mod's `nextCommand()` as a **bare string**; args are not delivered. New File, New Folder and Rename therefore ask for the name in `orca-files`' own popup rather than through the shipped `prompt` mod. Delete needs no typed text, so it still uses the shipped `confirm`.
-
-## Known limits
-
-- Search is capped at 200 hits: `exec` caps at 8 MiB / 30s, so the list bounds itself instead of failing on a large tree.
-- Clipboard and reveal are verified on Linux/Wayland only. The `xclip`, `pbcopy` and `explorer.exe` branches are written but untested.
-- `orca-tabs` forks Herdr's tab bar, so upstream fixes to it stop arriving here.
-- Built against `herdr-app 0.1.13` / `gpui-shell 0.7.1`. Shipped mods are replaced on every start; re-run `herdr-app check` and re-clone after an upgrade that changes their internals.
-
-## Themes
-
-`extras/themes/` carries Orca's own two terminal palettes, taken from its defaults:
-
-| Theme | Orca's name | Source |
-| --- | --- | --- |
-| `orca-dark` | Ghostty Default Style Dark | `terminal-themes/defaults.ts` |
-| `orca-light` | Builtin Tango Light | same |
-
-The layout follows the system's light or dark mode with `"theme": { "light": "orca-light", "dark": "orca-dark" }`.
+Tabs, spaces and panes keep Herdr's own keys (`alt-1`…`alt-9` for spaces, `ctrl-1`…`ctrl-9` for tabs, `alt-h/j/k/l` to move between panes). The activity rail, the space menu and the file menu are mouse-driven.
 
 ## Settings
+
+These belong to you, not the package; it never writes `settings.json`.
 
 Set these yourself; this package does not write `settings.json`.
 
@@ -83,64 +63,28 @@ Set these yourself; this package does not write `settings.json`.
 }
 ```
 
-The two sounds are Orca's, from `resources/notification-sounds/` in
-into `~/.config/herdr-app/data/sounds/` yourself.
-[Orca](https://github.com/stablyai/orca); copy `ding.mp3` and `two-tone.mp3`
-## Panel-by-panel check against Orca's source
+The two sounds come from Orca's `resources/notification-sounds/` in [stablyai/orca](https://github.com/stablyai/orca); copy `ding.mp3` and `two-tone.mp3` into `~/.config/herdr-app/data/sounds/` yourself.
 
-Verified by reading Orca's renderer, not from screenshots. "Herdr" is what exists in Herdr App today.
+Geist ships with Herdr, so there is no font install step.
 
-### Left sidebar
+## Update
 
-| Orca surface | Orca source | Herdr |
-| --- | --- | --- |
-| Search (worktree + browser-tab palette) | `SidebarNav.tsx:91` | `picker` mod, `ctrl-shift-k` |
-| Tasks | `SidebarTaskNavButton.tsx` (GitHub/GitLab/Jira/Linear) | none. `herdr-tsk` exists only as a **TUI** plugin |
-| Automations | `SidebarNav.tsx` `showAutomationsButton` | none |
-| Artifacts / Skills / Agent Dashboard | `SidebarNav.tsx` | none |
-| Orca Mobile | `SidebarNav.tsx` `showMobileButton` | none |
-| Projects (grouped worktrees) | `SidebarHeader.tsx` (`groupBy === 'repo' ? 'Projects' : 'Workspaces'`), `worktree-list/` | `spaces` mod, 280px |
-| Agents | `SidebarHeader.tsx` activity view toggle | `agents` mod |
-
-The header's `Projects`/`Workspaces` title is a **groupBy toggle**, not a separate panel.
-
-### Right sidebar activity bar
-
-From `use-right-sidebar-activity-items.ts` and `right-sidebar-panel-content.tsx`. Visibility comes from `right-sidebar-activity-visibility.ts`: `gitOnly` hides in folder workspaces, `folderOnly` shows only there, `sshOnly` needs an SSH host.
-
-| Orca activity | Icon | Shown when | Herdr |
-| --- | --- | --- | --- |
-| Explorer (files + search views) | Files | always | `files`. No search view |
-| Agents (AI vault / session history) | AgentSessionHistoryIcon | always | `agents` is in the left sidebar instead |
-| Attached worktrees | Workflow | folder workspaces | none |
-| PR Checks | ListChecks | folder workspaces | reviewr (TUI only) |
-| Source Control | GitBranch | git repos | `changes` |
-| Checks | ListChecks | git repos | reviewr (TUI only) |
-| Ports | Plug | SSH host | none |
-| Plugin panels | — | `pluginSystemEnabled` | none |
-
-The activity bar is an icon rail whose position is user-set (`top` or `side`, 40px when side) — `activity-bar-position-menu.tsx`.
-
-### Gaps that are real
-
-- **Explorer search**: Orca's explorer has `files` and `search` views (`rightSidebarExplorerView`). Herdr's `files` has no search.
-- **Checks / PR Checks**: Orca has them in-app; Herdr's equivalents are `persiyanov.reviewr` in the TUI.
-- **Ports, Attached worktrees, plugin panels**: nothing in Herdr.
-- **Tasks, Automations, Artifacts, Skills, Mobile, AI vault**: nothing in Herdr.
-
-## Known limits
-
-- Tab colours, worktree parent links, project groups and Sleep have no Herdr equivalent; they'd need a custom mod plus state of their own.
-- `files` opens a preview inline instead of opening an editor tab, so Orca's "View File" and editor-tab menu have no counterpart.
-- Herdr's layout has no conditional sizing, so min/max are fixed numbers.
-
-## Rebuilding from Orca
-
-The constants above came from:
+Herdr does not update mods or layouts from others, and an install never overwrites: adding this again would create `orca-spaces-2`. Update by overwriting:
 
 ```sh
-cd ~/Projects/orca/src/renderer/src
-grep -rn "sidebarWidth\|rightSidebarWidth" store/slices/ui store/slices/editor/actions
-grep -rn "MIN_WIDTH\|MAX_WIDTH" components/sidebar components/right-sidebar
-grep -rn "ContextMenuItem" components/sidebar components/right-sidebar components/tab-bar components/terminal-pane
+git pull && sh scripts/sync.sh
 ```
+
+Mods reload on save. A layout change needs a restart. Your settings, key bindings outside `layout:orca`, and other mods are untouched. Your own edits to the copied files are lost.
+
+## What it runs
+
+- `orca-spaces`: read-only `git status` / `git rev-parse` in your spaces' folders, and watches those repos for changes.
+- `orca-files`: `rg --vimgrep` while you type in the search field, and file operations you ask for (create, rename, delete, reveal).
+- `orca-menu`: `wl-copy` / `xclip` / `pbcopy` for Copy Path, and `xdg-open` / `open` / `explorer.exe` for Reveal.
+
+No network requests.
+
+## Credits and license
+
+`orca-spaces` starts from Herdr App's `spaces` via [herdr-t3](https://github.com/JinJieBeWater/herdr-t3)'s `t3-spaces`; `orca-menu`, `orca-files` and `orca-tabs` start from Herdr App's shipped `menu`, `files` and `tabs`. The layout starts from Herdr App's `main`. Orca's numbers and palettes are [stablyai/orca](https://github.com/stablyai/orca)'s (MIT License, Copyright Orca). Icons are from Herdr App's shipped set. Apache-2.0, as Herdr App.
