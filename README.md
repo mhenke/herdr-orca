@@ -2,14 +2,14 @@
 
 An [Orca](https://github.com/stablyai/orca)-shaped window for Herdr App, reverse-engineered from Orca's renderer source rather than from screenshots.
 
-Orca's three columns map onto Herdr's model with no custom mods: both of its sidebars are stock Herdr panels.
+Orca's three columns map onto Herdr's model. The look and the column frame are the layout; four mods carry Orca's menus, file actions and activity rail.
 
 | Orca | Orca source | Here |
 | --- | --- | --- |
-| Left nav | `components/sidebar/`, `sidebarWidth: 280` | shipped `spaces` + `agents` |
-| Explorer | `components/right-sidebar/file-explorer/`, `rightSidebarTab: 'explorer'` | shipped `files` |
+| Left nav | `components/sidebar/`, `sidebarWidth: 280` | `orca-spaces` + shipped `agents` |
+| Explorer | `components/right-sidebar/file-explorer/`, `rightSidebarTab: 'explorer'` | `orca-files` |
 | Source control | `right-sidebar/source-control/` | shipped `changes` |
-| Center | tab bar + framed panes | shipped `tabs` + `pane` |
+| Center | tab bar + framed panes | `orca-tabs` + shipped `pane` |
 
 ## Numbers, from Orca's source
 
@@ -31,11 +31,33 @@ sh scripts/sync.sh
 herdr-app do layout.switch '{"name":"orca"}'
 ```
 
-`scripts/sync.sh` copies `layouts/`, `mods/` (once they exist) and `extras/themes/` into `~/.config/herdr-app` as real copies, not symlinks. Restart the app after the first sync: a running window keeps the layout set it loaded at start.
+`scripts/sync.sh` copies `layouts/`, `mods/` and `extras/themes/` into `~/.config/herdr-app` as real copies, not symlinks. Restart the app after the first sync: a running window keeps the layout set it loaded at start.
 
-Explorer and Source Control are one stack, toggled from the tab bar and remembered per space by the shipped `tabs` mod, which finds the `panel` and `panel-body` nodes by id. Opening either shows the right column; pressing the active one again hides it. `ctrl-shift-b` toggles the left sidebar, `ctrl-shift-e` the right column.
+Explorer and Source Control are one stack, toggled by the 36px activity rail at the right of the tab bar and remembered per space by `orca-tabs`, the only writer of the `panel` and `panel-body` nodes. Source Control appears only in a git repo, matching Orca's `gitOnly` rule. Opening an activity shows the right column; pressing the active one again hides it. `ctrl-shift-b` toggles the left sidebar, `ctrl-shift-e` the right column.
 
 Verified: 280 / 280 columns rendered, panel hidden and shown again, no layout errors.
+
+## Mods
+
+Four mods, each a clone of a shipped one so upstream behaviour (spaces ordering, worktree grouping, file tree, tab drag) is inherited rather than reimplemented. Their diffs are deliberately small so a re-clone after a Herdr upgrade stays cheap.
+
+| Mod | Clone of | What Orca adds |
+| --- | --- | --- |
+| `orca-spaces` | `spaces` | Opens `orca-menu` for a space instead of `menu`, passing the folder |
+| `orca-menu` | `menu` | Copy Path, Copy Worktree Name, Open in Terminal |
+| `orca-files` | `files` | Row context menu (New File/Folder, Copy Path, Copy Relative Path, Open in Terminal, Reveal, Rename, Delete) and a bounded `rg` search view |
+| `orca-tabs` | `tabs` | The 36×36 activity rail with 16px icons; Files always, Changes only in a git repo |
+
+A mod cannot import outside its own folder, so `clip.js` (clipboard + reveal) is copied into each mod that needs it — the same way `herdr-t3` duplicates `name.js`.
+
+Herdr delivers `<mod>.<command>` to that mod's `nextCommand()` as a **bare string**; args are not delivered. New File, New Folder and Rename therefore ask for the name in `orca-files`' own popup rather than through the shipped `prompt` mod. Delete needs no typed text, so it still uses the shipped `confirm`.
+
+## Known limits
+
+- Search is capped at 200 hits: `exec` caps at 8 MiB / 30s, so the list bounds itself instead of failing on a large tree.
+- Clipboard and reveal are verified on Linux/Wayland only. The `xclip`, `pbcopy` and `explorer.exe` branches are written but untested.
+- `orca-tabs` forks Herdr's tab bar, so upstream fixes to it stop arriving here.
+- Built against `herdr-app 0.1.13` / `gpui-shell 0.7.1`. Shipped mods are replaced on every start; re-run `herdr-app check` and re-clone after an upgrade that changes their internals.
 
 ## Themes
 
