@@ -44,6 +44,17 @@ export default class Files extends View {
     this.saved = new Map();
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {};
     this.cx = cx;
+    this.hits = null;
+    this.q = InputState.new({ placeholder: "Search files" });
+    let timer = null;
+    this.q.on("change", (_e, cx) => {
+      const v = this.q.value().trim();
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!v) { this.hits = null; cx.notify(); return; }
+        void this.search(v).then(h => { this.hits = h; cx.notify(); });
+      }, 200);
+    });
     this.input = InputState.new({ placeholder: "Name" });
     this.input.on("change", (_e, cx) => cx.notify());
     this.input.on("submit", (_e, cx) => { void this.apply(this.input.value().trim()); cx.notify(); });
@@ -222,6 +233,17 @@ export default class Files extends View {
 
   command(c) { if (c === "remove") return this.remove(); }
 
+  // Bounded: exec caps at 8 MiB / 30s, so cap hits rather than fail.
+  async search(query) {
+    if (!query) return [];
+    const r = await exec("rg", ["--vimgrep", "--smart-case", "--max-count", "20", query], { cwd: this.root, on: this.on }).catch(() => null);
+    if (!r || r.code > 1) return [];
+    return (r.stdout || "").split("\n").slice(0, 200).filter(Boolean).map(l => {
+      const [file, line, , ...rest] = l.split(":");
+      return { file, line: Number(line), text: rest.join(":").trim() };
+    });
+  }
+
   rows(prefix, depth, out, t) {
     if (out.length >= TOTAL || depth > 40) return out;
     for (const entry of this.entries.get(prefix) ?? []) {
@@ -283,7 +305,16 @@ export default class Files extends View {
         .when(Boolean(this.file), el => el.child(div().id("files-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => { this.show(null); cx.notify(); }).child("←")))
         .child(div().font_semibold().child("Files"))
         .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(this.file ?? this.root?.split(/[\\/]/).pop() ?? "")))
-      .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6).children(this.rows("", 0, [], t))
+      .when(!this.file, el => el.child(h_flex().flex_none().h(36).px(10).gap(6).items_center().border_b(1).border_color(t.border)
+        .child(svg("mods/orca-files/file.svg").size(13).flex_none().text_color(t.dim))
+        .child(div().flex_1().min_w(0).h(24).px(8).flex().items_center().rounded(6).bg(t.background).child(Input.new(this.q).h_full().text_size(12).text_color(t.foreground)))))
+      .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6)
+        .children(this.hits?.length
+          ? this.hits.map((h, i) => h_flex().id(`hit-${i}`).h(26).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer().hover(s => s.bg(t.hover))
+              .on_click((_e, cx) => this.show(h.file, cx))
+              .child(div().flex_1().min_w(0).truncate().text_size(12).child(h.text))
+              .child(div().flex_none().text_size(11).text_color(t.dim).child(`${h.file}:${h.line}`)))
+          : this.hits ? [] : this.rows("", 0, [], t))
         .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "No folder"))))
         .when(this.limited, el => el.child(div().p(8).text_size(11).text_color(t.dim).child("File list limited to 500 entries per folder and 5,000 total")))))
       .when(Boolean(this.file), el => el.child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.dim).child(this.fileError || "Loading file…")));
