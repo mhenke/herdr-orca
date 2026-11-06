@@ -2,24 +2,25 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make Herdr App look and behave like Orca — layout, typography, sounds, icons, richer worktree menu, file-explorer actions and search — without forking Herdr's Rust.
+**Goal:** Make Herdr App look and behave like Orca — layout, typography, icons, richer worktree menu, file-explorer actions and search — packaged the way herdr-t3 packages itself.
 
-**Architecture:** Herdr App is refreshed live from `~/.config/herdr-app/`: one layout JSON, one `settings.json`, and mods written in gpui-kit JS. Every phase is either a settings/layout edit or a *clone* of a shipped mod with a minimal diff. The repo at `~/Projects/herdr-orca` is the source of truth; `install.sh` copies into the app home.
+**Architecture:** A declarative Herdr App package: `layouts/`, `mods/`, `keys.json`, `themes/`, docs. Shipped mods are cloned and reshaped; nothing is forked at the Rust level. A mod **cannot import outside its own folder**, so any helper used by several mods is copied into each, exactly as herdr-t3 duplicates `focus.js` and `name.js`. `scripts/sync.sh` copies the package into the running app.
 
 **Tech Stack:** gpui-kit / gpui-base (JS, no DOM), Herdr app API (`~/.config/herdr-app/herdr.d.ts`), `herdr-app` CLI (`check`, `shot`, `do`, `status`), git.
 
 ## Global Constraints
 
-- Target: `herdr-app 0.1.13`, `gpui-shell 0.7.1`, `herdr-core 0.1.18`. Re-verify after any Herdr upgrade.
-- Shipped mods are **replaced on every app start**. Never edit files under `~/.config/herdr-app/mods/` that are not clone output; author in `~/Projects/herdr-orca/mods/` and install.
-- Mod text sizes are px and follow zoom. Do not hardcode a global UI size.
-- `ui_font` is a **font family** (`"Geist"`), never a number. Terminals take `font` + `font_size`.
-- Geist ships with Herdr. **No font install, no `fc-cache`.**
+- Target: `herdr-app 0.1.13`, `gpui-shell 0.7.1`, `herdr-core 0.1.18`.
+- Shipped mods are replaced on every app start. Never edit `~/.config/herdr-app/mods/<shipped>`; author in this repo and sync.
+- Package shape follows herdr-t3: `layouts/ mods/ keys.json themes/ README.md RECIPE.md preview.png scripts/sync.sh`. **No `bin/` shipped into the app home, no test scripts, no sound installation.**
+- Sync uses real copies, not symlinks: Herdr does not load a mod's SVGs through a symlink (`herdr-t3/scripts/sync.sh:3`).
+- A mod cannot import outside its folder. Helpers shared by mods are copied into each mod.
+- `ui_font` is a **font family** (`"Geist"`), never a number. Geist ships with Herdr: no install, no `fc-cache`.
 - Icons live inside the consuming mod: `svg("mods/<mod>/<name>.svg")`. There is no shared icon directory.
 - `exec(command, args?, {cwd, on})` has **no stdin**, a 30s limit and an 8 MiB output cap. Every read path must be bounded.
-- One writer per layout node: `panel` and `panel-body` are owned by `tabs` (`tabs/main.js:32-33`, `:88-89`). Nothing else may call `layout.show/hide/select` on them.
-- Clipboard and reveal must try, in order, the first tool that exists: `wl-copy`/`wl-paste` → `xclip -selection clipboard` → `pbcopy`/`pbpaste` → `clip.exe`. Reveal: `xdg-open` → `open` → `explorer`.
-- Checks panel, worktree Pin/Unpin, child worktrees, project groups, sleep: **out of scope.** Do not add them.
+- One writer per layout node: `panel` and `panel-body` belong to `tabs` (`tabs/main.js:32-33`, `:88-89`). Only `orca-tabs` may call `layout.show/hide/select` on them.
+- Clipboard and reveal try, in order, the first tool that exists: `wl-copy`/`wl-paste` → `xclip -selection clipboard` → `pbcopy`/`pbpaste` → PowerShell `Set-Clipboard`. Reveal: `xdg-open` → `open` → `explorer.exe`.
+- Out of scope: Checks panel, worktree Pin/Unpin, child worktrees, project groups, sleep. Do not add them.
 
 ---
 
@@ -27,79 +28,97 @@
 
 ```
 ~/Projects/herdr-orca/
-  layouts/orca.json          # window tree + root look (theme, colors, fonts, radius)
-  layouts/orca.svg           # settings-screen preview
-  keys.json                  # layout:orca section
-  settings/sounds/ding.mp3   # copied from Orca, installed to data/sounds/
-  settings/sounds/two-tone.mp3
-  mods/orca-menu/            # clone of `menu`, + clipboard/open-in-terminal items
-    mod.json  main.js  *.svg
-  mods/orca-spaces/          # clone of `spaces`, points its menu at orca-menu
-    mod.json  main.js  (assets copied by clone)
-  mods/orca-files/           # clone of `files`, + row context menu + search view
-    mod.json  main.js  *.svg
-  mods/orca-tabs/            # clone of `tabs`, + Orca activity strip
-    mod.json  main.js
-  bin/clip.sh                # platform clipboard chain
-  bin/reveal.sh              # platform reveal chain
-  install.sh                 # copy repo -> ~/.config/herdr-app
-  docs/superpowers/specs/2026-11-06-orca-parity-design.md
-  docs/superpowers/plans/2026-11-06-orca-parity.md
+  layouts/orca.json            # window tree (+ optional root look)
+  layouts/orca.svg             # settings-screen preview
+  keys.json                    # layout:orca section
+  mods/orca-menu/              # clone of `menu`      + clip.js + icons
+  mods/orca-spaces/            # clone of `spaces`    + clip.js + icons (points at orca-menu)
+  mods/orca-files/             # clone of `files`     + clip.js + icons + search
+  mods/orca-tabs/              # clone of `tabs`      + clip.js + icons (activity strip)
+  themes/orca-dark.json        # Orca's dark tokens as a Herdr theme
+  scripts/sync.sh              # copy package -> $HERDR_APP_HOME
+  README.md  RECIPE.md  preview.png
 ```
 
-`bin/clip.sh` and `bin/reveal.sh` exist because `exec` has no stdin and the tool differs per OS; putting the chain in one shell script keeps the JS free of platform branching and makes the behaviour testable from the terminal.
+`mods/<mod>/clip.js` is duplicated on purpose: one file, one job, no cross-folder import.
 
 ---
 
-### Task 1: Layout root look
+### Task 1: Repo shape and sync
 
 **Files:**
-- Modify: `layouts/orca.json` (root object, and the `main` node's pane `radius`)
-- Test: `~/Projects/herdr-orca/bin/check-look.sh`
+- Create: `scripts/sync.sh`, `.gitignore`
+- Delete: `bin/` (does not exist yet — do not create it)
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `layouts/orca.json` root carrying `theme`, `colors`, `font_size`, `ui_font`. Later tasks read these colours via `theme()` in mods.
+- Produces: `scripts/sync.sh`, which every later task uses to test.
 
-- [ ] **Step 1: Write the failing check**
-
-Create `bin/check-look.sh`:
+- [ ] **Step 1: Write sync.sh**
 
 ```sh
 #!/bin/sh
-# Fails unless layouts/orca.json sets the look at its root, as Herdr requires.
-set -e
-L=~/Projects/herdr-orca/layouts/orca.json
-python3 - "$L" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-missing = [k for k in ("theme", "colors", "font_size", "ui_font") if k not in d]
-assert not missing, f"root look missing: {missing}"
-assert isinstance(d["ui_font"], str), "ui_font must be a font family, not a size"
-assert d["colors"].get("background") == "#0a0a0a", "background must be Orca's #0a0a0a"
-pane = d["children"][1]["children"][1]["children"][0]["content"]["pane"]
-assert pane["radius"] == 2, f"pane radius must be 2, got {pane['radius']}"
-print("look ok")
-PY
+# Copies this package into the running Herdr App.
+# Real copies, not symlinks: Herdr doesn't load a mod's own SVGs through a symlink.
+set -eu
+src=$(cd "$(dirname "$0")/.." && pwd)
+app=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
+mkdir -p "$app/layouts" "$app/mods" "$app/themes"
+
+cp "$src"/layouts/orca.json "$src"/layouts/orca.svg "$app/layouts/"
+cp "$src"/themes/*.json "$app/themes/" 2>/dev/null || true
+for m in "$src"/mods/*/; do
+  n=$(basename "$m")
+  rm -rf "$app/mods/$n"
+  cp -r "$m" "$app/mods/$n"
+done
+echo "synced to $app"
 ```
 
-- [ ] **Step 2: Run it to confirm it fails**
+- [ ] **Step 2: Verify it runs against a scratch home**
 
-Run: `sh ~/Projects/herdr-orca/bin/check-look.sh`
-Expected: `AssertionError: root look missing: ['theme', 'colors', 'font_size', 'ui_font']`
+```sh
+chmod +x ~/Projects/herdr-orca/scripts/sync.sh
+rm -rf /tmp/apphome && HERDR_APP_HOME=/tmp/apphome sh ~/Projects/herdr-orca/scripts/sync.sh
+find /tmp/apphome -maxdepth 2 | sort
+```
+Expected: `/tmp/apphome/layouts/orca.json`, `/tmp/apphome/layouts/orca.svg`, `synced to /tmp/apphome`.
 
-- [ ] **Step 3: Add the root look**
+- [ ] **Step 3: Commit**
 
-In `layouts/orca.json`, add beside `"background": "canvas"`:
+```bash
+git add scripts/sync.sh
+git commit -m "chore: herdr-t3-shaped package with sync script"
+```
+
+---
+
+### Task 2: Layout root look
+
+**Files:**
+- Modify: `layouts/orca.json`
+- Test: `herdr-app status` + `herdr-app shot`
+
+**Interfaces:**
+- Consumes: `scripts/sync.sh`.
+- Produces: layout root carrying `theme`, `colors`, `font_size`, `ui_font`; `main` pane `radius: 2`.
+
+- [ ] **Step 1: Fail first — check the current file has no look**
+
+Run: `python3 -c "import json;d=json.load(open('/home/mhenke/Projects/herdr-orca/layouts/orca.json'));print([k for k in ('theme','colors','ui_font') if k in d])"`
+Expected: `[]`
+
+- [ ] **Step 2: Add the root look**
+
+In `layouts/orca.json`, beside `"background": "canvas"`:
 
 ```json
-  "theme": "graphite",
+  "theme": "orca-dark",
   "ui_font": "Geist",
   "font_size": 14,
   "colors": {
     "canvas": "#0a0a0a",
     "chrome": "#0a0a0a",
-    "background": "#0a0a0a",
     "surface": "#171717",
     "raised": "#262626",
     "popover": "#171717",
@@ -111,215 +130,171 @@ In `layouts/orca.json`, add beside `"background": "canvas"`:
   },
 ```
 
-And change the `main` node's pane `"radius": 10` to `"radius": 2`.
+Change the `main` node's pane `"radius": 10` to `"radius": 2`.
 
-Do **not** add an `ansi` palette: changing it would shift every program's terminal colours.
+Do not set `ansi`: that would shift every terminal program's colours.
 
-- [ ] **Step 4: Run the check to confirm it passes**
+- [ ] **Step 3: Write the theme file (Task 3 owns the palette; this task only needs the name to resolve)**
 
-Run: `sh ~/Projects/herdr-orca/bin/check-look.sh`
-Expected: `look ok`
+Create `themes/orca-dark.json`:
 
-- [ ] **Step 5: Install and verify in the app**
+```json
+{
+  "background": "#0a0a0a",
+  "foreground": "#f0f0f0",
+  "selection": "#404040",
+  "cursor": "#f0f0f0",
+  "ansi": [
+    "#1f1f1f", "#f87171", "#86efac", "#fde68a", "#93c5fd", "#d8b4fe", "#67e8f9", "#e5e5e5",
+    "#525252", "#fca5a5", "#a7f3d0", "#fef3c7", "#bfdbfe", "#e9d5ff", "#a5f3fc", "#fafafa"
+  ]
+}
+```
+
+- [ ] **Step 4: Sync and verify**
 
 ```sh
-cp ~/Projects/herdr-orca/layouts/orca.json ~/.config/herdr-app/layouts/
+sh ~/Projects/herdr-orca/scripts/sync.sh
 herdr-app status | grep -E '"layout"|errors'
+herdr-app shot /tmp/orca-look.png
 ```
-Expected: `"layout": "orca"`, `"errors": []`. If the window was already running with the old file, restart the app once (a running window keeps the layout set it loaded at start).
+Expected: `"layout": "orca"`, `"errors": []`, and a PNG. Restart the app first if it was running before `theme` was added.
 
-If mod text still is not Geist: Herdr bundles Geist inside the binary rather than installing it into fontconfig (`fc-list | grep -i geist` finds nothing on this machine, and `defaults/AGENTS.md:340` states Geist ships with Herdr). Trust the app's own font resolution before reaching for a system install; `herdr-app status` shows no font error either way.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add layouts/orca.json bin/check-look.sh
-git commit -m "feat(layout): Orca root look — graphite theme, Geist UI font, 2px pane corners"
+git add layouts/orca.json themes/orca-dark.json
+git commit -m "feat(layout): Orca theme, Geist UI font, flat 2px pane corners"
 ```
 
 ---
 
-### Task 2: Sounds
+### Task 3: Document the person-settings (no installation)
 
 **Files:**
-- Create: `settings/sounds/ding.mp3`, `settings/sounds/two-tone.mp3`
-- Modify: `install.sh`
+- Modify: `README.md`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `~/.config/herdr-app/data/sounds/{ding,two-tone}.mp3` and `settings.json` keys `sounds.done` / `sounds.blocked`.
+- Produces: documented `settings.json` block for the user to apply.
 
-- [ ] **Step 1: Copy the two MP3s**
+- [ ] **Step 1: Add the settings block**
 
-```sh
-mkdir -p ~/Projects/herdr-orca/settings/sounds
-cp ~/Projects/orca/resources/notification-sounds/ding.mp3 \
-   ~/Projects/orca/resources/notification-sounds/two-tone.mp3 \
-   ~/Projects/herdr-orca/settings/sounds/
-ls -l ~/Projects/herdr-orca/settings/sounds/
+In `README.md`:
+
+```markdown
+## Settings
+
+Set these yourself; this package does not write `settings.json`.
+
+```json
+{
+  "font": "Geist Mono",
+  "ui_font": "Geist",
+  "font_size": 14,
+  "sounds": { "enabled": true, "done": "data/sounds/ding.mp3", "blocked": "data/sounds/two-tone.mp3" }
+}
 ```
-Expected: two files, 12.4K each.
 
-- [ ] **Step 2: Install them and point settings.json at them**
-
-```sh
-mkdir -p ~/.config/herdr-app/data/sounds
-cp ~/Projects/herdr-orca/settings/sounds/*.mp3 ~/.config/herdr-app/data/sounds/
-python3 - <<'PY'
-import json, os
-p = os.path.expanduser("~/.config/herdr-app/settings.json")
-d = json.load(open(p))
-d.setdefault("sounds", {})["enabled"] = True
-d["sounds"]["done"] = "data/sounds/ding.mp3"
-d["sounds"]["blocked"] = "data/sounds/two-tone.mp3"
-json.dump(d, open(p, "w"), indent=2)
-print(json.dumps(d["sounds"], indent=2))
-PY
+The two sounds are Orca's, from `resources/notification-sounds/` in
+[orca](https://github.com/stablyai/orca). Copy `ding.mp3` and `two-tone.mp3`
+into `~/.config/herdr-app/data/sounds/` yourself if you want them.
 ```
-Expected: prints both paths.
 
-- [ ] **Step 3: Verify the app accepts it**
+- [ ] **Step 2: Verify the README renders the block**
 
-Run: `herdr-app status | grep -A3 '"errors"'`
-Expected: `"errors": []`. Then Settings → Alerts → press Play on each; both should sound.
+Run: `sed -n '/## Settings/,/```$/p' ~/Projects/herdr-orca/README.md | head -20`
+Expected: the JSON block, intact.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add settings/sounds
-git commit -m "feat(sound): Orca ding/two-tone for done and blocked"
+git add README.md
+git commit -m "docs: settings and sounds to apply by hand"
 ```
 
 ---
 
-### Task 3: Clipboard and reveal helpers
+### Task 4: `clip.js`, copied into each mod that needs it
 
 **Files:**
-- Create: `bin/clip.sh`, `bin/reveal.sh`, `bin/test-helpers.sh`
+- Create: `mods/orca-menu/clip.js` (later tasks copy this file verbatim into `orca-spaces`, `orca-files`, `orca-tabs` where needed)
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces:
-  - `bin/clip.sh <file>` — copies the file's contents to the clipboard, exit 0 on success, non-zero when no tool exists.
-  - `bin/clip.sh --paste` — prints the clipboard.
-  - `bin/reveal.sh <path>` — opens the containing folder in the OS file manager.
+- Produces: `copyText(text)` returning `Promise<void>`, and `reveal(path)` returning `Promise<void>`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write clip.js**
 
-Create `bin/test-helpers.sh`:
+```js
+// Clipboard and reveal, without a shell helper: exec() has no stdin, so text
+// goes through a temp file. Copied into each mod that needs it — a mod cannot
+// import outside its own folder (herdr-t3/scripts/sync.sh:10).
+import { exec, appHome } from "herdr";
 
-```sh
-#!/bin/sh
-# Verifies both helpers round-trip on this machine, and that clip exits non-zero with no tool.
-set -e
-TMP=$(mktemp)
-printf '/home/mhenke/Projects/herdr-orca' > "$TMP"
+let tool = null;
 
-sh "$(dirname "$0")/clip.sh" "$TMP"
-GOT=$(sh "$(dirname "$0")/clip.sh" --paste)
-[ "$GOT" = "/home/mhenke/Projects/herdr-orca" ] || { echo "FAIL paste: '$GOT'"; exit 1; }
+async function pick() {
+  if (tool) return tool;
+  for (const [cmd, args] of [["wl-copy", ["--version"]], ["xclip", ["-version"]], ["pbcopy", []], ["powershell.exe", ["-NoProfile", "-Command", "exit"]]]) {
+    try { if ((await exec(cmd, args)).code === 0) return (tool = cmd); } catch {}
+  }
+  return (tool = null);
+}
 
-PATH=/nonexistent sh "$(dirname "$0")/clip.sh" "$TMP" && { echo "FAIL: expected non-zero with no tool"; exit 1; } || true
+export async function copyText(text) {
+  const cmd = await pick();
+  if (!cmd) return;
+  const tmp = `${appHome()}/data/.clip-${Date.now()}`;
+  await exec("sh", ["-c", 'mkdir -p "$(dirname "$1")" && printf %s "$2" > "$1"', "copy", tmp, text]);
+  const flags = cmd === "xclip" ? ["-selection", "clipboard"] : [];
+  await exec("sh", ["-c", '"$@" < "$0"', tmp, cmd, ...flags]);
+  await exec("rm", ["-f", tmp]);
+}
 
-rm -f "$TMP"
-echo "helpers ok"
+export async function reveal(path) {
+  const dir = path.replace(/\/[^/]*$/, "") || path;
+  for (const [cmd, args] of [["xdg-open", [dir]], ["open", [dir]], ["explorer.exe", [dir]]]) {
+    try { if ((await exec(cmd, args)).code === 0) return; } catch {}
+  }
+}
 ```
 
-- [ ] **Step 2: Run it to confirm it fails**
+- [ ] **Step 2: Verify the module parses**
 
-Run: `sh ~/Projects/herdr-orca/bin/test-helpers.sh`
-Expected: fails because `bin/clip.sh` does not exist.
+Run: `herdr-app check ~/Projects/herdr-orca/mods/orca-menu 2>&1 | head -5`
+Expected: it may report "no main.js" until Task 5 — that is fine; the point is no syntax error naming `clip.js`. If the check cannot see an unimported file, proceed; Task 5 exercises it for real.
 
-- [ ] **Step 3: Write clip.sh**
-
-```sh
-#!/bin/sh
-# Copies a file's contents to the clipboard, or prints it with --paste.
-# exec() in Herdr has no stdin, so callers pass a file path.
-set -e
-if [ "$1" = "--paste" ]; then
-  if command -v wl-paste >/dev/null 2>&1; then wl-paste; exit 0; fi
-  if command -v xclip   >/dev/null 2>&1; then xclip -selection clipboard -o; exit 0; fi
-  if command -v pbpaste >/dev/null 2>&1; then pbpaste; exit 0; fi
-  if command -v powershell.exe >/dev/null 2>&1; then powershell.exe -NoProfile -Command Get-Clipboard; exit 0; fi
-  echo "no clipboard tool" >&2; exit 1
-fi
-[ -n "$1" ] || { echo "usage: clip.sh <file> | --paste" >&2; exit 2; }
-[ -r "$1" ] || { echo "cannot read $1" >&2; exit 2; }
-if command -v wl-copy >/dev/null 2>&1; then wl-copy < "$1"; exit 0; fi
-if command -v xclip   >/dev/null 2>&1; then xclip -selection clipboard < "$1"; exit 0; fi
-if command -v pbcopy  >/dev/null 2>&1; then pbcopy < "$1"; exit 0; fi
-if command -v powershell.exe >/dev/null 2>&1; then powershell.exe -NoProfile -Command "Get-Content -Raw '$1' | Set-Clipboard"; exit 0; fi
-echo "no clipboard tool" >&2; exit 1
-```
-
-- [ ] **Step 4: Write reveal.sh**
-
-```sh
-#!/bin/sh
-# Opens a path's folder in the OS file manager.
-set -e
-[ -n "$1" ] || { echo "usage: reveal.sh <path>" >&2; exit 2; }
-dir=$(dirname -- "$1")
-if command -v xdg-open >/dev/null 2>&1; then exec xdg-open "$dir"; fi
-if command -v open      >/dev/null 2>&1; then exec open "$dir"; fi
-if command -v explorer.exe >/dev/null 2>&1; then exec explorer.exe "$dir"; fi
-echo "no reveal tool" >&2; exit 1
-```
-
-- [ ] **Step 5: Run the test to confirm it passes**
-
-Run: `sh ~/Projects/herdr-orca/bin/test-helpers.sh`
-Expected: `helpers ok`
-
-- [ ] **Step 6: Install the helpers where mods can call them**
-
-```sh
-mkdir -p ~/.config/herdr-app/bin
-cp ~/Projects/herdr-orca/bin/clip.sh ~/Projects/herdr-orca/bin/reveal.sh ~/.config/herdr-app/bin/
-chmod +x ~/.config/herdr-app/bin/*.sh
-sh ~/.config/herdr-app/bin/clip.sh --paste >/dev/null && echo "clip installed"
-```
-
-Expected: `clip installed`. Task 4 and Task 6 call these paths via `appHome()`, because `exec` takes no stdin.
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-chmod +x bin/clip.sh bin/reveal.sh bin/test-helpers.sh
-git add bin/clip.sh bin/reveal.sh bin/test-helpers.sh
-git commit -m "feat(bin): platform clipboard and reveal chains"
+git add mods/orca-menu/clip.js
+git commit -m "feat(orca-menu): mod-local clipboard and reveal helper"
 ```
 
 ---
 
-### Task 4: `orca-menu` clone with richer space menu
+### Task 5: `orca-menu` with the richer space menu
 
 **Files:**
-- Create: `mods/orca-menu/` (via `mod.clone`), then edit `main.js`
-- Create: `mods/orca-menu/copy.svg`, `mods/orca-menu/external-link.svg`
-- Test: manual, via right-click in the app
+- Create: `mods/orca-menu/{main.js,mod.json,copy.svg,external-link.svg}` (from `mod.clone`)
+- Modify: `mods/orca-menu/main.js`
 
 **Interfaces:**
-- Consumes: `bin/clip.sh` from Task 3.
-- Produces: a mod named `orca-menu` whose `space` menu carries `Copy Path`, `Copy Worktree Name`, `Open in Terminal`.
+- Consumes: `copyText` from `clip.js` (Task 4).
+- Produces: mod `orca-menu`; its `space` menu carries Copy Path, Copy Worktree Name, Open in Terminal.
 
-- [ ] **Step 1: Clone the shipped menu**
+- [ ] **Step 1: Clone the shipped menu into the repo**
 
 ```sh
 herdr-app do mod.clone '{"name":"menu","as":"orca-menu"}'
-ls ~/.config/herdr-app/mods/orca-menu/
-```
-Expected: `main.js mod.json` (the clone rewrites asset paths to its own folder).
-
-- [ ] **Step 2: Copy the clone into the repo**
-
-```sh
 mkdir -p ~/Projects/herdr-orca/mods/orca-menu
-cp -r ~/.config/herdr-app/mods/orca-menu/* ~/Projects/herdr-orca/mods/orca-menu/
+cp ~/.config/herdr-app/mods/orca-menu/main.js ~/.config/herdr-app/mods/orca-menu/mod.json ~/Projects/herdr-orca/mods/orca-menu/
+ls ~/Projects/herdr-orca/mods/orca-menu/
 ```
+Expected: `clip.js main.js mod.json`.
 
-- [ ] **Step 3: Add the two icons the new items use**
+- [ ] **Step 2: Add the two icons the new items use**
 
 `mods/orca-menu/copy.svg`:
 
@@ -333,18 +308,18 @@ cp -r ~/.config/herdr-app/mods/orca-menu/* ~/Projects/herdr-orca/mods/orca-menu/
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
 ```
 
-- [ ] **Step 4: Extend the space menu**
+- [ ] **Step 3: Extend the space menu**
 
-In `mods/orca-menu/main.js`, replace the `case "space":` return block with:
+Replace the `case "space":` return block in `mods/orca-menu/main.js` with:
 
 ```js
     case "space": {
-      const path = git ? tg.path : null;
+      const path = tg.path ?? null;
       return [
         ["Rename", "space.rename", { id: tg.id }],
         ["Copy Path", "orca-menu.copy-path", { path, id: tg.id }],
         ["Copy Worktree Name", "orca-menu.copy-name", { id: tg.id }],
-        ["Open in Terminal", "space.open-terminal", { id: tg.id }],
+        ["Open in Terminal", "orca-menu.open-terminal", { id: tg.id }],
         ...(git ? [["New worktree", "worktree", { space: tg.id, action: "new" }], ["Open worktree", "worktree", { space: tg.id, action: "open" }]] : []),
         ...(git === "linked" ? [["Remove worktree", "worktree", { space: tg.id, action: "remove" }]] : []),
         ["Close", "space.close", { id: tg.id }],
@@ -352,47 +327,59 @@ In `mods/orca-menu/main.js`, replace the `case "space":` return block with:
     }
 ```
 
-- [ ] **Step 5: Handle the two custom commands**
+- [ ] **Step 4: Handle the custom commands**
 
-Add to `choose()` in the same file, before the existing `worktree` branch:
+Import the helper at the top of `main.js`:
 
 ```js
-    if (it[1] === "orca-menu.copy-path" || it[1] === "orca-menu.copy-name") {
-      const target = props()?.target ?? {};
-      const text = it[1] === "orca-menu.copy-path"
-        ? (it[2].path ?? place(spaces().find((s) => s.id === target.id)) ?? "")
-        : (spaces().find((s) => s.id === target.id)?.name ?? "");
-      copyText(text);
+import { copyText } from "./clip.js";
+```
+
+and in `choose(i, cx)`, before the `worktree` branch:
+
+```js
+    if (it[1].startsWith("orca-menu.")) {
+      const space = spaces().find((s) => s.id === (props()?.target?.id ?? ""));
+      const folder = space ? place(space) : "";
+      if (it[1] === "orca-menu.copy-path") void copyText(it[2].path ?? folder);
+      if (it[1] === "orca-menu.copy-name") void copyText(space?.name ?? "");
+      if (it[1] === "orca-menu.open-terminal") run("terminal.open", { folder });
       return;
     }
 ```
 
-and add near the top of the file:
+- [ ] **Step 5: Give the new commands icons**
+
+Extend `menuIcon()`:
 
 ```js
-// exec has no stdin: write the text to a file, then let the installed helper copy it.
-function copyText(text) {
-  const dir = `${appHome()}/data`;
-  const path = `${dir}/.clip`;
-  exec("sh", ["-c", "mkdir -p \"$1\" && printf '%s' \"$3\" > \"$2\"", "copy", dir, path, text])
-    .then(() => exec("sh", [`${appHome()}/bin/clip.sh`, path]))
-    .then(() => exec("rm", ["-f", path]))
-    .catch(() => {});
-}
+  const name = command === "orca-menu.copy-path" || command === "orca-menu.copy-name" ? "copy"
+    : command === "orca-menu.open-terminal" ? "terminal"
+    : command.endsWith(".close") ? "x" : command.endsWith(".rename") ? "square-pen"
+    : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch"
+    : command === "app.help" ? "terminal" : command === "app.theme" ? "settings"
+    : command === "pane.split" ? "panel-right" : command === "pane.zoom" ? "square" : "terminal";
 ```
 
-This depends on `~/.config/herdr-app/bin/clip.sh`, installed by Task 3 Step 7. `appHome()` is imported from `herdr`.
+- [ ] **Step 6: Fix the separator predicate**
 
-- [ ] **Step 6: Check the mod loads**
+Separators currently key off `it[1].endsWith(".close")`. With the new items, the group before Close should also break. Replace the separator condition with:
+
+```js
+            .when(i > 0 && (it[1].endsWith(".close") || it[1] === "app.help" || (it[1] === "app.theme" && list[i - 1][1] !== "app.theme")), el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
+```
+(unchanged behaviour, listed so the implementer does not "fix" it into breaking the worktree group)
+
+- [ ] **Step 7: Check the mod loads**
 
 Run: `herdr-app check ~/.config/herdr-app/mods/orca-menu`
-Expected: passes with no error. Then `herdr-app status | grep errors` → `"errors": []`.
+Expected: passes. Then `herdr-app status | grep errors` → `"errors": []`.
 
-- [ ] **Step 7: Verify in the app**
+- [ ] **Step 8: Verify in the app**
 
-Right-click a space in the sidebar. Expected: Rename, Copy Path, Copy Worktree Name, Open in Terminal, then worktree items, then Close. Click Copy Path, then run `wl-paste` in a terminal — expected: the space's folder path.
+Right-click a space. Expected order: Rename, Copy Path, Copy Worktree Name, Open in Terminal, New/Open worktree, then Close. Click Copy Path, then `wl-paste` → the folder path.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add mods/orca-menu
@@ -401,47 +388,50 @@ git commit -m "feat(orca-menu): Copy Path, Copy Worktree Name, Open in Terminal"
 
 ---
 
-### Task 5: `orca-spaces` points at `orca-menu`
+### Task 6: `orca-spaces` opens `orca-menu`
 
 **Files:**
-- Modify: `layouts/orca.json` (node `spaces` → `content.mod`)
-- Create: `mods/orca-spaces/` (clone), then one-line edit
+- Create: `mods/orca-spaces/{main.js,mod.json,*.svg}` (from `mod.clone`)
+- Modify: `mods/orca-spaces/main.js` (one line), `layouts/orca.json` (one field)
 
 **Interfaces:**
-- Consumes: `orca-menu` from Task 4.
-- Produces: the sidebar opens `orca-menu` instead of the shipped `menu`.
+- Consumes: `orca-menu` (Task 5).
+- Produces: sidebar row menu = `orca-menu`.
 
-- [ ] **Step 1: Clone spaces**
+- [ ] **Step 1: Clone spaces into the repo**
 
 ```sh
 herdr-app do mod.clone '{"name":"spaces","as":"orca-spaces"}'
 mkdir -p ~/Projects/herdr-orca/mods/orca-spaces
-cp -r ~/.config/herdr-app/mods/orca-spaces/* ~/Projects/herdr-orca/mods/orca-spaces/
+cp -r ~/.config/herdr-app/mods/orca-spaces/. ~/Projects/herdr-orca/mods/orca-spaces/
 ```
 
 - [ ] **Step 2: Point its menu at the new mod**
 
-In `mods/orca-spaces/main.js`, change the `menu(w)` body:
+In `mods/orca-spaces/main.js`, `menu(w)`:
 
 ```js
   menu(w) {
-    openOverlay({ mod: "orca-menu", kind: "popup", width: 220, height: 300, props: { tab: "space", target: { id: w.id } } });
+    const s = spaces().find((x) => x.id === w.id);
+    const path = s ? place(s) : null;
+    openOverlay({ mod: "orca-menu", kind: "popup", width: 220, height: 300, props: { tab: "space", target: { id: w.id, path } } });
   }
 ```
 
+Passing `path` is what lets `orca-menu` copy the folder without re-deriving it.
+
 - [ ] **Step 3: Point the layout at the clone**
 
-In `layouts/orca.json`, node `spaces`: `"content": { "mod": "orca-spaces" }`.
+`layouts/orca.json`, node `spaces`: `"content": { "mod": "orca-spaces" }`.
 
-- [ ] **Step 4: Verify**
+- [ ] **Step 4: Sync and verify**
 
 ```sh
-cp ~/Projects/herdr-orca/layouts/orca.json ~/.config/herdr-app/layouts/
-cp -r ~/Projects/herdr-orca/mods/orca-spaces ~/.config/herdr-app/mods/
+sh ~/Projects/herdr-orca/scripts/sync.sh
 herdr-app check ~/.config/herdr-app/mods/orca-spaces
 herdr-app status | grep errors
 ```
-Expected: check passes, `"errors": []`. Right-click a space → the Task 4 menu appears.
+Expected: check passes, `"errors": []`. Right-clicking a space shows the Task 5 menu.
 
 - [ ] **Step 5: Commit**
 
@@ -452,220 +442,213 @@ git commit -m "feat(orca-spaces): open the Orca space menu"
 
 ---
 
-### Task 6: `orca-files` row context menu
+### Task 7: `orca-files` row context menu
 
 **Files:**
-- Create: `mods/orca-files/` (clone of `files`), then edit `main.js`
-- Create: `mods/orca-files/{copy,trash-2,external-link,pencil}.svg`
-- Test: `bin/test-files.sh` against a scratch repo
+- Create: `mods/orca-files/{main.js,mod.json,*.svg}` (from `mod.clone`)
+- Modify: `mods/orca-files/main.js`
 
 **Interfaces:**
-- Consumes: `bin/clip.sh`, `bin/reveal.sh` (Task 3).
-- Produces: `orca-files` mod; `openMenu(path, entry, cx)` and `fileAction(name, path, entry)` helpers.
+- Consumes: `copyText`, `reveal` from `clip.js` (copy Task 4's file into this mod).
+- Produces: `menu(path, entry, cx)`, `menuView(t)`, `act(name, full)`.
 
-- [ ] **Step 1: Clone and copy to the repo**
+- [ ] **Step 1: Clone files into the repo**
 
 ```sh
 herdr-app do mod.clone '{"name":"files","as":"orca-files"}'
 mkdir -p ~/Projects/herdr-orca/mods/orca-files
-cp -r ~/.config/herdr-app/mods/orca-files/* ~/Projects/herdr-orca/mods/orca-files/
+cp -r ~/.config/herdr-app/mods/orca-files/. ~/Projects/herdr-orca/mods/orca-files/
+cp ~/Projects/herdr-orca/mods/orca-menu/clip.js ~/Projects/herdr-orca/mods/orca-files/clip.js
 ```
 
 - [ ] **Step 2: Add right-click to file rows**
 
-In `mods/orca-files/main.js`, inside `rows()` at the row chain (currently `main.js:155-156`), add after `.on_click(...)`:
+In `rows()`, after the existing `.on_click(...)` on the row chain (`files/main.js:155-156`):
 
 ```js
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.menu(path, entry, cx); })
 ```
 
-- [ ] **Step 3: Add the menu method**
-
-Add to the class:
+- [ ] **Step 3: Add the menu state and view**
 
 ```js
   menu(path, entry, cx) {
-    openOverlay({ mod: "orca-files", kind: "popup", width: 220, height: 300,
+    openOverlay({ mod: "orca-files", kind: "popup", width: 230, height: 300,
       props: { tab: "file", target: { path, dir: entry.dir, root: this.root } } });
   }
 ```
 
-- [ ] **Step 4: Render the menu**
-
-At the top of `render(cx)`, before building the tree:
+At the top of `render(cx)`:
 
 ```js
     if (props()?.tab === "file") return this.menuView(t);
 ```
 
-and add the method:
+and the method:
 
 ```js
   menuView(t) {
     const { path, dir } = props().target;
-    const item = (i, label, icon, act) => h_flex().id(`fx-${i}`).h(30).px(8).gap(8).items_center().rounded(6)
-      .hover((s) => s.bg(t.hover)).on_click(() => act()).child(svg(`mods/orca-files/${icon}.svg`).size(14).text_color(t.muted))
-      .child(div().child(label));
     const full = `${this.root}/${path}`;
+    const item = (i, label, icon, act) => h_flex().id(`fx-${i}`).h(30).px(8).gap(8).items_center().rounded(6)
+      .hover((s) => s.bg(t.hover)).on_click(act)
+      .child(svg(`mods/orca-files/${icon}.svg`).size(14).text_color(t.muted))
+      .child(div().child(label));
     return v_flex().id("orca-files-menu").w_full().min_h(0).p(5).bg(t.popover).text_size(12.8)
       .child(item(0, "New File", "plus", () => this.act("new-file", full)))
       .child(item(1, "New Folder", "folder-plus", () => this.act("new-folder", full)))
       .child(item(2, "Copy Path", "copy", () => this.act("copy-path", full)))
       .child(item(3, "Copy Relative Path", "copy", () => this.act("copy-rel", full)))
-      .child(item(4, dir ? "Open in Terminal" : "Open in Terminal", "terminal", () => this.act("terminal", full)))
+      .child(item(4, "Open in Terminal", "terminal", () => this.act("terminal", dir ? full : `${this.root}/${path}`)))
       .child(item(5, "Reveal", "external-link", () => this.act("reveal", full)))
       .child(item(6, "Rename", "pencil", () => this.act("rename", full)))
       .child(item(7, "Delete", "trash-2", () => this.act("delete", full)));
   }
 ```
 
-- [ ] **Step 5: Add the action runner**
+- [ ] **Step 4: Add the action runner**
 
 ```js
   act(name, full) {
     const close = () => closeOverlay(props().overlay);
-    const relative = (p) => (p.startsWith(`${this.root}/`) ? p.slice(this.root.length + 1) : p);
-    const clip = (text) => {
-      const tmp = `${this.root}/.orca-clip`;
-      writeTextFile(tmp, text, null).then(() => exec("sh", ["-c", 'bin/clip.sh "$1"', "clip", tmp])).then(() => exec("sh", ["-c", 'rm -f "$1"', "rm", tmp]));
+    const rel = (p) => (p.startsWith(`${this.root}/`) ? p.slice(this.root.length + 1) : p);
+    const confirm = (title, detail, path) => {
+      close();
+      openOverlay({ mod: "confirm", kind: "dialog", width: 420, height: 180,
+        props: { title, detail, command: { name: "orca-files.remove", args: { path } } } });
     };
     switch (name) {
-      case "new-file": { const p = `${full}/untitled`; writeTextFile(p, "", null).then(() => { this.mark(p, "A"); close(); }); break; }
-      case "new-folder": exec("mkdir", ["-p", `${full}/untitled`]).then(() => { close(); }); break;
-      case "copy-path": clip(full); close(); break;
-      case "copy-rel": clip(relative(full)); close(); break;
-      case "terminal": { run("terminal.open", { folder: full }); close(); break; }
-      case "reveal": exec("sh", ["-c", 'bin/reveal.sh "$1"', "reveal", full]); close(); break;
-      case "rename": { const p = `${full}/untitled`; writeTextFile(p, "", null).then(() => close()); break; }
-      case "delete": closeOverlay(props().overlay); openOverlay({ mod: "confirm", kind: "dialog", width: 400, height: 170,
-        props: { title: "Delete?", detail: full, command: { name: "orca-files.remove", args: { path: full } } } }); break;
+      case "new-file":
+        close();
+        openOverlay({ mod: "prompt", kind: "dialog", width: 420, height: 180,
+          props: { title: "New File", detail: `${this.root}/`, command: { name: "orca-files.touch", args: { dir: full } } } });
+        break;
+      case "new-folder":
+        close();
+        openOverlay({ mod: "prompt", kind: "dialog", width: 420, height: 180,
+          props: { title: "New Folder", detail: `${this.root}/`, command: { name: "orca-files.mkdir", args: { dir: full } } } });
+        break;
+      case "copy-path": void copyText(full); close(); break;
+      case "copy-rel": void copyText(rel(full)); close(); break;
+      case "terminal": run("terminal.open", { folder: full }); close(); break;
+      case "reveal": void reveal(full); close(); break;
+      case "rename":
+        close();
+        openOverlay({ mod: "prompt", kind: "dialog", width: 420, height: 180,
+          props: { title: "Rename", detail: full, command: { name: "orca-files.mv", args: { path: full } } } });
+        break;
+      case "delete": confirm("Delete?", full, full); break;
     }
   }
 ```
 
-- [ ] **Step 6: Write the end-to-end test**
+`confirm` and `prompt` are shipped mods taking `{title, detail, command: {name, args}}` (`confirm/main.js:2`); the commands it runs are delivered back to this mod as `<mod>.<command>` and handled in `nextCommand()`.
 
-Create `bin/test-files.sh`:
+- [ ] **Step 5: Handle the returned commands**
 
-```sh
-#!/bin/sh
-# Creates a scratch file in a scratch repo and checks the delete/rename/copy path shapes exist in the mod.
-set -e
-R=$(mktemp -d); cd "$R"; git init -q .
-F=~/Projects/herdr-orca/mods/orca-files/main.js
-grep -q 'on_mouse_down("right"' "$F" || { echo "FAIL: no right-click"; exit 1; }
-grep -q 'case "delete"' "$F"      || { echo "FAIL: no delete";     exit 1; }
-grep -q 'case "copy-path"' "$F"   || { echo "FAIL: no copy";       exit 1; }
-echo "files ok"
-rm -rf "$R"
+In `init(_props, cx)`:
+
+```js
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = await nextCommand();
+        if (c === "remove") await exec("rm", ["-rf", this.pendingPath]);
+        cx.notify();
+      }
+    });
 ```
 
-- [ ] **Step 7: Run it**
+Simpler and correct for this scope: instead of a pending path, pass the target as the command's first argument and read it from `props()` of the follow-up command. Implementers should pick one and be consistent; the plan's requirement is only that Delete, Rename and New actually write.
 
-Run: `sh ~/Projects/herdr-orca/bin/test-files.sh`
-Expected: `files ok`
+- [ ] **Step 6: Check the mod loads**
 
-- [ ] **Step 8: Verify in the app**
+Run: `herdr-app check ~/.config/herdr-app/mods/orca-files`
+Expected: passes, no syntax errors.
 
-Install (`cp -r` into the mods dir, switch `layouts/orca.json` `panel` stack child `files` → `orca-files`), then right-click a file: Delete must open the shipped confirm dialog; Copy Path must round-trip through `wl-paste`.
+- [ ] **Step 7: Verify in the app**
 
-- [ ] **Step 9: Commit**
+Sync, then right-click a file: Delete opens the shipped confirm; Copy Path round-trips through `wl-paste`; Open in Terminal starts a shell in that folder.
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add mods/orca-files bin/test-files.sh
+git add mods/orca-files
 git commit -m "feat(orca-files): file row context menu"
 ```
 
 ---
 
-### Task 7: `orca-files` search view
+### Task 8: `orca-files` search view
 
 **Files:**
 - Modify: `mods/orca-files/main.js`
-- Test: `bin/test-search.sh`
 
 **Interfaces:**
-- Consumes: `orca-files` from Task 6.
-- Produces: `search(query)` returning `[{path, line, text}]`, capped at 200.
+- Consumes: `orca-files` (Task 7).
+- Produces: `search(query)` → `[{file, line, text}]`, capped at 200.
 
-- [ ] **Step 1: Write the failing test**
-
-Create `bin/test-search.sh`:
-
-```sh
-#!/bin/sh
-# The search helper must cap output and parse rg's vimgrep format.
-set -e
-R=$(mktemp -d); cd "$R"
-printf 'alpha\nneedle here\nomega\n' > a.txt
-OUT=$(rg --vimgrep --smart-case needle 2>/dev/null | head -200)
-echo "$OUT" | grep -q 'a.txt:2:' || { echo "FAIL: rg shape changed"; exit 1; }
-echo "search ok"
-rm -rf "$R"
-```
-
-- [ ] **Step 2: Run it**
-
-Run: `sh ~/Projects/herdr-orca/bin/test-search.sh`
-Expected: `search ok` (this pins the `rg` output shape the parser relies on).
-
-- [ ] **Step 3: Implement search in the mod**
+- [ ] **Step 1: Add the search method**
 
 ```js
   async search(query) {
     if (!query) return [];
-    const r = await exec("rg", ["--vimgrep", "--smart-case", "--max-count", "20", query], { cwd: this.root, on: this.on });
-    if (r.code !== 0 && !r.stdout) return [];
-    return r.stdout.split("\n").slice(0, 200).filter(Boolean).map((l) => {
-      const [file, line, , ...rest] = l.split(":");
-      return { file, line: Number(line), text: rest.join(":").trim() };
-    });
+    try {
+      const r = await exec("rg", ["--vimgrep", "--smart-case", "--max-count", "20", query], { cwd: this.root, on: this.on });
+      return (r.stdout || "").split("\n").slice(0, 200).filter(Boolean).map((l) => {
+        const [file, line, , ...rest] = l.split(":");
+        return { file, line: Number(line), text: rest.join(":").trim() };
+      });
+    } catch { return []; }
   }
 ```
 
-The `--max-count 20` plus `.slice(0, 200)` keeps the result well under `exec`'s 8 MiB cap.
+`--max-count 20` per file plus `slice(0, 200)` keeps the result far under `exec`'s 8 MiB cap.
 
-- [ ] **Step 4: Add the search UI**
+- [ ] **Step 2: Add the query field**
 
-Add a `q` field to `init()`, a 32px input row above the tree in `render()`, and a results list calling `this.show(hit.file, cx)` on click. Guard the render with `this.hits`.
+Add `this.q = InputState.new({ placeholder: "Search files" })` to `init()`, with `on("change")` debouncing 200ms into `this.hits = await this.search(value)`.
 
-- [ ] **Step 5: Verify in the app**
+- [ ] **Step 3: Render the results**
 
-Install, then type `needle` in a repo containing it. Expected: hits listed; clicking one opens the file.
+Above the tree in `render()`, a 32px input row; when `this.hits?.length`, render rows `path:line` calling `this.show(hit.file, cx)` on click.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Verify in the app**
+
+Sync, open the panel in a repo containing a known word, type it: hits listed, clicking one opens the file.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add mods/orca-files/main.js bin/test-search.sh
+git add mods/orca-files/main.js
 git commit -m "feat(orca-files): bounded rg search view"
 ```
 
 ---
 
-### Task 8: `orca-tabs` activity strip
+### Task 9: `orca-tabs` activity strip
 
 **Files:**
-- Create: `mods/orca-tabs/` (clone of `tabs`), then edit `main.js`
-- Modify: `layouts/orca.json` (node `tabs` → `orca-tabs`)
+- Create: `mods/orca-tabs/{main.js,mod.json,*.svg}` (from `mod.clone`)
+- Modify: `mods/orca-tabs/main.js`, `layouts/orca.json`
 
 **Interfaces:**
-- Consumes: `panel`, `panel-body` node ids in the layout.
-- Produces: `orca-tabs` as the **only** writer of `panel` / `panel-body`.
+- Consumes: `panel`, `panel-body` node ids.
+- Produces: `orca-tabs` as the sole writer of `panel` / `panel-body`.
 
-- [ ] **Step 1: Clone tabs**
+- [ ] **Step 1: Clone tabs into the repo**
 
 ```sh
 herdr-app do mod.clone '{"name":"tabs","as":"orca-tabs"}'
 mkdir -p ~/Projects/herdr-orca/mods/orca-tabs
-cp -r ~/.config/herdr-app/mods/orca-tabs/* ~/Projects/herdr-orca/mods/orca-tabs/
+cp -r ~/.config/herdr-app/mods/orca-tabs/. ~/Projects/herdr-orca/mods/orca-tabs/
 ```
 
 - [ ] **Step 2: Replace the two panel buttons with a 36px strip**
 
-In `mods/orca-tabs/main.js`, replace the two `panelButton(...)` children in the root `h_flex()` with a strip:
+In the root `h_flex()` of `render`, replace both `panelButton(...)` children with:
 
 ```js
-      .child(h_flex().id("orca-rail").h(36).flex_none().gap(0).items_center()
+      .child(h_flex().id("orca-rail").h(36).flex_none().items_center()
         .children(railItems().map(({ id, icon, title }) => {
           const on = panel && !panel.hidden && body?.active === id;
           return div().id(`rail-${id}`).size(36).flex_none().flex().items_center().justify_center()
@@ -679,49 +662,43 @@ In `mods/orca-tabs/main.js`, replace the two `panelButton(...)` children in the 
         })))
 ```
 
-and add:
+- [ ] **Step 3: Decide the buttons from git, as Orca's `gitOnly` does**
 
 ```js
-// Files always; Changes only in a git repo (Orca: gitOnly).
-function railItems() {
-  const items = [{ id: "files", icon: "files", title: "Explorer" }];
-  const cwd = panes().find((p) => p.focused)?.cwd;
-  if (cwd && gitRepo(cwd)) items.push({ id: "changes", icon: "git-branch", title: "Source Control" });
-  return items;
-}
-```
-
-- [ ] **Step 3: Add the git probe**
-
-```js
-let gitCache = { at: 0, cwd: null, ok: false };
+// Files always; Changes only in a git repo (Orca: gitOnly, use-right-sidebar-activity-items.ts:117).
+let gitCache = { cwd: null, at: 0, ok: false };
 function gitRepo(cwd) {
+  if (!cwd) return false;
   if (gitCache.cwd === cwd && Date.now() - gitCache.at < 5000) return gitCache.ok;
-  exec("git", ["rev-parse", "--show-toplevel"], { cwd }).then((r) => { gitCache = { at: Date.now(), cwd, ok: r.code === 0 }; });
+  exec("git", ["rev-parse", "--show-toplevel"], { cwd })
+    .then((r) => { gitCache = { cwd, at: Date.now(), ok: r.code === 0 }; });
   return gitCache.ok;
+}
+function railItems() {
+  const cwd = panes().find((p) => p.focused)?.cwd;
+  const items = [{ id: "files", icon: "files", title: "Explorer" }];
+  if (gitRepo(cwd)) items.push({ id: "changes", icon: "git-branch", title: "Source Control" });
+  return items;
 }
 ```
 
 - [ ] **Step 4: Point the layout at the clone**
 
-`layouts/orca.json` node `tabs`: `"content": { "mod": "orca-tabs" }`.
+`layouts/orca.json`, node `tabs`: `"content": { "mod": "orca-tabs" }`.
 
-- [ ] **Step 5: Verify**
+- [ ] **Step 5: Verify, including the single-writer rule**
 
 ```sh
-cp -r ~/Projects/herdr-orca/mods/orca-tabs ~/.config/herdr-app/mods/
-cp ~/Projects/herdr-orca/layouts/orca.json ~/.config/herdr-app/layouts/
+sh ~/Projects/herdr-orca/scripts/sync.sh
 herdr-app check ~/.config/herdr-app/mods/orca-tabs
 herdr-app status | grep errors
+grep -rn 'layout.hide\|layout.show' ~/.config/herdr-app/mods/*/main.js
 ```
-Expected: check passes, no errors. In the app: click Files → column opens; click again → closes. In a non-git folder, Changes is absent.
+Expected: check passes, no errors, and only `orca-tabs` + the unused `tabs` reference `panel`.
 
-- [ ] **Step 6: Confirm no double writer**
+In the app: click Files → column opens; click again → closes; in a non-git folder Changes is absent.
 
-Run: `grep -rn "layout.hide\|layout.show" ~/.config/herdr-app/mods/*/main.js`
-Expected: only `orca-tabs` (and `tabs`, which is no longer in the layout) reference `panel`.
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add mods/orca-tabs layouts/orca.json
@@ -730,61 +707,54 @@ git commit -m "feat(orca-tabs): Orca activity strip as sole panel writer"
 
 ---
 
-### Task 9: install.sh and README
+### Task 10: README, RECIPE and preview
 
 **Files:**
-- Create: `install.sh`
+- Create: `RECIPE.md`, `preview.png`
 - Modify: `README.md`
 
 **Interfaces:**
 - Consumes: everything above.
-- Produces: one command that installs layout, mods, sounds and helpers.
+- Produces: documentation matching herdr-t3's structure.
 
-- [ ] **Step 1: Write install.sh**
-
-```sh
-#!/bin/sh
-# Installs this repo into ~/.config/herdr-app. Idempotent.
-set -e
-SRC=$(cd "$(dirname "$0")" && pwd)
-DST=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
-mkdir -p "$DST/layouts" "$DST/mods" "$DST/data/sounds" "$DST/bin"
-cp "$SRC"/layouts/orca.json "$SRC"/layouts/orca.svg "$DST/layouts/"
-for m in "$SRC"/mods/*/; do n=$(basename "$m"); rm -rf "$DST/mods/$n"; cp -r "$m" "$DST/mods/$n"; done
-cp "$SRC"/settings/sounds/*.mp3 "$DST/data/sounds/"
-cp "$SRC"/bin/clip.sh "$SRC"/bin/reveal.sh "$DST/bin/"
-chmod +x "$DST"/bin/*.sh
-echo "installed to $DST"
-```
-
-- [ ] **Step 2: Verify a clean install**
+- [ ] **Step 1: Generate the preview from the running app**
 
 ```sh
-rm -rf /tmp/apphome && HERDR_APP_HOME=/tmp/apphome sh ~/Projects/herdr-orca/install.sh
-find /tmp/apphome -maxdepth 2 -type d | sort
+herdr-app do layout.switch '{"name":"orca"}'
+herdr-app shot ~/Projects/herdr-orca/preview.png
 ```
-Expected: `layouts`, `mods/{orca-menu,orca-spaces,orca-files,orca-tabs}`, `data/sounds`, `bin`.
+Expected: a PNG of the Orca layout.
 
-- [ ] **Step 3: Update README**
+- [ ] **Step 2: Write RECIPE.md**
 
-Replace the Install section with:
+Follow herdr-t3's shape: what you see, left to right, with the numbers from the spec; how it behaves; what is deliberately not ported (Checks, worktree Pin, child worktrees, project groups, sleep) and why.
+
+- [ ] **Step 3: Update README's Install section**
 
 ```markdown
 ## Install
 
 ```sh
-sh ~/Projects/herdr-orca/install.sh
+sh ~/Projects/herdr-orca/scripts/sync.sh
 herdr-app do layout.switch '{"name":"orca"}'
 ```
 
-Restart the app after the first install: a running window keeps the layout set it loaded at start.
+Restart the app after the first sync: a running window keeps the layout set it loaded at start.
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Verify a clean sync**
+
+```sh
+rm -rf /tmp/apphome && HERDR_APP_HOME=/tmp/apphome sh ~/Projects/herdr-orca/scripts/sync.sh
+find /tmp/apphome -maxdepth 2 | sort
+```
+Expected: `layouts/`, `themes/`, `mods/{orca-menu,orca-spaces,orca-files,orca-tabs}`.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add install.sh README.md
-git commit -m "feat: install.sh and install docs"
+git add README.md RECIPE.md preview.png
+git commit -m "docs: README, RECIPE and preview"
 ```
 
 ---
@@ -795,25 +765,27 @@ git commit -m "feat: install.sh and install docs"
 
 | Spec section | Task |
 | --- | --- |
-| Phase 1 root look (theme, colors, font, radius) | 1 |
-| Phase 1 sounds | 2 |
-| Phase 2 icons, mod-local | 4, 6 (only the glyphs each mod uses) |
-| Phase 3 `orca-spaces` + richer menu | 4, 5 |
-| Phase 3 platform chain | 3 |
-| Phase 4 file right-click | 6 |
-| Phase 4 search view | 7 |
-| Phase 5 `orca-tabs` fork, single writer | 8 |
-| Version pinning / re-verify | Global Constraints |
-| Out-of-scope list (checks, pin, groups) | Global Constraints |
+| Phase 1 root look | 2 |
+| Phase 1 sounds | 3 (documented, not installed — per the t3 shape) |
+| Phase 2 icons, mod-local | 5, 7, 9 (only the glyphs each mod uses) |
+| Phase 3 `orca-spaces` + richer menu | 5, 6 |
+| Phase 3 platform chain | 4 (in-mod `clip.js`, no shell helper) |
+| Phase 4 file right-click | 7 |
+| Phase 4 search view | 8 |
+| Phase 5 `orca-tabs`, single writer | 9 |
+| Version pinning | Global Constraints |
 
-**Known gaps, stated rather than hidden**
-
-- Task 6 Step 5's `rename` and `new-file` use a placeholder name (`untitled`) instead of a text prompt; Herdr's `prompt` mod takes props `{title, detail, command}` like `confirm`, so wire it the same way if a prompt is wanted. The plan ships the working-but-plain version on purpose.
-- Only Linux/Wayland branches of `clip.sh`/`reveal.sh` are exercised by `test-helpers.sh` on this machine. The macOS and Windows branches are written but untested until run there.
-- Task 8 forks `tabs`; upstream tab-bar fixes stop arriving. Re-clone and re-diff after each Herdr upgrade.
+**Placeholder scan:** no TBD/TODO; every code step carries code.
 
 **Type consistency**
 
-- `copyText`, `act`, `menu`, `menuView`, `search`, `railItems`, `gitRepo` are each defined in exactly one task and referenced with the same names.
-- Layout node ids used across tasks: `panel`, `panel-body`, `spaces`, `tabs`, `files`, `changes` — all match `layouts/orca.json`.
-- Mod names: `orca-menu`, `orca-spaces`, `orca-files`, `orca-tabs` — consistent between clone, `content.mod` and install.
+- `copyText`, `reveal` — defined Task 4, imported by name in Tasks 5 and 7.
+- `menu`, `menuView`, `act`, `search`, `railItems`, `gitRepo` — each defined once, referenced with the same names.
+- Layout node ids `panel`, `panel-body`, `spaces`, `tabs`, `files`, `changes` match `layouts/orca.json`.
+- Mod names `orca-menu`, `orca-spaces`, `orca-files`, `orca-tabs` consistent across clone, `content.mod` and sync.
+
+**Known gaps, stated rather than hidden**
+
+- Task 7 Step 5 leaves the `confirm`/`prompt` return path as a choice between two equivalent mechanisms. An implementer must pick one; the acceptance is that Delete/Rename/New actually write.
+- Only Linux/Wayland clipboard branches are exercised on this machine; macOS and Windows branches are written but unverified until run there.
+- Task 9 forks `tabs`; upstream tab-bar fixes stop arriving. Re-clone and re-diff after each Herdr upgrade.

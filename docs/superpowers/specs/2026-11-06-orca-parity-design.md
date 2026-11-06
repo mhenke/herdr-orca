@@ -33,6 +33,16 @@ None of the above is rebuilt.
 | Dark tokens | bg `#0a0a0a`, fg `#f0f0f0`, card `#171717`, muted `#262626`, accent `#404040`, border `rgb(255 255 255 / .07)` | `assets/main.css:336-380` |
 | Checks visibility | `gitOnly: true` — git repos only | `use-right-sidebar-activity-items.ts:117` |
 
+## Package shape
+
+Follows herdr-t3: `layouts/ mods/ keys.json themes/ README.md RECIPE.md preview.png scripts/sync.sh`.
+
+- No `bin/` shipped into the app home, no test scripts, no sound installation. Those were rev 2 drift; herdr-t3 ships none of them and keeps shell tooling in `scripts/` for producing its own previews only.
+- `scripts/sync.sh` is kept: herdr-t3 has one (`herdr-t3/scripts/sync.sh`), and it copies rather than symlinks because "Herdr App doesn't load a mod's own SVGs through a symlink".
+- A mod cannot import outside its own folder (`herdr-t3/scripts/sync.sh:10`), so the clipboard helper lives as `mods/<mod>/clip.js`, copied into each mod that needs it — the same way herdr-t3 duplicates `focus.js` and `name.js`.
+- Settings (fonts, sounds) are **documented** in the README for the person to apply, not written by the package.
+- Orca's colours ship as `themes/orca-dark.json`, matching how herdr-t3 ships `t3-code-dark.json`.
+
 ## Where each kind of change belongs
 
 Corrected in rev 2:
