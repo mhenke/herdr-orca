@@ -1,6 +1,6 @@
 // A lazy file browser for the focused pane's folder, with bounded read-only previews.
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
+import { v_flex, h_flex, Input, InputState, Editor, EditorState } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, openOverlay, closeOverlay, shared, setShared, nextCommand } from "herdr";
 import { copyText, reveal } from "./clip.js";
 
@@ -44,6 +44,9 @@ export default class Files extends View {
     this.saved = new Map();
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {};
     this.cx = cx;
+    this.input = InputState.new({ placeholder: "Name" });
+    this.input.on("change", (_e, cx) => cx.notify());
+    this.input.on("submit", (_e, cx) => { void this.apply(this.input.value().trim()); cx.notify(); });
     this.refresh(cx);
     cx.timer.every(10000, cx => this.refresh(cx));
     cx.spawn(async cx => {
@@ -170,20 +173,24 @@ export default class Files extends View {
     const { path, dir } = props().target;
     const full = this.full(path);
     const close = () => closeOverlay(props().overlay);
-    const ask = (kind, title, detail, command, value) => {
-      close();
-      setShared("orca-files.target", full);
-      openOverlay({ mod: kind, kind: "dialog", width: 420, height: 190,
-        props: { title, detail, ...(value === undefined ? {} : { value }), command: { name: `orca-files.${command}` } } });
+    // Typed text cannot cross mods: run("<mod>.<cmd>") delivers only the command
+    // string to nextCommand(). So New/Rename ask in this mod's own popup instead.
+    // Stay in this popup: closing it first would take the prompt with it.
+    const ask = (mode, title, value) => {
+      this.prompt = { mode, title, full, overlay: props().overlay, value: value ?? "" };
+      if (value) this.input.set_value(value), this.input.set_selected_range({ start: 0, end: value.length });
+      else this.input.set_value("");
+      this.input.focus();
+      this.cx?.notify();
     };
     switch (name) {
-      case "new-file": return ask("prompt", "New File", `${full}/`, "touch");
-      case "new-folder": return ask("prompt", "New Folder", `${full}/`, "mkdir");
+      case "new-file": return ask("touch", "New File");
+      case "new-folder": return ask("mkdir", "New Folder");
       case "copy-path": void copyText(full); return close();
       case "copy-rel": void copyText(path); return close();
       case "terminal": run("terminal.open", { folder: dir ? full : this.root }); return close();
       case "reveal": void reveal(full); return close();
-      case "rename": return ask("prompt", "Rename", full, "mv", path.replace(/^.*\//, ""));
+      case "rename": return ask("mv", "Rename", path.replace(/^.*\//, ""));
       case "delete":
         close();
         setShared("orca-files.target", full);
@@ -192,20 +199,28 @@ export default class Files extends View {
     }
   }
 
-  // Next file command's argument: the target parked by act().
-  async command(c) {
-    const full = shared("orca-files.target");
-    setShared("orca-files.target", null);
-    const name = props()?.name ?? "";
-    if (!full) return;
-    const parent = full.replace(/\/[^/]*$/, "");
-    if (c === "remove") await exec("rm", ["-rf", full]);
-    else if (!name) return;
-    else if (c === "touch") await writeTextFile(`${full}/${name}`, "", null);
-    else if (c === "mkdir") await exec("mkdir", ["-p", `${full}/${name}`]);
-    else if (c === "mv") await exec("mv", [full, `${parent}/${name}`]);
+  // The pending New/Rename, applied here because typed text cannot cross mods.
+  async apply(name) {
+    const p = this.prompt;
+    this.prompt = null;
+    if (p?.overlay) closeOverlay(p.overlay);
+    if (!p || !name) return;
+    const parent = p.full.replace(/\/[^/]*$/, "");
+    if (p.mode === "touch") await writeTextFile(`${p.full}/${name}`, "", null);
+    if (p.mode === "mkdir") await exec("mkdir", ["-p", `${p.full}/${name}`]);
+    if (p.mode === "mv") await exec("mv", [p.full, `${parent}/${name}`]);
     this.refresh(this.cx);
   }
+
+  // Delete needs no typed text, so the shipped confirm mod can drive it.
+  async remove() {
+    const full = shared("orca-files.target");
+    setShared("orca-files.target", null);
+    if (full) await exec("rm", ["-rf", full]);
+    this.refresh(this.cx);
+  }
+
+  command(c) { if (c === "remove") return this.remove(); }
 
   rows(prefix, depth, out, t) {
     if (out.length >= TOTAL || depth > 40) return out;
@@ -222,6 +237,23 @@ export default class Files extends View {
       if (entry.dir && open) this.rows(path, depth + 1, out, t);
     }
     return out;
+  }
+
+  promptView(t) {
+    const close = () => { this.prompt = null; this.cx.notify(); };
+    return v_flex().id("orca-files-prompt").w_full().min_h(0).p(14).gap(10).bg(t.popover).text_size(12.8).text_color(t.foreground)
+      .child(h_flex().items_center()
+        .child(div().flex_1().text_size(14).font_semibold().child(this.prompt.title))
+        .child(div().text_size(11).text_color(t.dim).child("Esc")).on_key_down((e, cx) => {
+          if (e.key === "escape") { close(); cx.stop_propagation(); }
+        }).track_focus(this.inputHandle ?? (this.inputHandle = this.cx.focus_handle())))
+      .child(div().text_size(11).text_color(t.dim).child(this.prompt.full))
+      .child(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_size(12.8).text_color(t.foreground)
+        .on_key_down((e, cx) => { if (e.key === "enter") { void this.apply(this.input.value().trim()); cx.stop_propagation(); } }))
+      .child(h_flex().gap(8).justify_end()
+        .child(h_flex().id("fx-cancel").h(30).px(12).items_center().rounded(7).border_1().border_color(t.input).text_size(12).cursor_pointer().hover(s => s.opacity(0.88)).on_click(close).child("Cancel"))
+        .child(h_flex().id("fx-save").h(30).px(12).items_center().rounded(7).bg(t.solid).text_color(t.solid_foreground).text_size(12).font_medium().cursor_pointer()
+          .hover(s => s.opacity(0.88)).on_click((_e, cx) => { void this.apply(this.input.value().trim()); cx.notify(); }).child("Save")));
   }
 
   menuView(t) {
@@ -244,6 +276,7 @@ export default class Files extends View {
   render(cx) {
     if (key() !== this.context?.key) this.refresh(cx);
     const t = theme();
+    if (this.prompt) return this.promptView(t);
     if (props()?.tab === "file") return this.menuView(t);
     return v_flex().id("files").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)

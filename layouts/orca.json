@@ -93,7 +93,7 @@
           },
           "window_drag": true,
           "content": {
-            "mod": "tabs"
+            "mod": "orca-tabs"
           }
         },
         {
@@ -183,7 +183,6 @@
     "light": "orca-light",
     "dark": "orca-dark"
   },
-  "colors": {},
   "ui_font": "Geist",
   "font_size": 14
 }

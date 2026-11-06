@@ -553,7 +553,19 @@ Add one handler per command, each receiving `{path, dir}` plus `name` where the 
   async remove({ path }) { await exec("rm", ["-rf", path]); }
 ```
 
-These are mod commands: they are registered as `<mod>.<command>` by Herdr and invoked by `run()`, so `orca-files.touch`, `orca-files.mkdir`, `orca-files.mv` and `orca-files.remove` are the names `act()` passes in `command.name`.
+`run("<mod>.<command>")` delivers only the command **string** to that mod's
+`nextCommand()` — args are NOT delivered (`gpui-kit.d.ts`:
+`nextCommand(): Promise<string>`, "Mods: \"<mod>.<command>\" delivers
+<command> to that mod's nextCommand()"). So `confirm`/`prompt` cannot carry
+`{dir}`, `{path}` or `{name}` into the mod. Instead `act()` parks the target
+with `setShared("orca-files.target", full)` before opening the shipped
+dialog, `init()` runs a `for(;;)` `nextCommand()` loop, and `command(c)`
+reads the target back from `shared()`. The typed name arrives in `props()`
+(the shipped `prompt` copies it into `p.command.args`, but only its own copy
+sees that — the mod's `nextCommand()` still sees just `"touch"`/`"mkdir"`/
+`"mv"`, so `command(c)` reads `props()?.name` from the dialog overlay while
+it is still open... in practice the dialog closes before delivery, hence the
+`prompt` value is captured via the pending-shared record instead).
 
 The plan's acceptance is that Delete, Rename and New actually write; no mechanism choice is left to the implementer.
 
