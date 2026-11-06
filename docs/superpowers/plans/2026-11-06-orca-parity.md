@@ -49,7 +49,6 @@
 
 **Files:**
 - Create: `scripts/sync.sh`, `.gitignore`
-- Delete: `bin/` (does not exist yet — do not create it)
 
 **Interfaces:**
 - Consumes: nothing.
@@ -543,19 +542,32 @@ and the method:
 
 - [ ] **Step 5: Handle the returned commands**
 
-In `init(_props, cx)`:
+The shipped `prompt` mod calls `run(p.command.name, { ...p.command.args, name: this.text })` (`mods/prompt/main.js:24`), and `confirm` calls `run(p.command.name, p.command.args ?? {})` (`mods/confirm/main.js:16`). Both therefore deliver the target as explicit args — no pending state, no `nextCommand()` loop.
+
+Add one handler per command, each receiving `{path, dir}` plus `name` where the prompt supplied it:
 
 ```js
-    cx.spawn(async (cx) => {
-      for (;;) {
-        const c = await nextCommand();
-        if (c === "remove") await exec("rm", ["-rf", this.pendingPath]);
-        cx.notify();
-      }
-    });
+  async touch({ dir, name }) { if (name) await writeTextFile(`${dir}/${name}`, "", null); }
+  async mkdir({ dir, name }) { if (name) await exec("mkdir", ["-p", `${dir}/${name}`]); }
+  async mv({ path, name }) { if (name) await exec("mv", [path, `${path.replace(/\/[^/]*$/, "")}/${name}`]); }
+  async remove({ path }) { await exec("rm", ["-rf", path]); }
 ```
 
-Simpler and correct for this scope: instead of a pending path, pass the target as the command's first argument and read it from `props()` of the follow-up command. Implementers should pick one and be consistent; the plan's requirement is only that Delete, Rename and New actually write.
+`run("<mod>.<command>")` delivers only the command **string** to that mod's
+`nextCommand()` — args are NOT delivered (`gpui-kit.d.ts`:
+`nextCommand(): Promise<string>`, "Mods: \"<mod>.<command>\" delivers
+<command> to that mod's nextCommand()"). So `confirm`/`prompt` cannot carry
+`{dir}`, `{path}` or `{name}` into the mod. Instead `act()` parks the target
+with `setShared("orca-files.target", full)` before opening the shipped
+dialog, `init()` runs a `for(;;)` `nextCommand()` loop, and `command(c)`
+reads the target back from `shared()`. The typed name arrives in `props()`
+(the shipped `prompt` copies it into `p.command.args`, but only its own copy
+sees that — the mod's `nextCommand()` still sees just `"touch"`/`"mkdir"`/
+`"mv"`, so `command(c)` reads `props()?.name` from the dialog overlay while
+it is still open... in practice the dialog closes before delivery, hence the
+`prompt` value is captured via the pending-shared record instead).
+
+The plan's acceptance is that Delete, Rename and New actually write; no mechanism choice is left to the implementer.
 
 - [ ] **Step 6: Check the mod loads**
 

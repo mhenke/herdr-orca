@@ -50,7 +50,7 @@
               },
               "min": 90,
               "content": {
-                "mod": "spaces"
+                "mod": "orca-spaces"
               }
             },
             {
@@ -93,7 +93,7 @@
           },
           "window_drag": true,
           "content": {
-            "mod": "tabs"
+            "mod": "orca-tabs"
           }
         },
         {
@@ -109,7 +109,7 @@
                 "tab": "active",
                 "pane": {
                   "gap": 8,
-                  "radius": 10,
+                  "radius": 2,
                   "background": "background",
                   "lone": true,
                   "border": {
@@ -150,7 +150,7 @@
                       "id": "files",
                       "type": "block",
                       "content": {
-                        "mod": "files"
+                        "mod": "orca-files"
                       }
                     },
                     {
@@ -183,7 +183,6 @@
     "light": "orca-light",
     "dark": "orca-dark"
   },
-  "colors": {},
   "ui_font": "Geist",
   "font_size": 14
 }
