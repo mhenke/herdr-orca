@@ -1,6 +1,6 @@
 # herdr-orca
 
-An [Orca](https://github.com/orca-app/orca)-shaped window for Herdr App, reverse-engineered from Orca's renderer source rather than from screenshots.
+An [Orca](https://github.com/stablyai/orca)-shaped window for Herdr App, reverse-engineered from Orca's renderer source rather than from screenshots.
 
 Orca's three columns map onto Herdr's model with no custom mods: both of its sidebars are stock Herdr panels.
 
@@ -62,9 +62,8 @@ Set these yourself; this package does not write `settings.json`.
 ```
 
 The two sounds are Orca's, from `resources/notification-sounds/` in
-[Orca](https://github.com/orca-app/orca); copy `ding.mp3` and `two-tone.mp3`
 into `~/.config/herdr-app/data/sounds/` yourself.
-
+[Orca](https://github.com/stablyai/orca); copy `ding.mp3` and `two-tone.mp3`
 ## Panel-by-panel check against Orca's source
 
 Verified by reading Orca's renderer, not from screenshots. "Herdr" is what exists in Herdr App today.
