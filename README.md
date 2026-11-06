@@ -48,6 +48,23 @@ Verified: 280 / 280 columns rendered, panel hidden and shown again, no layout er
 
 The layout follows the system's light or dark mode with `"theme": { "light": "orca-light", "dark": "orca-dark" }`.
 
+## Settings
+
+Set these yourself; this package does not write `settings.json`.
+
+```json
+{
+  "font": "Geist Mono",
+  "ui_font": "Geist",
+  "font_size": 14,
+  "sounds": { "enabled": true, "done": "data/sounds/ding.mp3", "blocked": "data/sounds/two-tone.mp3" }
+}
+```
+
+The two sounds are Orca's, from `resources/notification-sounds/` in
+[Orca](https://github.com/orca-app/orca); copy `ding.mp3` and `two-tone.mp3`
+into `~/.config/herdr-app/data/sounds/` yourself.
+
 ## Panel-by-panel check against Orca's source
 
 Verified by reading Orca's renderer, not from screenshots. "Herdr" is what exists in Herdr App today.
