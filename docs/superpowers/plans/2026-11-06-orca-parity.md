@@ -49,7 +49,6 @@
 
 **Files:**
 - Create: `scripts/sync.sh`, `.gitignore`
-- Delete: `bin/` (does not exist yet — do not create it)
 
 **Interfaces:**
 - Consumes: nothing.
@@ -543,19 +542,20 @@ and the method:
 
 - [ ] **Step 5: Handle the returned commands**
 
-In `init(_props, cx)`:
+The shipped `prompt` mod calls `run(p.command.name, { ...p.command.args, name: this.text })` (`mods/prompt/main.js:24`), and `confirm` calls `run(p.command.name, p.command.args ?? {})` (`mods/confirm/main.js:16`). Both therefore deliver the target as explicit args — no pending state, no `nextCommand()` loop.
+
+Add one handler per command, each receiving `{path, dir}` plus `name` where the prompt supplied it:
 
 ```js
-    cx.spawn(async (cx) => {
-      for (;;) {
-        const c = await nextCommand();
-        if (c === "remove") await exec("rm", ["-rf", this.pendingPath]);
-        cx.notify();
-      }
-    });
+  async touch({ dir, name }) { if (name) await writeTextFile(`${dir}/${name}`, "", null); }
+  async mkdir({ dir, name }) { if (name) await exec("mkdir", ["-p", `${dir}/${name}`]); }
+  async mv({ path, name }) { if (name) await exec("mv", [path, `${path.replace(/\/[^/]*$/, "")}/${name}`]); }
+  async remove({ path }) { await exec("rm", ["-rf", path]); }
 ```
 
-Simpler and correct for this scope: instead of a pending path, pass the target as the command's first argument and read it from `props()` of the follow-up command. Implementers should pick one and be consistent; the plan's requirement is only that Delete, Rename and New actually write.
+These are mod commands: they are registered as `<mod>.<command>` by Herdr and invoked by `run()`, so `orca-files.touch`, `orca-files.mkdir`, `orca-files.mv` and `orca-files.remove` are the names `act()` passes in `command.name`.
+
+The plan's acceptance is that Delete, Rename and New actually write; no mechanism choice is left to the implementer.
 
 - [ ] **Step 6: Check the mod loads**
 
