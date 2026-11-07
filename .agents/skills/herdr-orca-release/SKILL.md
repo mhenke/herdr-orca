@@ -24,7 +24,7 @@ Distribution combines two independent mechanisms:
 | **Publish Release** | `./scripts/release.sh <version> --push --github-release` | GitHub release live, assets attached |
 | **Mod Check** | `for m in mods/*; do [ -d "$m" ] && herdr-app check "$m"; done` | All mods output `check passed` |
 | **Syntax Check** | `for f in mods/*/main.js; do node --check "$f"; done` | Exit code 0 across all files |
-| **Direct Changelog** | `uvx git-cliff --tag v<version> -o CHANGELOG.md` | `CHANGELOG.md` updated |
+| **Direct Changelog** | `uvx git-cliff --offline --tag v<version> -o CHANGELOG.md` | `CHANGELOG.md` updated |
 
 ---
 
@@ -123,7 +123,7 @@ git push origin "v<version>"
 
 # Create GitHub Release
 NOTES_FILE=$(mktemp)
-uvx git-cliff --tag "v<version>" --latest --strip header > "$NOTES_FILE"
+uvx git-cliff --offline --tag "v<version>" --latest --strip header > "$NOTES_FILE"
 gh release create "v<version>" --title "v<version>" --notes-file "$NOTES_FILE"
 rm -f "$NOTES_FILE"
 ```

@@ -33,4 +33,4 @@ jobs:
 
       - name: Validate git-cliff changelog generation
         run: |
-          uvx git-cliff --unreleased
+          uvx git-cliff --offline --unreleased

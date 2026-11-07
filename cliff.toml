@@ -67,6 +67,4 @@ filter_commits = false
 tag_pattern = "v[0-9].*"
 sort_commits = "oldest"
 
-[github]
-owner = "mhenke"
-repo = "herdr-orca"
+

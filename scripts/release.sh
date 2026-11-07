@@ -104,12 +104,12 @@ fi
 # 4. Generate CHANGELOG.md
 echo "==> Generating changelog for ${TAG}..."
 if [[ "$DRY_RUN" = true ]]; then
-  uvx git-cliff --tag "$TAG" --unreleased
+  uvx git-cliff --offline --tag "$TAG" --unreleased
   echo "==> [Dry run] Completed without making commits or tags."
   exit 0
 fi
 
-uvx git-cliff --tag "$TAG" -o CHANGELOG.md
+uvx git-cliff --offline --tag "$TAG" -o CHANGELOG.md
 echo "    CHANGELOG.md updated."
 
 # 5. Commit and tag
@@ -131,7 +131,7 @@ if [[ "$GH_RELEASE" = true ]]; then
   if command -v gh >/dev/null 2>&1; then
     echo "==> Creating GitHub Release for ${TAG}..."
     NOTES_FILE=$(mktemp)
-    uvx git-cliff --tag "$TAG" --latest --strip header > "$NOTES_FILE"
+    uvx git-cliff --offline --tag "$TAG" --latest --strip header > "$NOTES_FILE"
     gh release create "$TAG" \
       --title "${TAG}" \
       --notes-file "$NOTES_FILE"

@@ -35,7 +35,7 @@ jobs:
 
       - name: Generate release notes
         run: |
-          uvx git-cliff --tag ${{ github.ref_name }} --latest --strip header > RELEASE_NOTES.md
+          uvx git-cliff --offline --tag ${{ github.ref_name }} --latest --strip header > RELEASE_NOTES.md
 
       - name: Package layout archive
         run: |
