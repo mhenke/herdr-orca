@@ -6,7 +6,9 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
-import { projectMark, repoMark, tint } from "./project.js";
+import { repoMark, tint } from "./project.js";
+import { statusMark } from "./status.js";
+import { getWorktreeCardContentIndent, getFlushWorktreeCardPaddingLeft, WORKTREE_CARD_SURFACE_MARGIN, LINEAGE_CHILDREN_INLINE_OFFSET } from "./indentation.js";
 import { tip, tipMark } from "./tip.js";
 import { stopsInit, stop, focusRoot, enter } from "./focus.js";
 
@@ -252,9 +254,15 @@ export default class Spaces extends View {
     const nested = (r) => r.g?.linked && mains.has(r.g.repo);
     const out = [];
     const placed = new Set(); // repos whose worktrees are listed (under the first of its spaces)
+    const headed = new Set(); // repos whose header is already drawn
     for (const r of list) {
       if (nested(r)) continue;
-      const top = { ...r, tree: null, kids: 0 };
+      // Orca's `groupBy: 'repo'` plan emits ONE header per repo group
+      // (sidebar-row-plan.ts -> buildOrderedGroups), with every worktree of that repo as a
+      // card beneath it. A second space in the same repo is another card, not a new group.
+      const head = !r.g || !headed.has(r.g.repo);
+      if (r.g) headed.add(r.g.repo);
+      const top = { ...r, tree: null, kids: 0, head };
       out.push(top);
       if (!r.g || r.g.linked || placed.has(r.g.repo)) continue;
       placed.add(r.g.repo);
@@ -262,7 +270,7 @@ export default class Spaces extends View {
       top.kids = kids.length;
       // Not filtered here: `row()` hides a folded repo's cards so its header stays, which is
       // what a fold means. Filtering here too made the whole group disappear.
-      kids.forEach((k, n) => out.push({ ...k, tree: n === kids.length - 1 ? "└─" : "├─" }));
+      kids.forEach((k, n) => out.push({ ...k, tree: n === kids.length - 1 ? "└─" : "├─", head: false }));
     }
     // space.next/prev and ctrl-N follow the model, so it keeps the rows' order, folded rows included: folding moves nothing.
     // Simulate the batch so later indexes include earlier moves. An attempted write can lose a sync conflict: let its echo settle before retrying.
@@ -419,9 +427,10 @@ export default class Spaces extends View {
       // not a letter monogram. A project's own favicon still wins when it has one.
       .child(repoMark(w, 16, t, ps))
       .child(div().min_w(0).flex_1().truncate().text_size(13).font_semibold().line_height("16px").text_color(t.foreground).child(g?.name ?? w.name))
-      // As Orca's: aria-hidden, the whole header folds, so it lights with the header and has no label.
+      // SectionHeader.tsx:358: size-5 rounded-md text-muted-foreground, hover:bg-accent/70
+      // and hover:text-foreground — a 70% accent wash, not a 70% white one.
       .child(div().id(`space-fold-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
-        .text_color(t.dim).hover((s) => s.bg("#f0f0f0b3"))
+        .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
         .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(14).flex_none())), 6,
       { enter: () => this.toggleRepo(key) });
   }
@@ -444,17 +453,9 @@ export default class Spaces extends View {
     // of real rows and never invents one.
     const tabIds = new Set((w.tabs ?? []).map(c => c.id));
     const mine = agents().filter(a => tabIds.has(a.tab));
-    // Orca's StatusIndicator: the most urgent state (blocked > working > done), from the
-    // agents' own status rather than a rollup that also counts plain terminals.
-    const rank = { blocked: 3, failed: 3, permission: 3, working: 2, monitoring: 2, done: 1 };
-    const top = mine.reduce((best, a) => ((rank[a.status] ?? 0) > (rank[best] ?? 0) ? a.status : best), null);
-    // Orca's StatusIndicator.tsx: red-500 for a failure, the emerald status dot for a
-    // finished or idle terminal, neutral/40 for a quiet one. No invented working spinner.
-    const rowDot = (st) => st === "failed" || st === "blocked" ? "#ef4444"
-      : st === "done" || st === "active" || st === "working" || st === "monitoring" ? "#10b981"
-      : st === "permission" || st === "unconfirmed" ? "#eab308"
-      : "#73737366";
-    const dot = rowDot(top);
+    // The host already rolled the space's agents up (model.rs `rollup`); re-deriving it here
+    // would let the card disagree with the app, and collapse `error` on its own.
+    const dot = w.status ?? null;
     // `primary` marks the repo's top branch only: a folder workspace has no branch, and a
     // linked worktree is secondary to its checkout.
     // shortcut: main/master by name; a repo whose default branch is named otherwise shows
@@ -469,7 +470,7 @@ export default class Spaces extends View {
     };
     const agentRow = (a) => h_flex().min_w(0).h(16).px(4).gap(4).items_center()
       .text_size(11).line_height("11px").text_color(t.dim)
-      .child(div().size(8).rounded_full().flex_none().bg(rowDot(a.status)))
+      .child(statusMark(a.status, 12))
       .child(div().min_w(0).flex_1().truncate().child(agentTitle(a)));
     const agentBlock = v_flex().min_w(0).gap(0)
       .child(h_flex().id(toggleId).h(24).w_full().min_w(0).px(4).gap(4).items_center().rounded(2)
@@ -481,11 +482,20 @@ export default class Spaces extends View {
         .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(10).flex_none())
         .child(div().min_w(0).truncate().child(`${mine.length} agent${mine.length === 1 ? "" : "s"}`)))
       .when(!folded, el => el.child(v_flex().min_w(0).gap(2).pt(2).children(mine.map(agentRow))));
+    // Orca's frame geometry: contentIndent from the group depth and lineage depth, then the
+    // flush-card padding that keeps the title under the header's label.
+    const contentIndent = getWorktreeCardContentIndent({
+      isGrouped: Boolean(g),
+      groupDepth: 0,
+      lineageDepth: tree ? 1 : 0,
+    });
+    const geometry = { cardPaddingLeft: getFlushWorktreeCardPaddingLeft(contentIndent, true) };
     return stop(this, t, `space-${w.id}`, v_flex()
       .relative()
       .id(`space-${w.id}`)
-      // A nested card steps in with its surface, as Orca's lineage wrapper (14 = 18 indent - 4 ml - 2 + 2).
-      .ml(4 + (tree ? 14 : 0)).pr(6).py(8)
+      // A nested card steps in with its surface. Orca derives this from the same module as the
+      // padding (`LINEAGE_CHILDREN_INLINE_OFFSET` = 18 - 4 - 2), not a second literal.
+      .ml(tree ? WORKTREE_CARD_SURFACE_MARGIN + LINEAGE_CHILDREN_INLINE_OFFSET : WORKTREE_CARD_SURFACE_MARGIN).pr(6).py(8)
       .flex_none()
       .rounded(8)
       .role("button")
@@ -523,10 +533,16 @@ export default class Spaces extends View {
         cx.notify();
       })
       .on_mouse_down("right", () => this.menu(w))
-      // Card root: Row gap xs (2), status lane then a Stack gap md (6) — Orca's default template.
-      .child(h_flex().w_full().min_w(0).pl(2 + (tree ? 18 : 0)).gap(2).items_center()
-        .child(div().w(20).mr(4).flex_none().flex().items_center().justify_center()
-          .child(div().size(8).rounded_full().flex_none().bg(dot)))
+      // Card root (worktree-card-surface.tsx): ml-1, py-2 for a title-only card, rounded-lg, and a
+      // padding-left that the geometry module derives from the group depth. The content row is
+      // `flex gap-0.5 items-start`, so the status lane sits at the top and never drives the title.
+      .child(h_flex().w_full().min_w(0).items_start().gap(2).pl(geometry.cardPaddingLeft)
+        // WorktreeCardStatusLane, legacy style (the default: experimentalNewWorktreeCardStyle
+        // is false): `shrink-0 flex justify-center items-start pt-[2px]`, and no width — the
+        // new-style `w-5` lane belongs to the other card style. StatusIndicator's own box is
+        // h-3 w-3 holding an 8px dot.
+        .child(div().flex_none().flex().items_start().justify_center().pt(2)
+          .child(statusMark(dot, 12)))
         .child(v_flex().flex_1().min_w(0).gap(6)
           // Title row: title, then Orca's primary pill (h-16, px-1.5, 10px). `ws.isMain` only
           // marks a repo's own checkout: a plain folder workspace is no one's primary branch,
@@ -553,10 +569,11 @@ export default class Spaces extends View {
   row(r, t, ps) {
     if (r.g?.linked) return [this.card(r, t, ps)];
     if (!r.g) return [this.card(r, t, ps)];
-    // Orca folds a whole repo (SectionHeader's toggle hides every row of the group),
-    // so the header hides its own card too and the chevron is never a dead control.
-    const folded = this.foldedRepos.has(r.g.repo);
-    return [this.header(r, t, ps), ...(folded ? [] : [this.card(r, t, ps)])];
+    // Orca folds the whole repo group, so every card of it hides, not only the head's.
+    if (this.foldedRepos.has(r.g.repo)) return r.head ? [this.header(r, t, ps)] : [];
+    // Only the repo's first space heads the group; its later spaces are further cards.
+    if (!r.head) return [this.card(r, t, ps)];
+    return [this.header(r, t, ps), this.card(r, t, ps)];
   }
 
   render() {
