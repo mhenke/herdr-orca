@@ -174,8 +174,11 @@ export default class Tabs extends View {
         .on_mouse_up("left", () => {
           const from = this.pressed; this.pressed = null;
           const source = from === null ? null : shown[from];
+
           if (source && from !== i) run("tab.move", { id: source.id, index: shown.findIndex(x => x.id === c.id) + 1 });
-          else run("tab.select", { id: c.id });
+          // Orca shows the workspace when one of its tabs is chosen; `layout.select` switches the
+          // center stack back to the terminals (`commands.rs:81`).
+          else { run("tab.select", { id: c.id }); run("layout.select", { stack: "main", child: "main-terminals" }); }
         })
         // `orca-menu` owns the tab menu (it already has the "tab" case); pointing at Herdr's
         // shipped `menu` made this mod depend on a mod outside the package.
