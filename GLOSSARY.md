@@ -46,10 +46,12 @@ exactly one thing here.
   a worktree whose title is its branch Orca genuinely draws the same string twice. We drop that
   repeat: the meta line is the only part removed, and it is removed only when its text equals
   the title. This is a deviation, not a port — record it as one.
-- **Title-only card** — a card with no meta line and no agent rows. It collapses to one line with
-  8px padding; any card with a meta line or agent rows takes 5px/6px
-  (`worktree-card-surface.tsx:67`, `singleLine` in the same template). Both facts derive from
-  the meta text, never from a separate flag.
+- **Title-only card** — Orca's template branch for a card with no meta line, no agent rows and
+  no lineage toggle (`singleLine`, `worktree-card-surface.tsx:61-67`). It is not a shape this
+  port ever draws: the `inline-agents` migration gives every user's card agent rows
+  (`normalize-loaded-ui-state.ts:106`), so `singleLine` is false for a migrated card and the
+  padding is always the meta-row pair, 5px above and 6px below. A card's padding does not depend
+  on whether an agent is running.
 - **Review** — the pull request for a worktree's own branch, drawn as a mark at the end of the
   card's meta row. A review belongs to a **branch**, never to a repo: two worktrees of one repo
   have different reviews, and a worktree with no PR has none. It is read from a persisted cache
@@ -58,3 +60,15 @@ exactly one thing here.
 - **Port** — reproduce Orca's behaviour and result using Herdr's primitives. Not *transcribe*
   (copy its markup literally, impossible here) and not *invent* (a control Orca has no
   counterpart for). See AGENTS.md rule 1.
+
+- **Page** — a full view that replaces the middle column: Tasks, Automations, Orca Mobile. A
+  page is not a sidebar panel: its body occupies the workspace column and is selected in the
+  `main` stack, and choosing a workspace or tab shows the terminals again. A row in the sidebar
+  may open a page; the page is the destination, not the row.
+- **Gap** — a surface Herdr has no backend for, drawn where Orca draws it, with Orca's
+  unavailable-state geometry and one sentence naming what is missing. A gap is reachable and
+  says why; it is not a dead control and never shows invented data. Removing a gap means
+  implementing its backend, not hiding the surface (ADR 0004).
+- **Saved project** — a folder someone added to the sidebar that outlives its space. It is a
+  project that exists with nothing open on it; a folder that is gone stays listed and marked
+  until it is removed, rather than disappearing.
