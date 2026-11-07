@@ -24,6 +24,18 @@ worktree / project group / top branch mean exactly one thing each here.
    graph (`graphify-out/`). Run `graphify query "<question>"` (or `graphify path` /
    `graphify explain`) to find the file that owns a behavior instead of grepping the
    tree; open the file it names and quote that file in the edit comment.
+
+   **`~/Projects/herdr-t3` has a graph too.** It is the reference Herdr layout this
+   package is shaped like (`layouts/ mods/ keys.json extras/themes/ scripts/sync.sh
+   README.md RECIPE.md preview.png`), so the same `graphify query` answers
+   "how does herdr-t3 do this?" from its `graphify-out/graph.json`. Use it for
+   packaging, sync, keys and mod-structure questions; use the Orca graph for what
+   the UI looks like and how it behaves. Its graph is built, no need to rebuild.
+
+   **Run graph queries with `env -u GRAPHIFY_OUT`.** `~/.zshrc:164` exports
+   `GRAPHIFY_OUT="$HOME/.graphify/oh-my-opencode-slim"`, so a bare `graphify query`
+   silently answers from that graph instead of the one in the current folder
+   (7348 nodes vs 874). Prefix every query: `env -u GRAPHIFY_OUT graphify query "…"`.
 2. **Copy the owning function, not its outputs.** Hand-tuned literals drift;
    the port of `indentation.ts` (`mods/orca-spaces/indentation.js`) ended five
    rounds of indent patches. If Orca computes it somewhere, port that module.
