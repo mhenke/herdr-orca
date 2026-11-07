@@ -1,10 +1,10 @@
 // Orca's left sidebar: history arrows, Search, the Tasks / Automations / Orca Mobile rows, then
 // the Projects header. The project tree under the header is orca-spaces; the three rows open
-// pages in the middle column (`page-tasks` …), which `layouts/orca.json` puts in the `main`
+// pages in the middle column (`page-tasks` …), which the `orca` layout puts in the `main`
 // stack. Bare rows rather than an omission: each page states its own gap (ADR 0004).
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, run, openOverlay, shared, window, layout } from "herdr";
+import { theme, run, openOverlay, shared, window, layout, pickFolder } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -116,16 +116,19 @@ export default class Nav extends View {
           .child(div().id("proj-add-repo").size(24).flex().items_center().justify_center().rounded(6).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
             .role("button").accessibility_label("Add project")
             .on_click(() => {
-              const folder = pickFolder();
-              if (!folder) return;
-              // Append to persisted project list
-              const existing = JSON.parse(localStorage.getItem("projects.saved.v1") || "[]");
-              // Avoid duplicates
-              if (!existing.includes(folder)) {
-                existing.push(folder);
-                localStorage.setItem("projects.saved.v1", JSON.stringify(existing));
-              }
-              run("space.new", { folder });
+              // herdr.d.ts:39 — the folder picker is async: `Promise<string | null>`.
+              // Taking the promise as a value stored "[object Promise]" as the folder.
+              void pickFolder().then((folder) => {
+                if (!folder) return;
+                // Append to persisted project list
+                const existing = JSON.parse(localStorage.getItem("projects.saved.v1") || "[]");
+                // Avoid duplicates
+                if (!existing.includes(folder)) {
+                  existing.push(folder);
+                  localStorage.setItem("projects.saved.v1", JSON.stringify(existing));
+                }
+                run("space.new", { folder });
+              });
             })
             .child(svg("mods/orca-nav/folder-plus.svg").size(14)))
           // NewWorkspaceButton (:60-64) — Plus `size-3.5`, same 2.25 stroke. Orca's header
