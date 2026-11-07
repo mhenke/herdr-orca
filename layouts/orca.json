@@ -126,7 +126,7 @@
                             "content": {
                               "mod": "orca-pane"
                             },
-                            "height": 30,
+                            "height": 24,
                             "position": "top",
                             "reveal": "hover"
                           }

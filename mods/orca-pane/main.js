@@ -34,8 +34,9 @@ export default class Pane extends View {
       .items_center()
       .justify_center()
       .rounded(6)
-      .text_color(t.dim)
-      .hover((s) => s.text_color(t.foreground))
+      // terminal.css:398,464: button fg rgb(255 255 255 / 0.3) → hover /0.8.
+      .text_color("#ffffff4d")
+      .hover((s) => s.text_color("#ffffffcc"))
       .on_click((_e, cx) => {
         cx.stop_propagation();
         run(command, args);
@@ -57,10 +58,15 @@ export default class Pane extends View {
       .px(8)
       .gap(8)
       .items_center()
-      .bg(t.background)
+      // `terminal.css:266-271` — the bar is `font-size: 13px`, `font-family: var(--font-mono)`,
+      // `color: rgb(255 255 255 / 0.52)`, `background: #000`, `border-bottom: 1px solid
+      // rgb(255 255 255 / 0.06)`. Geometry (px-8, height) comes from the layout; the rest is
+      // the literal the CSS states, because the theme's `border` is not this separator.
+      .bg("#000000")
       .border_b(1)
-      .border_color(t.border)
+      .border_color("#ffffff0f")
       .text_size(13)
+      .font_family("JetBrains Mono")
       .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
       .on_click(() => run("pane.focus", { pane }))
       // TerminalPaneHeaderOverlay.tsx:149 `onContextMenuCapture={(e) => onPaneTitleContextMenu(e, pane.id)}`

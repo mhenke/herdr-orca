@@ -1,12 +1,18 @@
-// Orca's empty-canvas landing page: the screen behind the sidebar when no workspace is open.
+// The empty-canvas welcome page: the screen behind the sidebar when no workspace is open.
 //
-// Ported from `Landing.tsx` — component at :216, JSX at :255-323, and the condition that shows
-// it is `AppWorkspaceShell.tsx:106` (`activeView === 'terminal' && !hasActiveWorktree &&
-// !creationLayoutActive`). `orca-tabs` owns that switch; this mod only draws the page.
+// GEOMETRY is a faithful port of Orca's `Landing.tsx` (component :216, JSX :255-323; shown by
+// `AppWorkspaceShell.tsx:106` when there is no active worktree). The layout is the thing this
+// package exists to reproduce, so every size below is Orca's.
 //
-// Named divergences, each because Herdr has no equivalent:
-//  - Orca's tile holds `resources/logo.svg`, copied verbatim into this folder as `logo.svg`.
-//  - The GitHub star footer (:317-321) is Orca's own repo link, not part of the workspace UI.
+// CONTENT is this package's own. This is "Herdr Orca", a layout for Herdr — it is not Orca. A
+// tile carrying Orca's logo and a page saying "ORCA" would advertise someone else's app inside
+// ours, so the tile and heading name this package and the copy speaks about projects.
+//
+// Named divergences:
+//  - Orca's tile holds `resources/logo.svg`. Deliberately not used (see above); the tile
+//    carries a word mark instead, which also avoids copying a third-party logo into a package
+//    others install.
+//  - The GitHub star footer (:317-321) points at Orca's repo; not ported.
 //  - Key caps come from Herdr's binding table, so they show what THIS app does.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -78,13 +84,13 @@ export default class Landing extends View {
           // outside it.
           .child(div().size(80).flex_none().flex().items_center().justify_center()
             .rounded(16).border_1().border_color("#f0f0f033").bg("#12181e")
-            .child(svg("mods/orca-landing/logo.svg").size(48)))
+            .child(div().text_size(16).font_bold().text_color("#f0f0f0").child("HERDR")))
           // `text-4xl font-bold tracking-tight` (:269-271): text-4xl = 36px.
-          .child(div().text_size(36).font_bold().text_color(t.foreground).child("ORCA"))
+          .child(div().text_size(36).font_bold().text_color(t.foreground).child("Herdr Orca"))
           // `text-sm text-muted-foreground text-center` (:275-282).
           .child(div().text_size(14).text_center().text_color(t.muted)
             .child(hasProjects
-              ? "Select a workspace from the sidebar to begin."
+              ? "Select a project from the sidebar to begin."
               : "Add a project to get started."))
           // The button pair: `flex items-center justify-center gap-2.5 flex-wrap` (:284),
           // gap-2.5 = 10px.

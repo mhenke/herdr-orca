@@ -730,7 +730,8 @@ export default class Spaces extends View {
       const label = a.title || a.app || a.program?.agent || "agent";
       return label === w.name || label === `π: ${w.name}` ? (a.app || a.program?.agent || "agent") : label;
     };
-    const agentRow = (a) => h_flex().min_w(0).h(16).px(4).gap(4).items_center()
+    // worktree-card-compact-agent-row.tsx:305 — `flex h-6 items-center gap-1` = 24px; `px-1` = 4px.
+    const agentRow = (a) => h_flex().min_w(0).h(24).px(4).gap(4).items_center()
       .text_size(11).line_height("11px").text_color(t.dim)
       .child(statusMark(a.status, 12))
       .child(div().min_w(0).flex_1().truncate().child(agentTitle(a)));
@@ -785,10 +786,22 @@ export default class Spaces extends View {
       // area on every pointer move, which reads as the list flickering. The hover's only job
       // here is to reveal the row's affordances, so that is all it does.
       .when(this.pressed === w.id && this.over !== w.id, (el) => el.opacity(0.5))
+      // `WorktreeSidebarDropIndicator.tsx:17-25` — the indicator is not a bar: it is
+      // `absolute left-3 right-2 z-30 flex h-3 -translate-y-1/2 items-center` holding
+      //   <span size-1.5 rounded-full bg-worktree-sidebar-ring shadow-[0_0_0_2px sidebar] />
+      //   <span h-0.5 flex-1 rounded-full bg-worktree-sidebar-ring shadow-... />
+      //   <span size-1.5 rounded-full bg-worktree-sidebar-ring shadow-... />
+      // so a 2px line with a 6px dot at each end, inset 12px left and 8px right, in the
+      // sidebar's ring colour (#737373 in dark, main.css:391). We drew a full-width 2px bar in
+      // the theme ACCENT, which was blue — that is the flash the user saw.
       .when(this.pressed !== null && this.over === w.id && this.pressed !== w.id, (el) => el.child(
-        div().absolute().left(0).right(0).h(2).bg(t.accent)
-          .when(fromIndex < i, line => line.bottom(0))
-          .when(fromIndex > i, line => line.top(0)),
+        div().absolute().left(12).right(8).h(3).items_center()
+          .when(fromIndex < i, line => line.bottom(-6))
+          .when(fromIndex > i, line => line.top(-6))
+          .child(h_flex().w_full().items_center()
+            .child(div().size(6).flex_none().rounded_full().bg("#737373"))
+            .child(div().h(2).flex_1().rounded_full().bg("#737373"))
+            .child(div().size(6).flex_none().rounded_full().bg("#737373"))),
       ))
       .on_mouse_down("left", () => {
         if (unopened) return;
