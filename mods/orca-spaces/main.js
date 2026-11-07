@@ -8,7 +8,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
 import { repoMark, tint } from "./project.js";
 import { statusMark } from "./status.js";
-import { getWorktreeCardContentIndent, getFlushWorktreeCardPaddingLeft, WORKTREE_CARD_SURFACE_MARGIN } from "./indentation.js";
+import { getWorktreeCardContentIndent, getFlushWorktreeCardPaddingLeft, getWorktreeCardSurfaceInset, getFolderWorkspaceCardContentIndent, getFolderWorkspaceCardSurfaceInset, getProjectGroupHeaderPaddingLeft, WORKTREE_CARD_SURFACE_MARGIN } from "./indentation.js";
 import { tip, tipMark } from "./tip.js";
 import { stopsInit, stop, focusRoot, enter } from "./focus.js";
 
@@ -467,7 +467,7 @@ export default class Spaces extends View {
     const id = `space-head-${w.id}`;
     return stop(this, t, id, h_flex()
       .id(id)
-      .h(28).flex_none().w_full().pl(10).pr(8).gap(6).items_center().mt(4)
+      .h(28).flex_none().w_full().pl(getProjectGroupHeaderPaddingLeft(0)).pr(8).gap(6).items_center().mt(4)
       .role("button").accessibility_label(g?.name ?? w.name)
       .on_mouse_down("right", () => this.menu(w))
       .on_click((_e, cx) => this.toggleRepo(key, cx))
@@ -537,14 +537,25 @@ export default class Spaces extends View {
         .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(10).flex_none())
         .child(div().min_w(0).truncate().child(`${mine.length} agent${mine.length === 1 ? "" : "s"}`)))
       .when(!folded, el => el.child(v_flex().min_w(0).gap(2).pt(2).children(mine.map(agentRow))));
-    // Orca's frame geometry: every row here is lineage depth 0 (no tree indent, no wrapper),
-    // so the padding is the grouped top-level value and the surface sits at ml-1.
-    const contentIndent = getWorktreeCardContentIndent({ isGrouped: Boolean(g), groupDepth: 0, lineageDepth: 0 });
-    const geometry = { cardPaddingLeft: getFlushWorktreeCardPaddingLeft(contentIndent, true) };
+    // Orca's frame geometry: every row here is lineage depth 0 (no tree indent, no wrapper).
+    // `default-workspace-card.json:38`: statusLane = vars.newStyle && options.show.status.
+    // `experimentalNewWorktreeCardStyle` is false, so the lane is the LEGACY one and the
+    // 8px new-style pullback must not apply (it pulled titles 8px too far left).
+    // A folder workspace is a folder-group child (`folder-row.tsx:89`), so it uses the folder
+    // path at groupDepth 1 — otherwise `isGrouped: false` gave it indent 0 and its title sat
+    // 7px left of the repo cards'. Both paths land on the same 13px anchor.
+    const folder = !g;
+    const contentIndent = folder
+      ? getFolderWorkspaceCardContentIndent({ groupDepth: 1 })
+      : getWorktreeCardContentIndent({ isGrouped: Boolean(g), groupDepth: 0, lineageDepth: 0 });
+    const surfaceInset = folder
+      ? getFolderWorkspaceCardSurfaceInset({ isGrouped: true, groupDepth: 1 })
+      : getWorktreeCardSurfaceInset({ isGrouped: Boolean(g), groupDepth: 0 });
+    const geometry = { cardPaddingLeft: getFlushWorktreeCardPaddingLeft(Math.max(0, contentIndent - surfaceInset), false), surfaceInset };
     return stop(this, t, `space-${w.id}`, v_flex()
       .relative()
       .id(`space-${w.id}`)
-      .ml(WORKTREE_CARD_SURFACE_MARGIN).pr(6).py(8)
+      .ml(WORKTREE_CARD_SURFACE_MARGIN + geometry.surfaceInset).pr(6).py(8)
       .flex_none()
       .rounded(8)
       .role("button")

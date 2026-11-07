@@ -29,7 +29,27 @@ export function getWorktreeCardContentIndent({ isGrouped, groupDepth, lineageDep
     : lineageIndent;
 }
 
-// `applyNewCardStyleStatusLaneOffset`: the new card's lane is 8px wider than the legacy one,
+// `folder-row.tsx:89` uses these instead of the plain card path whenever the row is a
+// folder-backed workspace child (`groupBy === 'repo' && createdFrom === 'folder-scan'`).
+export function getFolderWorkspaceCardContentIndent({ groupDepth }) {
+  // Folder workspaces are direct children of their folder group, so they align to its label.
+  const parentGroupDepth = Math.max(0, clampDepth(groupDepth) - 1);
+  return getProjectGroupHeaderPaddingLeft(parentGroupDepth) + GROUPED_CARD_TITLE_HEADER_LABEL_OFFSET;
+}
+
+export function getFolderWorkspaceCardSurfaceInset({ isGrouped, groupDepth }) {
+  const contentAnchor = getFolderWorkspaceCardContentIndent({ groupDepth });
+  const maxSurfaceInset = contentAnchor - WORKTREE_CARD_SURFACE_MARGIN - FLUSH_CARD_MIN_CONTENT_INSET;
+  // Caps deep surfaces so flush-card margin plus minimum padding keep the anchor compact.
+  return Math.min(getWorktreeCardSurfaceInset({ isGrouped, groupDepth }), Math.max(0, maxSurfaceInset));
+}
+
+export function getWorktreeCardSurfaceInset({ isGrouped, groupDepth }) {
+  // Steps with group headers so each card edge keeps the same offset from its header icon.
+  return isGrouped ? getProjectGroupHeaderPaddingLeft(groupDepth) - PROJECT_GROUP_HEADER_BASE_PADDING : 0;
+}
+
+// `getFlushWorktreeCardPaddingLeft`: the new card's lane is 8px wider than the legacy one,
 // and the pullback keeps the title on the header's label.
 export function getFlushWorktreeCardPaddingLeft(contentIndent, applyNewCardStyleStatusLaneOffset = false) {
   const pullback = FLUSH_CARD_CONTENT_PULLBACK + (applyNewCardStyleStatusLaneOffset ? NEW_CARD_STYLE_STATUS_LANE_EXTRA_PULLBACK : 0);

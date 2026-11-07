@@ -2,3 +2,4 @@
 .superpowers/
 mods/*/gpui-kit.d.ts
 mods/*/jsconfig.json
+graphify-out/
