@@ -36,20 +36,38 @@ No `package.json`, no lockfile, no installed npm dependencies. That is intention
 
 `layouts/orca.json` is the root of the system and owns geometry: three columns, their sizes, dividers, background, theme name and the terminal padding. Each region's contents come from exactly one mod. Mods draw; the layout arranges. A mod that also tried to size itself would fight the layout, so sizes live in the layout and only padding/type inside mods.
 
-Ten mods, all `"place": "none"` (composed into blocks rather than floated):
+Sixteen mods, all `"place": "none"` (composed into blocks rather than floated):
 
 | Mod | Owns | LOC |
 |---|---|---|
-| `orca-chrome` | titlebar strip and the sidebar footer | 56 |
-| `orca-nav` | Search row, port notice, Projects header incl. collapse-all | 90 |
-| `orca-spaces` | the project tree: groups, worktrees, cards, status, reviews | 887 |
-| `orca-tabs` | the tab rail above the work area | 142 |
-| `orca-pane` | the terminal pane header, incl. its right-click | 83 |
-| `orca-panel-head` | the right panel's switcher | 46 |
-| `orca-files` | the file tree, preview and search | 334 |
-| `orca-changes` | the source-control list and diff | 208 |
-| `orca-status` | the bottom status bar | 56 |
-| `orca-menu` | every context menu: `pane`, `tab`, `space`, `global` | 167 |
+| `orca-chrome` | titlebar strip and the sidebar footer | 66 |
+| `orca-nav` | Search, Tasks/Automations/Orca Mobile rows, history arrows, Projects header | 208 |
+| `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, saved folders | 1141 |
+| `orca-tabs` | the tab rail, window controls, right-sidebar toggle | 311 |
+| `orca-pane` | the terminal pane header, incl. its right-click | 100 |
+| `orca-pane-status` | the agent mark drawn in a pane header | 35 |
+| `orca-panel-head` | the right panel's activity switcher | 115 |
+| `orca-panel-gap` | the honest body for a panel or page Herdr has no backend for | 61 |
+| `orca-files` | the file tree, preview, name/content search | 773 |
+| `orca-changes` | the source-control list and diff | 313 |
+| `orca-agents` | the agents panel | 110 |
+| `orca-status` | the bottom status bar | 68 |
+| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global` | 384 |
+| `new-menu` | the create popup behind `+` | 119 |
+| `orca-landing` | the empty-workspace page | 108 |
+| `orca-float` | the floating agent-session panel | 156 |
+
+Three rules shape the composition:
+
+- **A repo, not a session, is the sidebar unit.** One group per repo, anchored on its main
+  checkout; the rows under it are `git worktree list`, including worktrees no space has opened
+  (`mods/orca-spaces/worktree-plan.js`). Spaces only decide where you already are.
+- **A page, not a panel, is where the sidebar's Tasks/Automations/Orca Mobile rows go.** Each is
+  a child of the `main` stack in `layouts/orca.json`, selected with `layout.select`; choosing a
+  workspace or tab selects the terminals back.
+- **A gap is a surface, not an omission.** When Herdr lacks the backend (PR Checks, Ports,
+  Tasks, Automations, Orca Mobile, …), the control still renders where Orca puts it and its body
+  names what is missing in Orca's unavailable-state geometry (`docs/adr/0004-…`).
 
 Mods are isolated by rule: **a mod cannot import or read outside its own folder**. `svg()`/`image()` resolve against `~/.config/herdr-app`, so icons are copied per mod, and each ships its own `gpui-kit.d.ts` and `jsconfig.json`. The duplication is deliberate — it is what makes a mod folder independently installable.
 
@@ -91,10 +109,12 @@ preview.png         the screenshot in README
 
 No persistence layer of the package's own. Four data sources, read at different cadences:
 
+0. **Layout selection** — which child of a stack is shown (`main` = terminals or a page,
+   `panel-body` = the right panel's tab) is read from `layout()`, never cached.
 1. **Host model, live** — `spaces()`, `panes()`, `agents()`, `machines()` are read directly during render. `space.status` and `agent.status` are already rolled up by `Model::rollup`; the package never re-derives urgency.
 2. **git, polled** — `check()` runs `git status --porcelain=v2 --branch` per place, at most once per second per repo, plus `watchFolder` on the git dir. Local repos only for anything expensive.
 3. **GitHub, polled out of band** — reviews come from a cache keyed `<git-common-dir>::<branch>` in `localStorage` (`pr.cache.v2`). The reader (`reviewOf`) is pure; the writer (`lookupPRByBranch`) runs from the refresh cycle, never from render. A fork's same-named branch cannot answer because the head owner must match origin's.
-4. **localStorage, per mod copy** — `repos.folded`, `agents.folded`, `machines.folded`, `machines.reconnecting`, `pr.cache.v2`. Each is a JSON array or object, written after the in-memory `Set`/`Map` changes.
+4. **localStorage, per mod copy** — `git.cache.v2` (per-place branch/repo/worktree list; v1 is retired because it lacked worktrees for linked checkouts), `pr.cache.v2`, `repos.folded`, `agents.folded`, `machines.folded`, `machines.reconnecting`, `projects.saved.v1` (folders added to the sidebar), `tab.colors.v1` (`{tabId: hex}` written by orca-menu, read by orca-tabs). Each is a JSON array or object, written after the in-memory `Set`/`Map` changes.
 
 ## Cross-Cutting Concerns
 
@@ -116,8 +136,8 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 - **Overall coverage**: 0% by unit-test measure. There is no test runner, no `package.json` and no test files.
 - **Testing framework**: none. `scripts/verify.py` is an audit, not a suite.
 - **Rationale**: the defects this project actually shipped were four runtime throws, three invented values and three fabricated citations. None is visible to a unit test; the oracle for a value is `~/Projects/orca`, which is not a JS dependency. So the audit checks what would have caught them, and it did — it found three fabricated line citations in its first run.
-- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (67 citations); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
-- **Known untested areas**: pointer interaction (Wayland blocks injection — `xdotool` finds no windows, `/dev/uinput` is root-only), so hover, click and drag are code-verified only.
+- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (423 citations); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
+- **Known untested areas**: pointer interaction. Injection is not blocked — Hyprland 0.57 dropped the plain `hyprctl dispatch` form and `hyprctl eval` needs the Lua `hl.dsp.*` API, so hover, click and drag stay code-verified unless one of those is finished.
 
 ## Entry Points
 
@@ -130,6 +150,14 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 | `keys.json` | `ctrl-shift-b` toggles the sidebar, `ctrl-shift-e` the panel |
 | `AGENTS.md` | the rules; read before any edit |
 
+## Changed Files
+
+`.claude/pipeline/project-doc.md` is a DELTA patch over the 17:45 full scan: 46 commits,
+touching every mod under `mods/`, `layouts/orca.json`, `GLOSSARY.md`, `AGENTS.md`, and the four
+ADRs under `docs/adr/`. Sections re-read for this patch: Architecture Pattern (mod table,
+repo-anchored groups, pages, gaps), Folder Structure, Data Architecture (localStorage keys,
+layout selection), Test Coverage (citation count, pointer caveat).
+
 ## Last Scanned
 
-2026-11-07T17:45:00Z
+2026-11-07T22:55:00Z
