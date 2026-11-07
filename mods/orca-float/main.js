@@ -16,7 +16,7 @@
 // (window/floats.rs:187,198).
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, run, theme, nextCommand } from "herdr";
+import { agents, run, theme, nextCommand, keys } from "herdr";
 
 // Orca's DEFAULT_PANEL_WIDTH/HEIGHT, MIN_PANEL_WIDTH/HEIGHT and viewport clamp
 // (`floating-terminal-panel-bounds.ts:1-4,89-90`).
@@ -87,17 +87,28 @@ export default class FloatWorkspace extends View {
     const h = Math.min(DEFAULT_HEIGHT, Math.max(MIN_HEIGHT, vp.height - 96));
     const list = agents() ?? [];
     // `FloatingTerminalEmptyState.tsx:37-43`: `absolute inset-0 flex items-center
-    // justify-center`, inner `flex w-[360px] flex-col items-center gap-1.5`; the row
-    // `:44-59` is `h-8 gap-2.5 rounded-md px-3 text-sm`, glyph `size-3.5 opacity-90`,
-    // copy `truncate leading-none`. Its New Terminal / New Markdown / Open Markdown /
-    // New Browser / Minimize rows are dropped: a mod cannot create layout content
-    // (ADR 0003) and the header × is the one backend-backed hide. The float lists live
-    // agent sessions, so this row carries that empty copy.
+    // justify-center`, inner `flex w-[360px] flex-col items-center gap-1.5`, a stack of ghost
+    // rows (`h-8 gap-2.5 rounded-md px-3 text-sm`, glyph `size-3.5 opacity-90`, keycap
+    // `justify-self-end` in the button's `text-foreground`). New Terminal / New Markdown / Open
+    // Markdown / New Browser create float content, which a mod cannot instantiate (ADR 0003).
+    // Its fifth row, Minimize (`:120-129`, `onClose`), is the header ×'s hide, so it is kept.
+    // The first row is the empty message: Orca has no such row, but a list with nothing in it
+    // has to say so.
+    const chord = (keys() ?? []).find((k) => k.action === "orca-float.toggle")?.keys ?? "";
     const empty = v_flex().size_full().items_center().justify_center()
       .child(v_flex().w(360).items_center().gap(6)
         .child(h_flex().h(32).w_full().px(12).gap(10).rounded(6).items_center()
-          .child(div().flex_none().opacity(0.9).child(svg("mods/orca-float/terminal-square.svg").size(14).text_color(t.muted)))
-          .child(div().min_w(0).truncate().text_size(14).line_height("14px").text_color(t.muted).child("No live agent sessions"))));
+          .child(div().flex_none().opacity(0.9).text_color(t.foreground).child(svg("mods/orca-float/terminal-square.svg").size(14)))
+          .child(div().min_w(0).truncate().text_size(14).line_height("14px").text_color(t.foreground).child("No live agent sessions")))
+        // `ShortcutKeyCombo` (`:135-152`) draws the chord as keycaps; the chord text alone
+        // carries the same hint without a second chrome component.
+        .child(h_flex().id("orca-float-minimize").h(32).w_full().px(12).gap(10).rounded(6).items_center()
+          .cursor_pointer().hover((s) => s.bg(t.hover))
+          .role("button").accessibility_label("Minimize floating workspace")
+          .on_click((_e, cx) => { this.open = false; cx.notify(); })
+          .child(div().flex_none().opacity(0.9).text_color(t.foreground).child(svg("mods/orca-float/minus.svg").size(14)))
+          .child(div().flex_1().min_w(0).truncate().text_size(14).line_height("14px").text_color(t.foreground).child("Minimize"))
+          .when(Boolean(chord), (el) => el.child(div().flex_none().text_size(10).line_height("12px").opacity(0.9).text_color(t.foreground).child(chord)))));
     return v_flex().id("orca-float").w(w).h(h).min_h(0).overflow_hidden().text_color(t.foreground)
       // Orca's floating title bar (`FloatingTerminalPanelSurface.tsx:116-117`): `h-9`
       // (36px), `border-b border-border`, over the float frame's card colour. Of its
