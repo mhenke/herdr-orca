@@ -1,7 +1,7 @@
-// Workspace spaces: stable colored avatars, worktrees under their checkout,
-// grouped by machine when more than one is known. After a space's name, the repo
-// its first terminal is in now, only where unusual: branch, ahead/behind. Agent state lives in the agents list, not here. Click to
-// switch, right-click for its menu, drag to reorder.
+// Workspace spaces: worktrees under their checkout, grouped by machine when more than
+// one is known. Cards follow Orca's classic card: folder/repo header, a status lane, a
+// title and a meta row (branch, then the review badge at its end). Agent state lives in
+// the agents list, not here. Click to switch, right-click for its menu, drag to reorder.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -49,7 +49,7 @@ export default class Spaces extends View {
     cx.spawn(async (cx) => {
       for (;;) if (await nextCommand() === "focus") enter(this, cx, "space-new");
     });
-    this.git = {}; // where() -> { name, branch, ahead, behind, repo, linked }, null: not a repo
+    this.git = {}; // where() -> { name, branch, owner, repo, linked, pr }, null: not a repo
     this.checked = {}; // where() -> when it was last looked at
     this.unsure = new Set(); // where()s git couldn't answer for (a machine away)
     this.pending = new Set(); // where()s to look at next
@@ -119,7 +119,7 @@ export default class Spaces extends View {
     return due;
   }
 
-  // `key` and the other places in its repo (a commit there moves their ahead/behind).
+  // `key` and the other places in its repo (a commit there moves their branch).
   sameRepo(key, keys) {
     const repo = this.git[key]?.repo;
     return [key, ...(repo ? [...keys].filter((k) => this.git[k]?.repo === repo) : [])];
@@ -197,7 +197,7 @@ export default class Spaces extends View {
     });
   }
 
-  // One place's git: branch, ahead/behind, its repo.
+  // One place's git: branch, its repo, and the review on that branch.
   async check(key, cx) {
     const [on, cwd] = JSON.parse(key);
     this.checked[key] = Date.now();
@@ -246,14 +246,11 @@ export default class Spaces extends View {
           owner = avatarUrlFor(slug && slug.repo !== o.repo ? o : (slug ?? o));
         }
       } catch {}
-      const info = { name, top: topDir, branch: null, ahead: 0, behind: 0, owner, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
+      const info = { name, top: topDir, branch: null, owner, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
+      // Only the branch name is read. `# branch.ab` (ahead/behind) fed the removed gitTail,
+      // and Orca's card has no such element; the flag still prints the header we parse.
       for (const line of r.stdout.split("\n")) {
         if (line.startsWith("# branch.head ")) info.branch = line.slice(14);
-        else if (line.startsWith("# branch.ab ")) {
-          const [a, b] = line.slice(12).split(" ");
-          info.ahead = Math.abs(parseInt(a, 10)) || 0;
-          info.behind = Math.abs(parseInt(b, 10)) || 0;
-        }
       }
       this.git[key] = info;
       // Orca's right-aligned meta badge cluster (`WorktreeCardMetaBadges.tsx:86` `ml-auto ...
@@ -355,7 +352,7 @@ export default class Spaces extends View {
         if (opened.has(wt.path)) continue;
         opened.add(wt.path);
         const w = { id: `wt:${r.g.repo}:${wt.path}`, name: wt.branch || wt.path.split("/").pop(), named: false, tabs: [], active: false, status: null, machine: r.w.machine, folder: wt.path };
-        const g = { ...r.g, top: wt.path, branch: wt.branch || r.g.branch, ahead: 0, behind: 0, linked: true };
+        const g = { ...r.g, top: wt.path, branch: wt.branch || r.g.branch, linked: true };
         kids.push({ w, i: -1, g, key: `wt:${wt.path}`, also: [], unopened: true });
       }
       top.kids = kids.length;
@@ -497,24 +494,11 @@ export default class Spaces extends View {
         .child(svg(`mods/orca-spaces/${icon}.svg`).size(12).flex_none().text_color(tone)))));
   }
 
-  // Only what's unusual, after the name: "herdr \u00b7 spike \u21912 \u21931". The repo or
-  // branch goes when the name already says it (a worktree is named after its branch),
-  // and master/main go: nearly every space is on one.
-  // Only the counts that can't be seen elsewhere, after the title: ahead/behind. The branch
-  // and repo are the meta row and the header now, so repeating them here drew them twice.
-  gitTail(g, t, id) {
-    const n = (count, what) => `${count} commit${count === 1 ? "" : "s"} to ${what}`;
-    return h_flex()
-      .flex_1()
-      .min_w(0)
-      .gap(4)
-      .justify_end()
-      .items_center()
-      .text_size(11)
-      .text_color(t.dim)
-      .when(g.ahead > 0, (el) => el.child(tipMark(this, t, `ahead-${id}`, n(g.ahead, "push"), div().text_color(t.ansi2).child(`\u2191${g.ahead}`))))
-      .when(g.behind > 0, (el) => el.child(tipMark(this, t, `behind-${id}`, n(g.behind, "pull"), div().text_color(t.ansi1).child(`\u2193${g.behind}`))));
-  }
+  // `gitTail` used to draw `↑N`/`↓N` at the end of the title row. That was ours, not
+  // Orca's: `default-workspace-card.json` has no ahead/behind var (its 32 vars are
+  // classic/compact/folder/branch/conflict/details/ports/indicators and friends), and a
+  // search for `ahead` across `components/sidebar/` returns only unrelated prose. Orca's
+  // only right-side element on a classic card is the review badge in the meta row.
 
   // Orca's project header (SectionHeader.tsx): h-7, gap-1.5, pr-2, a 16px icon slot, a 13px
   // semibold label, and a 20px collapse button. The header owns the fold; its cards hide under it.
@@ -686,7 +670,9 @@ export default class Spaces extends View {
             .child(div().min_w(0).max_w(150).truncate().text_size(13).line_height("20px").text_color(t.foreground).child(title))
             .when(isPrimary, el => el.child(div().flex_none().h(16).px(6).rounded(4).border_1().border_color("#f0f0f033").bg("#f0f0f00f")
               .text_size(10).font_medium().line_height("14px").text_color("#f0f0f0b3").child("primary")))
-            .child(g ? this.gitTail(g, t, w.id) : div().flex_1()))
+            // No trailing element: Orca's title row ends at the title (and the primary pill);
+            // its right-hand cluster lives in the meta row below.
+            .child(div().flex_1()))
           // Meta row: the branch, or the folder's own last segment — 11px muted, mono for paths
           // (`WorktreeCardFolderPath`: `font-mono text-[11px] leading-none`). The review badge
           // sits at the row's end, which is Orca's `ml-auto ... pr-1.5` cluster
