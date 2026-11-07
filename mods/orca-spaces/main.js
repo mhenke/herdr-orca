@@ -649,28 +649,39 @@ export default class Spaces extends View {
       .role("button").accessibility_label(g?.name ?? w.name)
       .on_mouse_down("right", () => this.menu(w))
       .on_click((_e, cx) => this.toggleRepo(key, cx))
+      .on_hover((on, cx) => {
+        if (on) this.hoveredRepo = key;
+        else if (this.hoveredRepo === key) this.hoveredRepo = null;
+        cx.notify();
+      })
       // Orca's RepoIconGlyph: the repo's own image when it has one, else a lucide Folder
       // (repo-icon.tsx:145). Herdr has no per-repo icon, so the origin remote's GitHub owner
       // avatar is the image source; the first render kicks off a one-time fetch and writes it
       // under the app folder, and `image()` reads that cached file from then on.
       .child(repoMark(w, 16, t, ps, g?.owner ?? null))
       .child(div().min_w(0).flex_1().truncate().text_size(13).font_semibold().line_height("16px").text_color(t.foreground).child(g?.name ?? w.name))
-      // SectionHeader.tsx:355-414 — `ProjectHeaderActions` holds the collapse chevron first,
-      // then the group/repo menus, then `RepoHeaderCreateWorkspaceButton`. That button is
-      // `size-5` with a `Plus size-3` (repo-header-project-actions.tsx:239-241), so the chevron
-      // is NOT the rightmost thing on the row: there is a plus after it.
-      // `PROJECT_HEADER_ACTIONS_CLASS_NAME` makes the whole cluster hover-only
-      // (`opacity-0` until `group-hover`, :5-15). Herdr has no header-hover group, so both
-      // stay visible — the same named divergence as the collapse-all button.
-      .child(div().id(`space-new-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
-        .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
-        .on_click((_e, cx) => { cx.stop_propagation(); run("space.new", { folder: g?.top ?? w.folder }); })
-        .child(svg("mods/orca-spaces/plus.svg").size(12).flex_none()))
-      // SectionHeader.tsx:358: size-5 rounded-md text-muted-foreground, hover:bg-accent/70
-      // and hover:text-foreground — a 70% accent wash, not a 70% white one.
-      .child(div().id(`space-fold-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
-        .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
-        .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(14).flex_none())), 6,
+      // Orca's hover cluster (SectionHeader.tsx:355-414, ProjectHeaderActions.tsx:5-15): the
+      // collapse chevron sits first, then the group menus, then the create button — and the
+      // whole cluster is `opacity-0` until the header is hovered. Herdr has no `group-hover`
+      // rule, so the `on_hover` flag above drives a `.when`, in the same in-idiom way as
+      // `glow(id)` for tooltips: same hide-until-hover, done in script rather than the class
+      // list. `self.hoveredRepo` lives on the instance; at a few dozen headers it is not
+      // worth a registry.
+      .when(this.hoveredRepo === key, el => el
+        // The two slots side by side with Orca's `gap-0.5` (2px), not the row's 6px.
+        .child(h_flex().flex_none().items_center().gap(2)
+          // SectionHeader.tsx:355-414 — `RepoHeaderCreateWorkspaceButton` is `size-5` with a
+          // `Plus size-3` (repo-header-project-actions.tsx:239-241), so the chevron is NOT the
+          // rightmost thing on the row: there is a plus after it.
+          .child(div().id(`space-new-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
+            .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
+            .on_click((_e, cx) => { cx.stop_propagation(); run("space.new", { folder: g?.top ?? w.folder }); })
+            .child(svg("mods/orca-spaces/plus.svg").size(12).flex_none()))
+          // SectionHeader.tsx:358: size-5 rounded-md text-muted-foreground,
+          // hover:bg-accent/70 and hover:text-foreground — a 70% accent wash, not a 70% white one.
+          .child(div().id(`space-fold-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
+            .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
+            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(14).flex_none())))), 6,
       { enter: () => this.toggleRepo(key) });
   }
 
