@@ -59,8 +59,8 @@ export default class WorkspaceChrome extends View {
     return h_flex().size_full().bg(t.chrome).pl(leftPad).pr(10).gap(4).items_center().border_b(1).border_color(t.border).text_size(13.5)
       .when(!collapsed && !mac, el => el.child(h_flex().gap(0).items_center()
         .child(image("frame/welcome/herdr.png").size(16).opacity(0.75))
-        .child(this.button("menu", svg("mods/orca-chrome/menu.svg").size(14), () => run("mod.open", { name: "picker" })))))
+        .child(this.button("menu", svg("mods/orca-chrome/menu.svg").size(14), () => run("mod.open", { name: "picker" })).tooltip("Menu")))
       // On the macOS rail the traffic lights fill the row; the agents list's » unfolds it.
-      .when(!(collapsed && mac), el => el.child(this.button("sidebar-toggle", svg("mods/orca-chrome/panel-left.svg").size(16), toggleSidebar, 32, 24)));
+      .when(!(collapsed && mac), el => el.child(this.button("sidebar-toggle", svg("mods/orca-chrome/panel-left.svg").size(16), toggleSidebar, 32, 24)).tooltip("Sidebar toggle")));
   }
 }

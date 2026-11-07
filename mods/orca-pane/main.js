@@ -94,7 +94,7 @@ export default class Pane extends View {
           // both also require `isActivePane`, which the layout supplies by mounting one header
           // per pane in a focused tab. Herdr has no chat-view leaf and no session handoff
           // command (`herdr-app commands`), so only the split and close rows have a backend.
-          .child(this.button(`ph-r-${pane}`, "square-split-vertical", "pane.split", { direction: "right", pane }))
-          .child(this.button(`ph-x-${pane}`, "x", "pane.close", { pane }))))
+          .child(this.button(`ph-r-${pane}`, "square-split-vertical", "pane.split", { direction: "right", pane }).accessibility_label("Split terminal").tooltip("Split terminal"))
+          .child(this.button(`ph-x-${pane}`, "x", "pane.close", { pane }).accessibility_label("Close pane").tooltip("Close pane"))))
   }
 }

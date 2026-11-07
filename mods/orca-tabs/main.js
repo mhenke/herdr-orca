@@ -129,19 +129,19 @@ export default class Tabs extends View {
     // `rounded-md` resolves to 8px, not 6: --radius .625rem x .8 (main.css:175,195).
     const tabNew = (action) => div().id("tab-new").ml(8).size(28).flex_none().flex().items_center().justify_center().rounded(8)
       .text_color(t.muted).hover(s => s.bg("#40404080").text_color(t.foreground))
-    .role("button").accessibility_label("New tab").tooltip("New tab")
+      .role("button").accessibility_label("New tab").tooltip("New tab")
       .on_mouse_down("left", stop).on_click(action)
       .child(svg("mods/orca-tabs/plus.svg").size(14).flex_none());
     const winBtn = (id, label, glyph, action, close) => div().id(id).w(46).h_full().flex_none().flex().items_center().justify_center()
       .text_color(t.muted).hover(s => s.bg(close ? "#c42b1c" : t.hover).text_color(close ? "#ffffff" : t.foreground))
-      .role("button").accessibility_label(label)
+      .role("button").accessibility_label(label).tooltip(label)
       .on_mouse_down("left", stop).on_click(action).child(glyph);
     // TitlebarMainStrip.tsx:12-33,76 — `RightSidebarToggle`: `.sidebar-toggle mr-2`
     // (main.css:1213-1230 = 4px/8px padding around the 16px `PanelRight`, so 32x24, radius 4,
     // muted, hover --accent + foreground). Herdr toggles it with `layout.toggle` (commands.rs:77).
     const panelToggle = (action) => div().id("panel-toggle").mr(8).w(32).h(24).flex_none().flex().items_center().justify_center().rounded(4)
       .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
-    .role("button").accessibility_label("Toggle right sidebar").tooltip("Toggle right sidebar")
+      .role("button").accessibility_label("Toggle right sidebar").tooltip("Toggle right sidebar")
       .on_mouse_down("left", stop).on_click(action)
       .child(svg("mods/orca-tabs/panel-right.svg").size(16));
     const item = (c, i) => {
@@ -214,7 +214,7 @@ export default class Tabs extends View {
         .when(c.zoomed, el => el.child(div().id(`collapse-${c.id}`).size(16).flex_none().flex().items_center().justify_center().rounded(2)
           .text_color(c.active || this.hoveredTab === c.id ? t.muted : "#00000000")
           .hover(s => s.text_color(t.foreground).bg(t.raised))
-          .role("button").accessibility_label("Collapse pane")
+          .role("button").accessibility_label("Collapse pane").tooltip("Collapse pane")
           .on_mouse_down("left", stop)
           .on_click((_e, cx) => {
             cx.stop_propagation();
@@ -230,7 +230,7 @@ export default class Tabs extends View {
         .when(!c.settled, el => el.child(div().id(`close-${c.id}`).size(16).flex_none().flex().items_center().justify_center().rounded(2)
           .text_color(c.active || this.hoveredTab === c.id ? t.muted : "#00000000")
           .hover(s => s.text_color(t.foreground).bg(t.raised))
-          .on_mouse_down("left", stop)
+          .on_mouse_down("left", stop).accessibility_label("Close").tooltip("Close")
           .on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); })
           .child(svg("mods/orca-tabs/close.svg").size(12))));
     };
@@ -287,7 +287,7 @@ export default class Tabs extends View {
       // 4px padding around a 14px glyph with `mr-2`, radius 4 (main.css:1288-1313).
       .when(shown.length === 1 && shown[0].zoomed, el => el.child(div().id("titlebar-collapse").mr(8).size(22).flex_none().flex().items_center().justify_center().rounded(4)
         .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
-        .role("button").accessibility_label("Collapse pane")
+        .role("button").accessibility_label("Collapse pane").tooltip("Collapse pane")
         .on_mouse_down("left", stop)
         .on_click(() => {
           const z = (panes() ?? []).find(p => p.tab === shown[0].id && p.zoomed);
