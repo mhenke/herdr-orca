@@ -5,8 +5,8 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
-import { projectMark, tint } from "./project.js";
+import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
+import { projectMark, repoMark, tint } from "./project.js";
 import { tip, tipMark } from "./tip.js";
 import { stopsInit, stop, focusRoot, enter } from "./focus.js";
 
@@ -49,6 +49,7 @@ export default class Spaces extends View {
     for (const state of Object.values(this.reconnecting)) state.busy = false;
     this.folded = new Set(JSON.parse(localStorage.getItem("machines.folded") ?? "[]"));
     this.foldedRepos = new Set(JSON.parse(localStorage.getItem("repos.folded") ?? "[]"));
+    this.foldedAgents = new Set(JSON.parse(localStorage.getItem("agents.folded") ?? "[]"));
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     // `git status` walks the whole tree, on another machine a process there:
@@ -285,6 +286,13 @@ export default class Spaces extends View {
     return out.filter(r => this.shown.has(r.w.id));
   }
 
+  // Orca keeps each card's agent list open or folded on its own, remembered across runs.
+  toggleAgents(id, cx) {
+    this.foldedAgents.has(id) ? this.foldedAgents.delete(id) : this.foldedAgents.add(id);
+    localStorage.setItem("agents.folded", JSON.stringify([...this.foldedAgents]));
+    cx.notify();
+  }
+
   toggleRepo(repo, cx) {
     this.foldedRepos.has(repo) ? this.foldedRepos.delete(repo) : this.foldedRepos.add(repo);
     localStorage.setItem("repos.folded", JSON.stringify([...this.foldedRepos]));
@@ -407,7 +415,9 @@ export default class Spaces extends View {
       .role("button").accessibility_label(g?.name ?? w.name)
       .on_mouse_down("right", () => this.menu(w))
       .on_click((_e, cx) => this.toggleRepo(key, cx))
-      .child(projectMark(w, 16, t, ps))
+      // Orca's RepoIconGlyph: a lucide icon (Folder by default) in a 16px rounded square,
+      // not a letter monogram. A project's own favicon still wins when it has one.
+      .child(repoMark(w, 16, t, ps))
       .child(div().min_w(0).flex_1().truncate().text_size(13).font_semibold().line_height("16px").text_color(t.foreground).child(g?.name ?? w.name))
       // As Orca's: aria-hidden, the whole header folds, so it lights with the header and has no label.
       .child(div().id(`space-fold-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
@@ -421,18 +431,56 @@ export default class Spaces extends View {
   card({ w, i, g, tree }, t, ps) {
     const fromIndex = this.pressed === null ? -1 : spaces().findIndex(s => s.id === this.pressed);
     const on = w.active;
-    // Orca titles a card by its worktree and puts the branch under it, as its meta row
-    // (`default-workspace-card.json` -> IdentityBlock -> Branch, 11px muted).
-    const title = w.name;
-    // Panes in this worktree, for the agent lines.
-    const tabs = new Set((w.tabs ?? []).map(c => c.id));
-    const mine = (ps ?? []).filter(p => tabs.has(p.tab));
-    // Orca's StatusIndicator states, from Herdr's most urgent status (blocked > done > working > idle).
-    // A space with no reporting agent draws the quiet dot, never a fake active one.
-    const status = w.status ?? null;
-    const dot = status === "blocked" ? "#ef4444" : status === "working" ? t.ansi2 : status === "done" ? t.ansi2 : "#f0f0f04d";
-    // The meta row is the branch, as Orca's `vars.branch` (card template), 11px muted.
-    const meta = g?.branch ?? w.branch ?? null;
+    // Orca titles a card by its worktree's branch when the header above already says the
+    // repo/folder (`herdr-file-viewer` -> `main`), else the space's own name. The branch
+    // follows as the meta row only when it adds to the title (default-workspace-card.json
+    // -> IdentityBlock -> Branch, 11px muted).
+    const branch = g?.branch ?? w.branch ?? null;
+    // Orca's worktree title is the branch for an unnamed worktree; a name the user gave wins.
+    const title = !w.named && branch ? branch : w.name;
+    const meta = branch && branch !== title ? branch : null;
+    // Orca's card lists its own agents (inlineAgents) with a 6px status dot each, from
+    // agents(): the same rows the agents view reads, so a collapsed card shows the count
+    // of real rows and never invents one.
+    const tabIds = new Set((w.tabs ?? []).map(c => c.id));
+    const mine = agents().filter(a => tabIds.has(a.tab));
+    // Orca's StatusIndicator: the most urgent state (blocked > working > done), from the
+    // agents' own status rather than a rollup that also counts plain terminals.
+    const rank = { blocked: 3, failed: 3, permission: 3, working: 2, monitoring: 2, done: 1 };
+    const top = mine.reduce((best, a) => ((rank[a.status] ?? 0) > (rank[best] ?? 0) ? a.status : best), null);
+    // Orca's StatusIndicator.tsx: red-500 for a failure, the emerald status dot for a
+    // finished or idle terminal, neutral/40 for a quiet one. No invented working spinner.
+    const rowDot = (st) => st === "failed" || st === "blocked" ? "#ef4444"
+      : st === "done" || st === "active" || st === "working" || st === "monitoring" ? "#10b981"
+      : st === "permission" || st === "unconfirmed" ? "#eab308"
+      : "#73737366";
+    const dot = rowDot(top);
+    // `primary` marks the repo's top branch only: a folder workspace has no branch, and a
+    // linked worktree is secondary to its checkout.
+    // shortcut: main/master by name; a repo whose default branch is named otherwise shows
+    // none. Upgrade to `git symbolic-ref refs/remotes/origin/HEAD` if that ever matters.
+    const isPrimary = Boolean(g && !g.linked && (branch === "main" || branch === "master"));
+    const folded = this.foldedAgents.has(w.id);
+    const toggleId = `space-agents-${w.id}`;
+    // An agent row shows the agent, not the folder it shares with the space.
+    const agentTitle = (a) => {
+      const label = a.title || a.app || a.program?.agent || "agent";
+      return label === w.name || label === `π: ${w.name}` ? (a.app || a.program?.agent || "agent") : label;
+    };
+    const agentRow = (a) => h_flex().min_w(0).h(16).px(4).gap(4).items_center()
+      .text_size(11).line_height("11px").text_color(t.dim)
+      .child(div().size(8).rounded_full().flex_none().bg(rowDot(a.status)))
+      .child(div().min_w(0).flex_1().truncate().child(agentTitle(a)));
+    const agentBlock = v_flex().min_w(0).gap(0)
+      .child(h_flex().id(toggleId).h(24).w_full().min_w(0).px(4).gap(4).items_center().rounded(2)
+        .text_size(11).line_height("11px").text_color(t.dim).cursor_pointer()
+        .role("button")
+        .accessibility_label(folded ? `Expand ${mine.length} agents` : `Collapse ${mine.length} agents`)
+        .hover(s => s.text_color(t.foreground))
+        .on_click((_e, cx) => { cx.stop_propagation(); this.toggleAgents(w.id, cx); })
+        .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(10).flex_none())
+        .child(div().min_w(0).truncate().child(`${mine.length} agent${mine.length === 1 ? "" : "s"}`)))
+      .when(!folded, el => el.child(v_flex().min_w(0).gap(2).pt(2).children(mine.map(agentRow))));
     return stop(this, t, `space-${w.id}`, v_flex()
       .relative()
       .id(`space-${w.id}`)
@@ -478,32 +526,36 @@ export default class Spaces extends View {
       // Card root: Row gap xs (2), status lane then a Stack gap md (6) — Orca's default template.
       .child(h_flex().w_full().min_w(0).pl(2 + (tree ? 18 : 0)).gap(2).items_center()
         .child(div().w(20).mr(4).flex_none().flex().items_center().justify_center()
-          .child(div().size(6).rounded_full().flex_none().bg(dot)))
+          .child(div().size(8).rounded_full().flex_none().bg(dot)))
         .child(v_flex().flex_1().min_w(0).gap(6)
-          // Title row: title, then the primary pill (h-16, px-1.5, 10px).
+          // Title row: title, then Orca's primary pill (h-16, px-1.5, 10px). `ws.isMain` only
+          // marks a repo's own checkout: a plain folder workspace is no one's primary branch,
+          // and a linked worktree is secondary to its checkout.
           .child(h_flex().w_full().min_w(0).gap(6).items_center()
             .child(div().min_w(0).max_w(150).truncate().text_size(13).line_height("20px").text_color(t.foreground).child(title))
-            .when(g && !g.linked, el => el.child(div().flex_none().h(16).px(6).rounded(4).border_1().border_color("#f0f0f033").bg("#f0f0f00f")
+            .when(isPrimary, el => el.child(div().flex_none().h(16).px(6).rounded(4).border_1().border_color("#f0f0f033").bg("#f0f0f00f")
               .text_size(10).font_medium().line_height("14px").text_color("#f0f0f0b3").child("primary")))
             .child(g ? this.gitTail(g, t, w.id) : div().flex_1()))
           // Meta row: the branch, 11px muted, as Orca's Branch part.
           .when(Boolean(meta), el => el.child(div().min_w(0).truncate().text_size(11).line_height("11px").text_color(t.dim).child(meta)))
-          // Agent rows sit inside the card and light when it is active, as Orca's inlineAgents.
-          .when(mine.length > 0 && mine.some(p => p.program?.agent), el => el.child(h_flex().gap(6).items_center()
-            .text_size(11).line_height("14px").text_color(t.dim)
-            .child(div().min_w(0).truncate().child(`${mine.filter(p => p.program?.agent).length} agent${mine.filter(p => p.program?.agent).length === 1 ? "" : "s"}`))))),
+          // Orca's compact agent summary (worktree-card-compact-agents.tsx): h-6, px-1,
+          // 11px muted, a chevron that folds the rows, which carry a 6px status dot each.
+          .when(mine.length > 0, el => el.child(agentBlock))),
       ),
       // A space goes by its mouse-up, which a key isn't.
       8, { enter: () => run("space.select", { id: w.id }) });
   }
 
-  // Every top-level space is a project: a header, then its cards. A linked worktree hangs
-  // under the card its main checkout leads, so it draws no second header.
+  // A repo is a project group: a SectionHeader, then its worktree cards. A bare folder
+  // workspace has no repo to head it, so it is one top-level card (Orca's folder row) —
+  // heading it would print its folder name twice. A linked worktree hangs under the card
+  // its main checkout leads, so it draws no second header.
   row(r, t, ps) {
     if (r.g?.linked) return [this.card(r, t, ps)];
+    if (!r.g) return [this.card(r, t, ps)];
     // Orca folds a whole repo (SectionHeader's toggle hides every row of the group),
     // so the header hides its own card too and the chevron is never a dead control.
-    const folded = this.foldedRepos.has(r.g?.repo ?? `space:${r.w.id}`);
+    const folded = this.foldedRepos.has(r.g.repo);
     return [this.header(r, t, ps), ...(folded ? [] : [this.card(r, t, ps)])];
   }
 

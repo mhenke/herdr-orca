@@ -54,6 +54,16 @@ export function projectMark(s, size, t, ps) {
     .child(text);
 }
 
+// Orca's RepoIconGlyph: the repo's own icon when set, else the default Folder glyph on a
+// 16px rounded-[4px] tile. A found favicon still wins. Colors come from the repo badge,
+// which Orca defaults to neutral (#737373) until the user picks one.
+export function repoMark(s, size, t, ps) {
+  const icon = s && projectIcon(s, ps);
+  if (icon) return image(icon).size(size).flex_none().rounded(size / 4);
+  return h_flex().size(size).flex_none().rounded(size / 4).items_center().justify_center()
+    .child(svg("mods/workspace-chrome/folder.svg").size(size * 0.875).text_color("#f0f0f080"));
+}
+
 // T3's well-known places (ProjectFaviconResolver), less the .icns ones an image here can't be.
 const PLACES = ["favicon.svg", "favicon.ico", "favicon.png", "public/favicon.svg", "public/favicon.ico", "public/favicon.png",
   "app/favicon.ico", "app/favicon.png", "app/icon.svg", "app/icon.png", "app/icon.ico", "src/favicon.ico", "src/favicon.svg",
