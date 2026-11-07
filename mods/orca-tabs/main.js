@@ -1,6 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, exec, run, openOverlay, theme, window, shared, layout, settings, setShared } from "herdr";
+import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, setShared } from "herdr";
 
 // `src/shared/agent-status/title/agent-title-decoration.ts`: the tab already shows the
 // provider icon, so a known agent's own leading status glyph is dropped. Glyph-only titles
@@ -21,22 +21,7 @@ function find(node, id) {
   return null;
 }
 
-// Files always; Changes only in a git repo (Orca: gitOnly). The probe runs inside `cx.spawn`
-// so it uses the continuation's `cx`, never render's — a `cx` is valid only for the call that
-// made it, and `cx.notify()` after an `await` on render's `cx` throws.
-let gitCache = { cwd: null, at: 0, ok: false };
-function gitRepo(cwd, cx) {
-  if (!cwd) return false;
-  if (gitCache.cwd === cwd && Date.now() - gitCache.at < 5000) return gitCache.ok;
-  const cached = gitCache.ok;
-  gitCache = { cwd, at: Date.now(), ok: cached };
-  cx.spawn(async (cx) => {
-    const r = await exec("git", ["rev-parse", "--show-toplevel"], { cwd }).catch(() => null);
-    gitCache = { cwd, at: Date.now(), ok: r?.code === 0 };
-    cx.notify();
-  });
-  return cached;
-}
+
 
 export default class Tabs extends View {
   init(_props, cx) {

@@ -1,6 +1,6 @@
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { theme, run, layout, panes, spaces, exec } from "herdr";
+import { theme, run, layout, panes, spaces, focused, exec } from "herdr";
 
 const find = (n, id) => {
   if (!n) return null;
@@ -9,7 +9,23 @@ const find = (n, id) => {
   return null;
 };
 
-let gitCache = { cwd: null, at: 0, ok: false };
+// Reads write nothing under .git (no index refresh or lock, no fsmonitor cookie):
+// the folder watch would see it, and every refresh would start the next one.
+const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false"];
+
+// Orca scopes the panel to the project, not to whatever folder the focused
+// terminal happens to sit in: a terminal in /tmp must not empty the tree.
+function location() {
+  const space = (spaces() ?? []).find(s => s.active), f = focused();
+  const pane = f?.pane ? (panes() ?? []).find(p => p.pane === f.pane) : null;
+  const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
+  const live = pane?.cwd || f?.cwd;
+  const project = space?.folder || live;
+  const cwd = live && project && !(live.startsWith(project + "/") || live === project) ? project : live || project;
+  return { cwd, on, space: space?.id };
+}
+
+let gitCache = { cwd: null, on: null, at: 0, ok: false, resolved: false, pending: false };
 
 // `use-right-sidebar-activity-items.ts:74-128`, in order. `gating` is Orca's own flag:
 //   gitOnly hides the item for a folder repo; folderOnly shows it only for a folder
@@ -32,23 +48,35 @@ export default class PanelHead extends View {
     const active = stack?.active ?? "files";
     // The probe runs inside `cx.spawn`: a `cx` is valid only for the call that made it, so
     // `cx.notify()` after an `await` on render's `cx` throws and Herdr draws its render banner.
-    const cwd = (panes() ?? []).find(p => p.focused)?.cwd;
+    const { cwd, on } = location();
     if (!cwd) {
-      gitCache = { cwd: null, at: 0, ok: false };
-    } else if (cwd !== gitCache.cwd || Date.now() - gitCache.at > 5000) {
-      gitCache = { cwd, at: Date.now(), ok: gitCache.ok };
-      cx.spawn(async (cx) => {
-        const r = await exec("git", ["rev-parse", "--show-toplevel"], { cwd }).catch(() => null);
-        gitCache = { cwd, at: Date.now(), ok: r?.code === 0 };
-        cx.notify();
-      });
+      gitCache = { cwd: null, on: null, at: 0, ok: false, resolved: true, pending: false };
+    } else {
+      const isSameTarget = gitCache.cwd === cwd && gitCache.on === on;
+      const isExpired = Date.now() - gitCache.at > 5000;
+      if (!isSameTarget || (isExpired && !gitCache.pending)) {
+        const prevOk = isSameTarget ? gitCache.ok : false;
+        const prevResolved = isSameTarget ? gitCache.resolved : false;
+        gitCache = { cwd, on, at: Date.now(), ok: prevOk, resolved: prevResolved, pending: true };
+        cx.spawn(async (cx) => {
+          const r = await exec("git", [...READ, "rev-parse", "--show-toplevel"], { cwd, on }).catch(() => null);
+          if (gitCache.cwd === cwd && gitCache.on === on) {
+            gitCache.pending = false;
+            const ok = r?.code === 0;
+            const changed = !gitCache.resolved || gitCache.ok !== ok;
+            gitCache.ok = ok;
+            gitCache.resolved = true;
+            if (changed) cx.notify();
+          }
+        });
+      }
     }
     // Gating (`right-sidebar/right-sidebar-activity-visibility.ts:14-20`): gitOnly is hidden
     // when the project is a folder (no repo); folderOnly only appears in a folder workspace;
     // sshOnly only on an SSH host. Herdr has no separate folder-workspace record, so a non-git
     // folder is that case; a workspace on a machine (`space.machine`) is the SSH case.
-    const isFolder = !gitCache.ok;
-    const onSshHost = Boolean((spaces() ?? []).find(s => s.active)?.machine);
+    const isFolder = gitCache.resolved ? !gitCache.ok : false;
+    const onSshHost = Boolean(on || (spaces() ?? []).find(s => s.active)?.machine);
     const tools = ITEMS.filter(({ gating }) =>
       gating === "gitOnly" ? !isFolder
         : gating === "folderOnly" ? isFolder

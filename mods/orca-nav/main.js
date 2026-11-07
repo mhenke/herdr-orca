@@ -71,7 +71,18 @@ export default class Nav extends View {
           // AddProjectButton (:27-31) — FolderPlus `size-3.5` at the explicit `strokeWidth={2.25}`.
           .child(div().id("proj-add-repo").size(24).flex().items_center().justify_center().rounded(6).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
             .role("button").accessibility_label("Add project")
-            .on_click(() => run("space.new"))
+            .on_click(() => {
+              const folder = pickFolder();
+              if (!folder) return;
+              // Append to persisted project list
+              const existing = JSON.parse(localStorage.getItem("projects.saved.v1") || "[]");
+              // Avoid duplicates
+              if (!existing.includes(folder)) {
+                existing.push(folder);
+                localStorage.setItem("projects.saved.v1", JSON.stringify(existing));
+              }
+              run("space.new", { folder });
+            })
             .child(svg("mods/orca-nav/folder-plus.svg").size(14)))
           // NewWorkspaceButton (:60-64) — Plus `size-3.5`, same 2.25 stroke. Orca's header
           // actions are `size="icon-xs"` buttons, which are 24x24, so this is not wider than

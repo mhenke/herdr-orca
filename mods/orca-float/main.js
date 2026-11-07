@@ -25,14 +25,23 @@ const DEFAULT_HEIGHT = 560;
 const MIN_WIDTH = 420;
 const MIN_HEIGHT = 280;
 
-// `AgentStateDot` (`src/renderer/src/components/AgentStateDot.tsx:186-193`): working/blocked coloured,
-// idle dim. Orca hides `done` on these rows, so only these three reach here.
+// `AgentStateDot` at its default `sm` size (`src/renderer/src/components/AgentStateDot.tsx:105-197`):
+// a 10px box (`h-2.5 w-2.5`), 10px glyphs (`size-2.5`), and a 6px inner dot (`size-1.5`).
+// Statuses map to Herdr's 4-state rollup: working (AgentWorkingSpinner turning 1000ms in t.working),
+// blocked (AgentQuestionIcon message-circle-question in t.blocked), done (CircleCheck in
+// t.done), and idle (6px dot in t.idle + "66").
 function stateDot(status, t) {
   const box = div().size(10).flex_none().flex().items_center().justify_center();
-  const dot = div().size(6).rounded_full().flex_none();
-  if (status === "blocked") return box.child(dot.bg(t.blocked));
-  if (status === "working") return box.child(dot.bg(t.working));
-  return box.child(dot.bg(t.idle + "66"));
+  if (status === "working") {
+    return box.child(svg("mods/orca-float/agent-working-spinner.svg").size(10).flex_none().text_color(t.working).spin(1000));
+  }
+  if (status === "blocked") {
+    return box.child(svg("mods/orca-float/message-circle-question.svg").size(10).flex_none().text_color(t.blocked));
+  }
+  if (status === "done") {
+    return box.child(svg("mods/orca-float/circle-check.svg").size(10).flex_none().text_color(t.done));
+  }
+  return box.child(div().size(6).rounded_full().flex_none().bg(t.idle + "66"));
 }
 
 // Orca's row title falls back through title -> app -> program name
@@ -85,16 +94,14 @@ export default class FloatWorkspace extends View {
     const vp = window.viewport_size();
     const w = Math.min(DEFAULT_WIDTH, Math.max(MIN_WIDTH, vp.width - 48));
     const h = Math.min(DEFAULT_HEIGHT, Math.max(MIN_HEIGHT, vp.height - 96));
-    const list = agents() ?? [];
-    // `FloatingTerminalEmptyState.tsx:37-43`: `absolute inset-0 flex items-center
-    // justify-center`, inner `flex w-[360px] flex-col items-center gap-1.5`, a stack of ghost
-    // rows (`h-8 gap-2.5 rounded-md px-3 text-sm`, glyph `size-3.5 opacity-90`, keycap
-    // `justify-self-end` in the button's `text-foreground`). New Terminal / New Markdown / Open
-    // Markdown / New Browser create float content, which a mod cannot instantiate (ADR 0003).
+    // Orca's first empty-state row, New Terminal (`FloatingTerminalEmptyState.tsx:44-59`),
+    // creates float content, which a mod cannot instantiate. The closest working action is
+    // `tab.new` (commands.rs:37-39), so the row opens a terminal tab in the workspace instead.
+    // New Markdown / New Browser are not offered: Herdr has neither content type.
+    const chord = (keys() ?? []).find((k) => k.action === "tab.new")?.keys ?? "";
     // Its fifth row, Minimize (`:120-129`, `onClose`), is the header ×'s hide, so it is kept.
     // The first row is the empty message: Orca has no such row, but a list with nothing in it
     // has to say so.
-    const chord = (keys() ?? []).find((k) => k.action === "orca-float.toggle")?.keys ?? "";
     const empty = v_flex().size_full().items_center().justify_center()
       .child(v_flex().w(360).items_center().gap(6)
         .child(h_flex().h(32).w_full().px(12).gap(10).rounded(6).items_center()

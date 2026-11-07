@@ -21,17 +21,22 @@ function icon(p, size, color) {
 // boolean, never a name (orca-spaces/main.js:759-763).
 const title = (a) => a.title?.trim() || a.app || a.program?.name || "Agent";
 
-// `AgentStateDot` at its default `sm` size (`src/renderer/src/components/AgentStateDot.tsx:117-118`): a 6px box
-// (`h-2.5 w-2.5`), a 6px dot (`size-1.5`), a 10px spinner (`size-2.5`). Orca hides `done`
-// on these rows, so only working/blocked/idle reach here (`AiVaultSessionRow.tsx:63-64`).
-// Colours (`src/renderer/src/components/AgentStateDot.tsx:186-193`): blocked/failed red-500, idle neutral-500/40;
-// working turns the 8px-border-2 arc (`AgentWorkingSpinner.tsx:38-41`), one turn per second.
+// `AgentStateDot` at its default `sm` size (`src/renderer/src/components/AgentStateDot.tsx:105-197`):
+// a 10px box (`h-2.5 w-2.5`), a 6px inner dot (`size-1.5`), a 10px glyph (`size-2.5`). Statuses map
+// to Herdr's 4-state rollup: working (AgentWorkingSpinner turning 1000ms in t.working),
+// blocked (AgentQuestionIcon message-circle-question in t.blocked), done (CircleCheck in
+// t.done), and idle (6px dot in t.idle + "66").
 function stateDot(status, t) {
   const box = div().size(10).flex_none().flex().items_center().justify_center();
   if (status === "working") {
     return box.child(svg("mods/orca-agents/agent-working-spinner.svg").size(10).flex_none().text_color(t.working).spin(1000));
   }
-  if (status === "blocked") return box.child(div().size(6).rounded_full().flex_none().bg(t.blocked));
+  if (status === "blocked") {
+    return box.child(svg("mods/orca-agents/message-circle-question.svg").size(10).flex_none().text_color(t.blocked));
+  }
+  if (status === "done") {
+    return box.child(svg("mods/orca-agents/circle-check.svg").size(10).flex_none().text_color(t.done));
+  }
   return box.child(div().size(6).rounded_full().flex_none().bg(t.idle + "66"));
 }
 
@@ -66,7 +71,7 @@ export default class AgentsPanel extends View {
         // `size-4` slot at `size={14}`, then the state dot and the agent label.
         .child(h_flex().mt(4).gap(6).items_center().text_size(11).line_height("16px").text_color(t.muted)
           .child(h_flex().size(16).flex_none().items_center().justify_center().child(icon(a.program, 14, t.muted)))
-          .when(a.status !== "done", (el) => el.child(stateDot(a.status, t)))
+          .child(stateDot(a.status, t))
           .child(div().min_w(0).truncate().child(a.app || a.program?.name || "agent"))
           // Herdr's real metadata where Orca shows message count, subagent count, time and
           // model: the space and tab the live agent belongs to.
