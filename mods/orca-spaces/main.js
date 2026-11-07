@@ -655,6 +655,17 @@ export default class Spaces extends View {
       // under the app folder, and `image()` reads that cached file from then on.
       .child(repoMark(w, 16, t, ps, g?.owner ?? null))
       .child(div().min_w(0).flex_1().truncate().text_size(13).font_semibold().line_height("16px").text_color(t.foreground).child(g?.name ?? w.name))
+      // SectionHeader.tsx:355-414 — `ProjectHeaderActions` holds the collapse chevron first,
+      // then the group/repo menus, then `RepoHeaderCreateWorkspaceButton`. That button is
+      // `size-5` with a `Plus size-3` (repo-header-project-actions.tsx:239-241), so the chevron
+      // is NOT the rightmost thing on the row: there is a plus after it.
+      // `PROJECT_HEADER_ACTIONS_CLASS_NAME` makes the whole cluster hover-only
+      // (`opacity-0` until `group-hover`, :5-15). Herdr has no header-hover group, so both
+      // stay visible — the same named divergence as the collapse-all button.
+      .child(div().id(`space-new-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
+        .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
+        .on_click((_e, cx) => { cx.stop_propagation(); run("space.new", { folder: g?.top ?? w.folder }); })
+        .child(svg("mods/orca-spaces/plus.svg").size(12).flex_none()))
       // SectionHeader.tsx:358: size-5 rounded-md text-muted-foreground, hover:bg-accent/70
       // and hover:text-foreground — a 70% accent wash, not a 70% white one.
       .child(div().id(`space-fold-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)

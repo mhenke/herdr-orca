@@ -46,8 +46,11 @@ export default class Nav extends View {
         .child(div().text_size(11).line_height("15px").text_color("#f0f0f066")
           .child("Tasks, Automations and Orca Mobile open pages Herdr has no equivalent for, so those rows are left out rather than shown dead.")))
       .child(div().h(4))
-      // Projects header — SidebarHeader.tsx:61-66: mt-2 h-8 gap-1.5 px-2; title pl-2 pr-0.5
-      // text-xs semibold muted/80; actions gap-1, icon-xs buttons (24px) with 14px icons, stroke 2.25.
+      // Projects header — SidebarHeader.tsx:60-63: `group/sidebar-header mt-2 flex h-8 min-w-0
+      // shrink-0 items-center justify-between gap-1.5 px-2`; title `pl-2 pr-0.5 text-xs
+      // font-semibold text-muted-foreground/80`; actions group `flex shrink-0 items-center gap-1`.
+      // Icons are plain Lucide at their default stroke-width 2 — there is no global override in
+      // Orca's CSS (main.css:3090 is a feature-wall decoration, not icons).
       .child(h_flex().w_full().h(32).mt(8).px(8).gap(6).items_center().justify_between()
         .child(h_flex().min_w(0).items_center()
           .child(div().pl(8).pr(2).text_size(12).font_semibold().text_color("#969eaecc").child("Projects"))
