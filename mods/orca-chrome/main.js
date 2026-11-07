@@ -41,12 +41,16 @@ export default class WorkspaceChrome extends View {
         .child(row("help", "circle-check", "Help", () => run("app.palette")))
         .child(row("machine", "plus", "Add machine", () => run("mod.open", { name: "machine-add" })));
     }
-    return h_flex().size_full().bg(t.chrome).pl(collapsed ? 6 : 14).pr(10).gap(4).items_center().text_size(13.5)
+    // TitlebarLeftControls.tsx: with a custom titlebar (Linux/Windows) the row is the logo,
+    // the application-menu button, then the sidebar toggle. The app-name label is macOS-only,
+    // so the brand text and the extra search button are gone. `···` opens the same command
+    // surface the sidebar's search row does, since Herdr has no native app menu.
+    return h_flex().size_full().bg(t.chrome).pl(collapsed ? 6 : 10).pr(10).gap(4).items_center().text_size(13.5)
       .when(window()?.platform === "macos" && !window()?.fullscreen && !collapsed, el => el.pl(76))
-      // TitlebarLeftControls: logo h-16px, margin 0 4px 0 10px, opacity .75; icon buttons 14px, p-4, r-4.
-      .when(!collapsed, el => el.child(h_flex().flex_1().gap(0).items_center().child(image("frame/welcome/herdr.png").size(16).opacity(0.75).mr(4)).child(div().ml(6).font_semibold().text_color(t.foreground).child("Herdr"))))
-      .when(!collapsed, el => el.child(this.button("search", svg("mods/orca-chrome/search.svg").size(14), () => run("mod.open", { name: "picker" }))))
+      .when(!collapsed, el => el.child(h_flex().flex_1().gap(0).items_center()
+        .child(image("frame/welcome/herdr.png").size(16).opacity(0.75).mr(4))
+        .child(this.button("menu", svg("mods/orca-chrome/menu.svg").size(14), () => run("mod.open", { name: "picker" })))))
       // On the macOS rail the traffic lights fill the row; the agents list's » unfolds it.
-      .when(!(collapsed && window()?.platform === "macos"), el => el.child(this.button("sidebar-toggle", svg("mods/orca-chrome/sidebar.svg").size(15), toggleSidebar)));
+      .when(!(collapsed && window()?.platform === "macos"), el => el.child(this.button("sidebar-toggle", svg("mods/orca-chrome/sidebar.svg").size(16), toggleSidebar)));
   }
 }
