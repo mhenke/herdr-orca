@@ -25,6 +25,9 @@
     {
       "id": "body",
       "type": "row",
+      "floating": [
+        { "id": "float-workspace", "content": { "mod": "orca-float" }, "edge": "bottom", "align": "end" }
+      ],
       "children": [
         {
           "id": "sidebar",
@@ -174,10 +177,57 @@
                           }
                         },
                         {
+                          "id": "vault",
+                          "type": "block",
+                          "content": {
+                            "mod": "orca-agents"
+                          }
+                        },
+                        {
+                          "id": "workspaces",
+                          "type": "block",
+                          "content": {
+                            "mod": "orca-panel-gap",
+                            "props": {
+                              "tab": "workspaces"
+                            }
+                          }
+                        },
+                        {
+                          "id": "pr-checks",
+                          "type": "block",
+                          "content": {
+                            "mod": "orca-panel-gap",
+                            "props": {
+                              "tab": "pr-checks"
+                            }
+                          }
+                        },
+                        {
                           "id": "changes",
                           "type": "block",
                           "content": {
                             "mod": "orca-changes"
+                          }
+                        },
+                        {
+                          "id": "checks",
+                          "type": "block",
+                          "content": {
+                            "mod": "orca-panel-gap",
+                            "props": {
+                              "tab": "checks"
+                            }
+                          }
+                        },
+                        {
+                          "id": "ports",
+                          "type": "block",
+                          "content": {
+                            "mod": "orca-panel-gap",
+                            "props": {
+                              "tab": "ports"
+                            }
                           }
                         }
                       ],

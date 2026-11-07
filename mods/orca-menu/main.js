@@ -1,5 +1,5 @@
 // Context menus (Herdr's items). Opened as a popup with
-// props { tab: "pane" | "tab" | "space" | "global", target }.
+// props { tab: "pane" | "tab" | "space" | "group", target }.
 // ↑/↓ move, Enter runs, Esc closes. An item is [label, command, args];
 // a command "worktree" opens the worktree dialog instead.
 
@@ -38,12 +38,19 @@ function items(p, git) {
       const own = panes().find((x) => x.pane === tg.pane);
       const alone = own && panes().filter((x) => x.tab === own.tab).length < 2;
       return [
-        // Orca's order (TerminalContextMenu.tsx:265-302): splits, then expand/collapse.
+        // Orca's order (TerminalContextMenu.tsx:204-231): Copy, Add to chat, Select All,
+        // Paste, Quick Commands, agent-session rows. Add to chat (:209), Select All (:217),
+        // Quick Commands (:227) and the agent rows (:236-262) have no Herdr command.
+        ["Copy", "terminal.copy", {}],
+        ["Paste", "terminal.paste", {}],
+        // Orca's split section (TerminalContextMenu.tsx:265-302): splits, then expand/collapse.
+        // Equalize Pane Sizes (:281) has no Herdr command.
         ["Split Terminal Right", "pane.split", { direction: "right", pane: tg.pane }],
         ["Split Terminal Down", "pane.split", { direction: "down", pane: tg.pane }],
         [own?.zoomed ? "Collapse Pane" : "Expand Pane", "pane.zoom", { pane: tg.pane }],
-        // Herdr-only: Orca has no right-click routing or park command; kept between the
-        // layout block and Close, where Orca's title/ID block sits.
+        // Herdr-only: Orca has no right-click routing or park command; kept where Orca's
+        // title/ID block sits (TerminalContextMenu.tsx:307-347). Set Title, Clear Pane Title
+        // and the Copy Session/Terminal/Pane ID rows there have no Herdr command.
         ...(term
           ? [
               toProgram
@@ -53,23 +60,50 @@ function items(p, git) {
           : []),
         ...(parent ? [[`Send back to ${parent.name || parent.address}`, "terminal.park", { terminal: term.address }]] : []),
         [alone ? "Close tab" : "Close Pane", "pane.close", { pane: tg.pane }],
+        // Orca's Clear Screen (:359) and Reset Terminal (:363) have no Herdr command.
       ];
     }
-    case "tab":
-      // Orca's order (SortableTabContextMenu.tsx:206-222): Copy Tab ID, Close, Change Title.
-      // New tab is the tab strip's + button (orca-tabs/main.js), not a menu row in Orca.
+    case "tab": {
+      // Orca's order (SortableTabContextMenu.tsx:154-231): split section (:157-176), separator
+      // (:178), Pin/Unpin (:187), Allow Auto-Close (:197-204), Copy Tab ID (:206), separator
+      // (:207), Close (:208), Close Others (:213), Close Split Pane (:216), separator (:217),
+      // Change Title (:218), Tab Color (:224-231). Allow Auto-Close, Close Split Pane and Tab
+      // Color have no Herdr command.
+      const own = spaces().find((s) => (s.tabs ?? []).some((x) => x.id === tg.id));
+      const list = own?.tabs ?? [];
+      const tab = list.find((x) => x.id === tg.id);
+      const mine = panes().filter((x) => x.tab === tg.id);
+      const pane = (mine.find((x) => x.focused) ?? mine[0])?.pane;
       return [
+        ...(pane
+          ? [
+              ["Split Terminal Right", "pane.split", { direction: "right", pane }],
+              ["Split Terminal Down", "pane.split", { direction: "down", pane }],
+            ]
+          : []),
+        // Herdr-only, in Orca's first slot: Orca reorders tabs by drag (SortableTab.tsx:213) and
+        // has no move rows; `tab.move` backs these.
+        ...(tab?.index > 1 ? [["Move Left", "tab.move", { id: tg.id, index: tab.index - 1 }]] : []),
+        ...(tab && tab.index < list.length ? [["Move Right", "tab.move", { id: tg.id, index: tab.index + 1 }]] : []),
+        // SortableTabContextMenu.tsx:187-196 — Orca's Pin/Unpin. Herdr's only pin-like state is
+        // `settled` (TabInfo.settled): `tab.settle` puts the tab away rather than making it
+        // unclosable, so the row keeps Herdr's words.
+        [tab?.settled ? "Bring Tab Back" : "Put Tab Away", tab?.settled ? "tab.unsettle" : "tab.settle", { id: tg.id }],
         ["Copy Tab ID", "orca-menu.copy-tab-id", { id: tg.id }],
         ["Close", "tab.close", { id: tg.id }],
+        // SortableTabContextMenu.tsx:213 — inset, disabled when `tabCount <= 1`; with one tab
+        // the loop in choose() would close nothing, so leave the row out.
+        ...(list.length > 1 ? [["Close Others", "orca-menu.close-others", { id: tg.id }]] : []),
         ["Change Title", "tab.rename", { id: tg.id }],
       ];
+    }
     // `RepoHeaderProjectActionsMenu` (repo-header-project-actions.tsx:121-186): the ellipsis on a
     // project group header. Its rows are project settings/icon/visibility/groups/remove, none of
     // which Herdr has (there is no project entity), so the rows below are Herdr's own.
     case "group":
       return [
-        ["New worktree", "worktree", { space: tg.id, action: "new" }],
-        ["Open worktree", "worktree", { space: tg.id, action: "open" }],
+        ["New worktree", "worktree", { space: tg.id, action: "new", ...(tg.path ? { folder: tg.path } : {}) }],
+        ["Open worktree", "worktree", { space: tg.id, action: "open", ...(tg.path ? { folder: tg.path } : {}) }],
         ["Copy Path", "orca-menu.copy-path", { path: tg.path ?? null, id: tg.id }],
         ["Rename workspace", "space.rename", { id: tg.id }],
         ["Close workspace", "space.close", { id: tg.id }],
@@ -79,11 +113,14 @@ function items(p, git) {
       // Copy Worktree Name, then worktree work, then the destructive row.
       return [
         ["Update", "space.rename", { id: tg.id }],
-        ["Open in Terminal", "orca-menu.open-terminal", { id: tg.id }],
+        // Orca's "Open in" is a submenu of external editors (WorktreeOpenInMenu.tsx:295-325);
+        // Herdr has no external-open command, so this opens a Herdr terminal in the
+        // worktree's folder instead (terminal.open, commands.md:277).
+        ["Open in Terminal", "terminal.open", tg.path ? { folder: tg.path } : {}],
         ["Copy Path", "orca-menu.copy-path", { path: tg.path ?? null, id: tg.id }],
         ["Copy Worktree Name", "orca-menu.copy-name", { id: tg.id }],
-        ...(git ? [["New worktree", "worktree", { space: tg.id, action: "new" }], ["Open worktree", "worktree", { space: tg.id, action: "open" }]] : []),
-        ...(git === "linked" ? [["Remove worktree", "worktree", { space: tg.id, action: "remove" }]] : []),
+        ...(git ? [["New worktree", "worktree", { space: tg.id, action: "new", ...(tg.path ? { folder: tg.path } : {}) }], ["Open worktree", "worktree", { space: tg.id, action: "open", ...(tg.path ? { folder: tg.path } : {}) }]] : []),
+        ...(git === "linked" ? [["Remove worktree", "worktree", { space: tg.id, action: "remove", ...(tg.path ? { folder: tg.path } : {}) }]] : []),
         ["Close", "space.close", { id: tg.id }],
       ];
     default:
@@ -104,8 +141,12 @@ function menuIcon(it, zoomed) {
   if (command === "pane.split") return `mods/orca-menu/${args?.direction === "down" ? "panel-bottom-close" : "panel-right-close"}.svg`;
   if (command === "pane.zoom") return `mods/orca-menu/${zoomed ? "minimize-2" : "maximize-2"}.svg`;
   if (command === "worktree") return `mods/orca-menu/${args?.action === "new" ? "git-branch-plus" : args?.action === "open" ? "workflow" : "unlink"}.svg`;
-  const name = command === "orca-menu.copy-path" || command === "orca-menu.copy-name" ? "copy"
-    : command === "orca-menu.open-terminal" ? "folder-open"
+  if (command === "tab.move") return `mods/orca-menu/${it[0] === "Move Left" ? "arrow-left" : "arrow-right"}.svg`;
+  if (command === "orca-menu.close-others") return "mods/orca-menu/x.svg";
+  if (command === "tab.settle" || command === "tab.unsettle") return `mods/orca-menu/${command === "tab.unsettle" ? "pin-off" : "pin"}.svg`;
+  const name = command === "orca-menu.copy-path" || command === "orca-menu.copy-name" || command === "terminal.copy" ? "copy"
+    : command === "terminal.paste" ? "clipboard"
+    : command === "terminal.open" ? "folder-open"
     : command.endsWith(".close") ? "x"
     : command.endsWith(".rename") ? "pencil"
     : command.endsWith(".new") ? "plus"
@@ -118,9 +159,17 @@ function menuIcon(it, zoomed) {
 function section(p, list, i) {
   const it = list[i], prev = list[i - 1];
   if (!prev) return false;
+  // Close starts its own group in every menu (dropdown-menu.tsx:208): pane
+  // (TerminalContextMenu.tsx:355), tab (SortableTabContextMenu.tsx:207), space (:196).
   if (it[1].endsWith(".close")) return true;
-  if (p?.tab === "tab" && it[0] === "Change Title") return true;
-  if (p?.tab === "space" && (it[0] === "Open in Terminal" || (it[1] === "worktree" && prev[1] !== "worktree"))) return true;
+  // Orca's pane menu separates the Copy/Paste block from the split section
+  // (TerminalContextMenu.tsx:263).
+  if (p?.tab === "pane" && it[1] === "pane.split" && prev[1] !== "pane.split") return true;
+  if (p?.tab === "tab") {
+    // After the split section (SortableTabContextMenu.tsx:178) and before Change Title (:217).
+    if (prev[1] === "pane.split") return true;
+    if (it[0] === "Change Title") return true;
+  }
   // The global list is Herdr's own; keep its rows apart as before.
   if (!p?.tab || p.tab === "global") return it[1] === "app.help" || (it[1] === "app.theme" && prev[1] !== "app.theme");
   return false;
@@ -133,7 +182,7 @@ function destructive() {
 }
 
 // Orca marks only the pane and workspace close rows destructive; the tab's Close is plain
-// (TerminalContextMenu.tsx:351, WorktreeContextMenuView.tsx:353, SortableTabContextMenu.tsx:206).
+// (TerminalContextMenu.tsx:351, WorktreeContextMenuView.tsx:353, SortableTabContextMenu.tsx:208).
 function isDestructive(p, it) {
   return it[1] === "pane.close" || ((p?.tab === "space" || p?.tab === "group") && it[1] === "space.close");
 }
@@ -142,7 +191,7 @@ function isDestructive(p, it) {
 function shortcut(name, args) {
   // `pane.split:right` binds pane.split with { direction: "right" }.
   const value = args && Object.values(args)[0];
-  const k = (keys() ?? []).find((b) => b.section === "global" && (b.action === name || b.action === `${name}:${value}`));
+  const k = (keys() ?? []).find((b) => b.action === name || b.action === `${name}:${value}`);
   return k ? k.keys : "";
 }
 
@@ -165,6 +214,15 @@ export default class Menu extends View {
   choose(i, cx) {
     const it = items(props(), this.git)[i];
     if (!it) return;
+    // `terminal.copy`/`terminal.paste` act on the focused terminal (commands.md:285-287), so
+    // focus the pane that was right-clicked before the overlay gives focus back.
+    if (it[1] === "terminal.copy" || it[1] === "terminal.paste") {
+      const tg = props()?.target ?? {};
+      if (tg.terminal || tg.pane) run("pane.focus", tg.terminal ? { terminal: tg.terminal } : { pane: tg.pane });
+      run(it[1], it[2]);
+      closeOverlay(props()?.overlay);
+      return;
+    }
     closeOverlay(props()?.overlay);
     if (it[1].startsWith("orca-menu.")) {
       const space = spaces().find((s) => s.id === (props()?.target?.id ?? ""));
@@ -172,6 +230,11 @@ export default class Menu extends View {
       if (it[1] === "orca-menu.copy-tab-id") void copyText(it[2].id ?? "");
       if (it[1] === "orca-menu.copy-path") void copyText(it[2].path || folder);
       if (it[1] === "orca-menu.copy-name") void copyText(space?.name ?? "");
+      // Close Others — the tab's own space only (SortableTabContextMenu.tsx:213).
+      if (it[1] === "orca-menu.close-others") {
+        const owner = spaces().find((s) => (s.tabs ?? []).some((x) => x.id === it[2].id));
+        for (const x of owner?.tabs ?? []) if (x.id !== it[2].id) run("tab.close", { id: x.id });
+      }
       return;
     }
     if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
@@ -197,7 +260,11 @@ export default class Menu extends View {
       .on_key_down((e, cx) => {
         if (e.key === "down") this.at = (this.at + 1) % list.length;
         else if (e.key === "up") this.at = (this.at + list.length - 1) % list.length;
-        else if (e.key === "enter") this.choose(this.at, cx);
+        else if (e.key === "home") this.at = 0;
+        else if (e.key === "end") this.at = list.length - 1;
+        // Radix activates with Enter or Space (context-menu.tsx:31-62). Type-ahead and
+        // ChevronRight submenus have no flat-list equivalent here.
+        else if (e.key === "enter" || e.key === "space") this.choose(this.at, cx);
         else if (e.key === "escape") closeOverlay(props()?.overlay);
         else return;
         cx.notify();
@@ -209,8 +276,9 @@ export default class Menu extends View {
           : []),
         ...list.map((it, i) => {
           const red = isDestructive(p, it);
-          // Orca's Copy Tab ID is `inset`: no icon, 32px left pad (CopyTabIdMenuItem.tsx:24).
-          const inset = it[1] === "orca-menu.copy-tab-id";
+          // Orca's Copy Tab ID and Close Others are `inset`: no icon, 32px left pad
+          // (CopyTabIdMenuItem.tsx:24, SortableTabContextMenu.tsx:208).
+          const inset = it[1] === "orca-menu.copy-tab-id" || it[1] === "orca-menu.close-others";
           return v_flex()
             // Separator: mx-2.5 my-[5px] h-px (dropdown-menu.tsx:208).
             .when(section(p, list, i), (el) => el.child(div().mx(10).my(5).h(1).bg(t.border)))
@@ -226,15 +294,20 @@ export default class Menu extends View {
             .items_center()
             .justify_between()
             .line_height("16px")
+            // Orca's rows are whitespace-nowrap (TerminalContextMenu.tsx:265,273); the label
+            // gives way with an ellipsis rather than wrapping inside the fixed popup.
+            .whitespace_nowrap()
             .text_color(red ? bad : t.foreground)
+            // One current row: pointer hover moves `this.at`, so hover, keyboard and Enter
+            // agree (dropdown-menu.tsx:115 data-[current=true]).
             .when(i === this.at, (el) => el.bg(red ? `${bad}1a` : t.selected))
-            .hover((s) => s.bg(red ? `${bad}1a` : t.hover))
+            .on_hover((hovered, cx) => { if (hovered && this.at !== i) { this.at = i; cx.notify(); } })
             .on_click((_e, cx) => this.choose(i, cx))
             .when(!inset, (el) => el.child(svg(menuIcon(it, zoomed)).size(14).flex_none().text_color(red ? bad : t.muted)))
-            .child(div().flex_1().child(it[0]))
-            // Shortcut: ml-auto pl-4 text-muted-foreground, same 13px as the label
+            .child(div().flex_1().min_w(0).truncate().child(it[0]))
+            // Shortcut: ml-auto shrink-0 whitespace-nowrap pl-4 text-muted-foreground
             // (dropdown-menu.tsx:219).
-            .child(div().pl(16).flex_none().text_color(t.muted).child(shortcut(it[1], it[2]))));
+            .child(div().pl(16).flex_none().whitespace_nowrap().text_color(t.muted).child(shortcut(it[1], it[2]))));
         }),
       ]);
   }

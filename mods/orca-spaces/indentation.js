@@ -8,10 +8,28 @@ export const FLUSH_CARD_CONTENT_PULLBACK = 4;
 export const NEW_CARD_STYLE_STATUS_LANE_EXTRA_PULLBACK = 8;
 export const FLUSH_CARD_MIN_CONTENT_INSET = 2;
 export const WORKTREE_CARD_SURFACE_MARGIN = 4;
+// The legacy status lane's box is its unread button, `size-4` = 16px
+// (`surface/WorktreeCardStatusSlot.tsx:246-247`); the lane div itself has no width
+// (`surface/worktree-card-status-lane.tsx:19-23`). Ours is a bare 12px mark, so the slot has to
+// make up the other 4px or every title sits 4px left of its group-header label.
+export const LEGACY_STATUS_LANE_WIDTH = 16;
+// The card always draws `border border-transparent` (`surface/worktree-card-surface.tsx:71-76`),
+// so the active border never shifts the title by 1px.
+export const WORKTREE_CARD_BORDER_WIDTH = 1;
+// Header label inset inside its group header: a 16px icon slot plus `gap-1.5`
+// (`worktree-list/rows/SectionHeader.tsx:249,328`).
+const HEADER_ICON_SLOT = 16;
+const HEADER_ICON_GAP = 6;
+// The card's lane-to-text gap (`card-primitives.tsx:8-13` gap xs = `gap-0.5` = 2px;
+// `worktree-card-parent-content.tsx` root row `gap-xs`).
+const CARD_ROW_GAP = 2;
 export const LINEAGE_IMMEDIATE_PARENT_STEP = SIDEBAR_TREE_INDENT + PROJECT_WORKTREE_CARD_EXTRA_INDENT;
 export const LINEAGE_CHILDREN_INLINE_OFFSET =
   LINEAGE_IMMEDIATE_PARENT_STEP - WORKTREE_CARD_SURFACE_MARGIN - FLUSH_CARD_MIN_CONTENT_INSET;
-const GROUPED_CARD_TITLE_HEADER_LABEL_OFFSET = 3;
+// Why: header icon+gap vs. card margin+border+legacy lane+gap minus the pullback lands the title
+// on the header label. Derived, not nudged: change a lane width and the anchor follows.
+const GROUPED_CARD_TITLE_HEADER_LABEL_OFFSET =
+  HEADER_ICON_SLOT + HEADER_ICON_GAP - (WORKTREE_CARD_SURFACE_MARGIN + WORKTREE_CARD_BORDER_WIDTH + LEGACY_STATUS_LANE_WIDTH + CARD_ROW_GAP - FLUSH_CARD_CONTENT_PULLBACK);
 export const PROJECT_GROUP_HEADER_BASE_PADDING = 10;
 const PROJECT_GROUP_HEADER_INDENT = 10;
 const MAX_PROJECT_GROUP_HEADER_DEPTH = 6;

@@ -1,8 +1,6 @@
-// Orca's right-panel tool switcher: compact horizontal icons, one active tool.
-// Content below owns the full panel width; this row owns the only header.
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { theme, run, layout, panes, exec } from "herdr";
+import { theme, run, layout, panes, spaces, exec } from "herdr";
 
 const find = (n, id) => {
   if (!n) return null;
@@ -12,6 +10,20 @@ const find = (n, id) => {
 };
 
 let gitCache = { cwd: null, at: 0, ok: false };
+
+// `use-right-sidebar-activity-items.ts:74-128`, in order. `gating` is Orca's own flag:
+//   gitOnly hides the item for a folder repo; folderOnly shows it only for a folder
+//   workspace; sshOnly shows it only for a workspace on an SSH host.
+// `id` is this panel's stack child; `title` is Orca's translated label.
+const ITEMS = [
+  { id: "files", icon: "files", title: "Explorer" },
+  { id: "vault", icon: "agent-session-history", title: "Agents" },
+  { id: "workspaces", icon: "workflow", title: "Attached worktrees", gating: "folderOnly" },
+  { id: "pr-checks", icon: "list-checks", title: "PR Checks", gating: "folderOnly" },
+  { id: "changes", icon: "git-branch", title: "Source Control", gating: "gitOnly" },
+  { id: "checks", icon: "list-checks", title: "Checks", gating: "gitOnly" },
+  { id: "ports", icon: "plug", title: "Ports", gating: "sshOnly" }
+];
 
 export default class PanelHead extends View {
   render(cx) {
@@ -31,29 +43,40 @@ export default class PanelHead extends View {
         cx.notify();
       });
     }
-    const tools = [{ id: "files", icon: "files", label: "Files" }];
-    if (gitCache.ok) tools.push({ id: "changes", icon: "git-branch", label: "Changes" });
-    // Orca right-sidebar-top-activity-bar.tsx:40 + activity-bar-buttons.tsx:151-176:
-    // the strip paints no background, so it shows the panel surface #171717
-    // (right-sidebar/index.tsx:158 -> --sidebar, main.css:392) and starts after
-    // pl-2 = 8 (right-sidebar-titlebar-drag-regions.ts:5). The source button is 36px
-    // (activity-bar-buttons.tsx:156 `w-9`) with a 25% inset bar; this row keeps the
-    // 32px width the port settled on, so the same 25% is 8px a side. Inactive is
-    // text-muted-foreground/60 and hover text-muted-foreground (:171-173) — a colour,
-    // not element opacity, so the active bar is never dimmed.
+    // Gating (`right-sidebar/right-sidebar-activity-visibility.ts:14-20`): gitOnly is hidden
+    // when the project is a folder (no repo); folderOnly only appears in a folder workspace;
+    // sshOnly only on an SSH host. Herdr has no separate folder-workspace record, so a non-git
+    // folder is that case; a workspace on a machine (`space.machine`) is the SSH case.
+    const isFolder = !gitCache.ok;
+    const onSshHost = Boolean((spaces() ?? []).find(s => s.active)?.machine);
+    const tools = ITEMS.filter(({ gating }) =>
+      gating === "gitOnly" ? !isFolder
+        : gating === "folderOnly" ? isFolder
+        : gating === "sshOnly" ? onSshHost
+        : true);
+    // Orca falls back to the first visible item when the active tab is gated out
+    // (`right-sidebar-effective-tab.ts:28-32`). Deferred: selecting a stack child mutates
+    // state, which render itself may not do.
+    if (!tools.some(tool => tool.id === active)) {
+      cx.spawn(() => { run("layout.select", { stack: "panel-body", child: tools[0].id }); });
+    }
     // `right-sidebar-top-activity-bar.tsx:40` is a bare `h-[36px] border-b border-border`
-    // wrapper with NO background: it inherits the panel's `bg-sidebar` #171717
-    // (`index.tsx:158`). We painted `t.canvas` #0a0a0a, so this band was 13 shades
-    // darker than the panel under it — the header looked detached from its own body.
+    // wrapper with NO background; it shows the panel surface #171717
+    // (`right-sidebar/index.tsx:158` -> `--sidebar`, main.css:392). The strip starts at pl-2 = 8
+    // (`right-sidebar-titlebar-drag-regions.ts:5`). Each button is 32px wide here with a
+    // 16px glyph; inactive is text-muted-foreground/60 and hover text-muted-foreground
+    // (`activity-bar-buttons.tsx:156-157`) — a colour change, not element opacity.
     return h_flex().w_full().h_full().items_center().pl(8).pr(4).border_b(1).border_color(t.border)
-      .children(tools.map(({ id, icon, label }) => {
+      .children(tools.map(({ id, icon, title }) => {
         const on = active === id;
         return div().id(`panel-${id}`).w(32).h_full().flex_none().flex().items_center().justify_center().relative()
           .text_color(on ? t.foreground : "#acacac99")
           .when(!on, el => el.hover(s => s.text_color(t.muted)))
-          .role("button").accessibility_label(label)
+          .role("button").accessibility_label(title)
           .on_click(() => run("layout.select", { stack: "panel-body", child: id }))
           .child(svg(`mods/orca-panel-head/${icon}.svg`).size(16))
+          // `activity-bar-buttons.tsx:175-177`: bottom-0, left/right 25%, h-2px,
+          // bg-foreground, rounded-t. 25% of 32px is 8px.
           .when(on, el => el.child(div().absolute().bottom(0).left(8).right(8).h(2).bg(t.foreground).rounded_t(4)));
       }))
       .child(div().flex_1())

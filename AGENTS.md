@@ -9,7 +9,9 @@
 > and the packaging example `~/Projects/herdr-t3`.
 
 Read `GLOSSARY.md` for the domain: repo / space / main checkout / linked
-worktree / project group / top branch mean exactly one thing each here.
+worktree / project group / top branch mean exactly one thing each here. Read
+`ETHOS.md` for the judgment behind the rules: user report is ground truth,
+evidence over inference, fix the fault not the surface.
 ## Iron rules (paid for in full)
 
 1. **Orca's code is the spec, not screenshots, not pixels.** Every geometry value,
@@ -161,29 +163,53 @@ worktree / project group / top branch mean exactly one thing each here.
     is the error, not the styling — the message names the fix. See
     `docs/adr/0002-render-failures-are-visible.md`.
 
-## Before a medium or large change: redesign from first principles
+## Redesign from first principles — apply it constantly
 
-**Run the `principle-redesign-from-first-principles` skill before starting any
-medium or large change.** Not after it goes wrong, and not optionally.
+**Run the `principle-redesign-from-first-principles` skill on every change, not
+just large ones.** This is a standing instruction, not a stage gate. The
+previous wording ("before a medium or large change") let the small ones skip it,
+and the small ones are where the shape errors hide: two closed bugs in one
+session were each fixed at the symptom, because "one line" did not feel like it
+needed a redesign.
 
-The trigger is scope, not difficulty. Treat a change as medium-or-large when it
-touches more than one mod, changes a shape other code depends on, adds a new
-element or region, or has more than one plausible place to put the fix. A
-one-line value correction is small; "align the tab strip with Orca" is not.
+The trigger is not scope. **Any time you are about to edit, ask the question.**
+It costs one breath:
 
-What the skill demands here, concretely:
+> **If this requirement had been there from the start, what would I have built?**
+
+Then check the answer against what you are about to do. If they differ, build
+the answer, not the patch. Four things this has caught here, each after a
+small-looking fix failed:
+
+- **Wrong place.** Agent status was moved out of Orca's pane *title* and into a
+  **bottom-right overlay**. Deleting it from the header "fixed" the extra
+  element and silently lost the status. The requirement was never "remove the
+  status" — it was "put it where Orca puts it".
+- **Wrong region.** The explorer's toolbar was missing because the band was
+  never in the tree at all; patching the filter row could not have added it.
+- **Wrong owner.** Two mods drew the same activity bar (titlebar and right
+  panel). Restyling one left two of them on screen.
+- **Wrong layer.** A scrollbar painted *over* the rows because the scrolling
+  container owned the bar. No inset value fixes that; the bar has to be a
+  sibling in its own gutter.
+
+Concretely, on every edit:
 
 1. **Read every file the change reaches** — the mod, the layout node that sizes
    it, any sibling that reads the same `shared()` key, and the Orca owner file.
-2. **Ask what you would build if the requirement had been there from the start.**
-   The answer is usually a constant or a table, not another special case.
-3. **Find the shape, not the instance.** The recurring failure in this repo is
-   fixing one visible symptom of a rule that applies everywhere: one chevron's
-   order, one gap's units, one icon's stroke. If a value is derived, derive it.
-4. **Propagate** — types, docs, comments, and every other caller of the thing
+2. **Ask the question above.** Most answers are a constant, a table, or a move
+   of ownership — not another special case.
+3. **Find the shape, not the instance.** The recurring failure here is fixing
+   one visible symptom of a rule that applies everywhere: one chevron's order,
+   one gap's units, one icon's stroke. If a value is derived, derive it.
+4. **Question the instruction you were given**, including this file's. The
+   overlay case arrived as "delete what Orca lacks"; the correct reading was
+   "relocate what Orca relocates". A removal instruction is a claim about where
+   the thing belongs, not proof that it is unwanted.
+5. **Propagate** — types, docs, comments, and every other caller of the thing
    you just redefined. A rule that lives in one file and is violated in four is
    not a rule.
-5. **Deliver incrementally**, but decide the whole design first.
+6. **Deliver incrementally**, but decide the whole design first.
 
 Redesigning is cheap here because the geometry module already exists
 (`mods/orca-spaces/indentation.js`): when a number is reused, it belongs there,

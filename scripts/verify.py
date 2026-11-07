@@ -28,11 +28,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODS = os.path.join(ROOT, "mods")
 ORCA = os.path.expanduser("~/Projects/orca")
 
-# Cited names that belong to this package, not to Orca: our own helpers and the type stubs
-# each mod ships. A citation of these is a reference to a local file, not a parity claim.
+# Cited names that belong to this package or to Herdr, not to Orca: our own helpers, the type
+# stubs each mod ships, and the `herdr` module's generated herdr.d.ts. A citation of these is
+# a reference to a local file, not an Orca parity claim.
 LOCAL = {
     "main.js", "project.js", "status.js", "indentation.js", "focus.js", "tip.js", "clip.js",
-    "mod.js", "mod.json", "jsconfig.json", "tsconfig.json", "gpui-kit.d.ts",
+    "mod.js", "mod.json", "jsconfig.json", "tsconfig.json", "gpui-kit.d.ts", "herdr.d.ts",
+    # Herdr's own kind-binding file. A mod names it to explain how Herdr spells a key
+    # ("ctrl-shift-t"), which is a fact about Herdr, not a parity claim about Orca.
+    "keys.json",
 }
 
 CITE = re.compile(r"([A-Za-z0-9_./-]+\.(?:tsx?|jsx?|json|css))(?![\w.])(?::(\d+)(?:-(\d+))?)?")
@@ -55,6 +59,32 @@ def line_count(path):
         return 0
 
 
+def comments(text):
+    """Only the lines that are comments.
+
+    A citation is a claim about Orca, and the mods make those claims in comments. Scanning the
+    whole file made a table of *filenames* — `orca-files`' extension-to-icon map — read as a
+    page of parity claims, so `vitest.config.js` and `package.json` failed as MISSING/AMBIGUOUS
+    when they were only data being compared against. Prose in a string is not a citation either.
+    """
+    out = []
+    in_block = False
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if in_block:
+            out.append(stripped)
+            if "*/" in stripped:
+                in_block = False
+            continue
+        if stripped.startswith("/*"):
+            out.append(stripped)
+            in_block = "*/" not in stripped
+            continue
+        if stripped.startswith("//") or stripped.startswith("*"):
+            out.append(stripped)
+    return "\n".join(out)
+
+
 def check_citations():
     index = orca_index()
     problems = []
@@ -67,7 +97,7 @@ def check_citations():
             path = os.path.join(root, name)
             with open(path, encoding="utf-8", errors="ignore") as fh:
                 text = fh.read()
-            for match in CITE.finditer(text):
+            for match in CITE.finditer(comments(text)):
                 cited, first, last = match.group(1), match.group(2), match.group(3)
                 base = os.path.basename(cited)
                 if base in LOCAL:
@@ -91,6 +121,15 @@ def check_citations():
                         )
                         continue
                     hits = paths
+                elif len(hits) > 1:
+                    # A bare basename that matches several files proves nothing: it names a
+                    # directory-less file, so any of them satisfies it. `PortsPanel.tsx` passed
+                    # this way while the cited one was never the one read. Name the directory.
+                    problems.append(
+                        f"  AMBIGUOUS  {cited}  (matched {len(hits)}: "
+                        f"{', '.join(os.path.relpath(h, ORCA) for h in hits[:3])})  <- {os.path.relpath(path, ROOT)}"
+                    )
+                    continue
                 if not first:
                     continue
                 longest = max(line_count(h) for h in hits)

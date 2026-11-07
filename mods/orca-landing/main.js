@@ -29,7 +29,8 @@ function keyCap(label, t) {
 }
 
 // `ShortcutKeyCombo` (:52-66): caps joined by `+` on Linux (`mx-0.5 text-xs`); macOS joins
-// them with no separator. Herdr exposes no platform to a mod, so the `+` form is used.
+// them with no separator. `window().platform` IS available to a mod, but this page always
+// joins with `+`; `tip.js:21` is the only place that varies it by platform.
 function combo(keysFor, t) {
   const row = h_flex().items_center().gap(4);
   keysFor.forEach((k, i) => {
@@ -80,8 +81,8 @@ export default class Landing extends View {
         .child(v_flex().items_center().gap(16).py(32)
           // The logo tile (:259-268): `size-20 rounded-2xl border border-border/80 shadow-lg`,
           // `style={{ backgroundColor: '#12181e' }}`, logo `size-12` = 48px. size-20 = 80px,
-          // rounded-2xl = 16px. The logo SVG is copied into this folder; a mod cannot read
-          // outside it.
+          // rounded-2xl = 16px. A text wordmark stands in for Orca's logo: a distributable
+          // package must not ship another project's mark.
           .child(div().size(80).flex_none().flex().items_center().justify_center()
             .rounded(16).border_1().border_color("#f0f0f033").bg("#12181e")
             .child(div().text_size(16).font_bold().text_color("#f0f0f0").child("HERDR")))
@@ -97,7 +98,7 @@ export default class Landing extends View {
           .child(h_flex().items_center().justify_center().gap(10)
             .child(button("landing-add", "folder-plus", "Add project", () => run("space.new")))
             .child(button("landing-create", "git-branch-plus", "Create workspace",
-              () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 }))))
+              () => openOverlay({ mod: "new-menu", kind: "popup", width: 288, height: 512 }))))
           // The shortcut list: `mt-6 w-full max-w-xs space-y-2` (:302) — mt-6 = 24px,
           // space-y-2 = 8px between rows.
           .child(v_flex().mt(24).gap(8).items_center()

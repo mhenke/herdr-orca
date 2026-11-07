@@ -1,6 +1,7 @@
 {
   "layout:orca": {
     "ctrl-shift-b": "layout.toggle:sidebar",
-    "ctrl-shift-e": "layout.toggle:panel"
+    "ctrl-shift-e": "layout.toggle:panel",
+    "ctrl-alt-a": "orca-float.toggle"
   }
 }

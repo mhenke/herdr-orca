@@ -3,14 +3,14 @@
 // title and a meta row (branch, then the review badge at its end). Agent state lives in
 // the agents list, not here. Click to switch, right-click for its menu, drag to reorder.
 
-import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { View, div, svg, image } from "gpui-kit";
+import { v_flex, h_flex, Scrollbar } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
 import { repoMark, tint, parseRemote, avatarUrlFor, ensureAvatar } from "./project.js";
-import { statusMark } from "./status.js";
-import { getWorktreeCardContentIndent, getFlushWorktreeCardPaddingLeft, getWorktreeCardSurfaceInset, getFolderWorkspaceCardContentIndent, getFolderWorkspaceCardSurfaceInset, getProjectGroupHeaderPaddingLeft, WORKTREE_CARD_SURFACE_MARGIN } from "./indentation.js";
+import { statusMark, agentStateMark } from "./status.js";
+import { getWorktreeCardContentIndent, getFlushWorktreeCardPaddingLeft, getWorktreeCardSurfaceInset, getFolderWorkspaceCardContentIndent, getFolderWorkspaceCardSurfaceInset, getProjectGroupHeaderPaddingLeft, WORKTREE_CARD_SURFACE_MARGIN, LEGACY_STATUS_LANE_WIDTH } from "./indentation.js";
 import { tip, tipMark } from "./tip.js";
-import { stopsInit, stop, focusRoot, enter } from "./focus.js";
+import { stopsInit, stop, focusRoot, enter, within } from "./focus.js";
 
 // `git worktree list --porcelain`, as Orca parses it
 // (`git-worktree-porcelain-parser.ts`): the first row emitted is the main checkout.
@@ -61,7 +61,10 @@ export default class Spaces extends View {
     cx.spawn(async (cx) => {
       for (;;) {
         const cmd = await nextCommand();
-        if (cmd === "focus") enter(this, cx, "space-new");
+        // A popup over this mod hands focus back when it closes, so the header cluster can stop
+        // being held visible for `has-[button[aria-expanded=true]]`
+        // (`worktree-list/rows/ProjectHeaderActions.tsx:5-15`) — Herdr has no expanded attribute.
+        if (cmd === "focus") { this.menuKey = null; enter(this, cx, "space-new"); }
         // `project-collapse-all.ts` setAllProjectsCollapsed: collapsing adds every project key;
         // expanding clears all project keys (nested ones included), keeping machine folds.
         // Keys are the same ones `header()` folds on: repo name, or `space:<id>` for a folder.
@@ -98,6 +101,9 @@ export default class Spaces extends View {
     this.shown = new Set(spaces().map((s) => s.id));
     this.born = {};
     this.pressed = null;
+    // The group whose menu overlay is open: its header cluster stays visible while the
+    // pointer is over the overlay instead of the header.
+    this.menuKey = null;
     this.over = null;
     this.machines = [];
     this.reconnecting = stored("machines.reconnecting", {});
@@ -413,7 +419,8 @@ export default class Spaces extends View {
     // A popup is as tall as its items; height is only the most.
     const s = spaces().find((x) => x.id === w.id);
     const path = s ? place(s, panes()) : null;
-    openOverlay({ mod: "orca-menu", kind: "popup", width: 220, height: 300, props: { tab: "space", target: { id: w.id, path } } });
+    // WorktreeContextMenuView.tsx:147 — `min-w-52` (208).
+    openOverlay({ mod: "orca-menu", kind: "popup", width: 208, height: 300, props: { tab: "space", target: { id: w.id, path } } });
   }
 
   orderingDue(now) {
@@ -523,7 +530,8 @@ export default class Spaces extends View {
   toggleRepo(repo, cx) {
     this.foldedRepos.has(repo) ? this.foldedRepos.delete(repo) : this.foldedRepos.add(repo);
     localStorage.setItem("repos.folded", JSON.stringify([...this.foldedRepos]));
-    cx.notify();
+    // `cx` is absent for a keyboard Enter from `stop` (`focus.js`), which has no render cx.
+    cx?.notify();
   }
 
   // The rows, under a header per machine once one isn't this computer.
@@ -566,7 +574,8 @@ export default class Spaces extends View {
       // its + and chevron crowded the heading's buttons, a column of icons unevenly spaced.
       // Its + and chevron stand under the heading's two buttons, in slots built as those are (26px, 2px apart, 10px from the edge), so any zoom rounds them alike.
       const head = h_flex().id(`machine-${m ?? "local"}`).pt(8).h(30).flex_none().pl(8).pr(2).gap(4).items_center()
-        .text_size(12).font_medium().text_color(t.dim)
+        // `ProjectHeaderHostLabel.tsx:25`: `text-muted-foreground` (full #acacac, not `t.dim`).
+        .text_size(12).font_medium().text_color(t.muted)
         .role("button").accessibility_label(`${folded ? "Expand" : "Collapse"} ${m ?? "This computer"}`)
         .on_hover((on, cx) => {
           // By the row's id: this computer's m is null, which a cleared field would equal.
@@ -688,35 +697,53 @@ export default class Spaces extends View {
       // under the app folder, and `image()` reads that cached file from then on.
       .child(repoMark(w, 16, t, ps, g?.owner ?? null))
       .child(div().min_w(0).flex_1().truncate().text_size(13).font_semibold().line_height("16px").text_color(t.foreground).child(g?.name ?? w.name))
-      // Orca's hover cluster (SectionHeader.tsx:355-414, ProjectHeaderActions.tsx:5-15): the
-      // collapse chevron sits first, then the group menus, then the create button — and the
-      // whole cluster is `opacity-0` until the header is hovered. Herdr has no `group-hover`
-      // rule, so the `on_hover` flag above drives a `.when`, in the same in-idiom way as
-      // `glow(id)` for tooltips: same hide-until-hover, done in script rather than the class
-      // list. `self.hoveredRepo` lives on the instance; at a few dozen headers it is not
-      // worth a registry.
-      .when(this.hoveredRepo === key, el => el
-        // The slots side by side with Orca's `gap-0.5` (2px), not the row's 6px.
-        .child(h_flex().flex_none().items_center().gap(2)
-          // ORDER, from SectionHeader.tsx:355-414 — the collapse chevron comes FIRST in
-          // `ProjectHeaderActions`, then `RepoHeaderProjectActionsMenu` (the ellipsis, size-3.5,
-          // repo-header-project-actions.tsx:113), then `RepoHeaderCreateWorkspaceButton`
-          // (the plus, size-3, :239-241). Left to right: chevron, ellipsis, plus.
-          // `SectionHeader.tsx:190-192`: the chevron is omitted entirely when the group has no
-          // rows (`row.count > 0`); the menus/plus are not gated on it.
-          // SectionHeader.tsx:358: size-5 rounded-md text-muted-foreground,
-          // hover:bg-accent/70 and hover:text-foreground — a 70% accent wash, not a 70% white one.
-          .when(count > 0, el => el.child(div().id(`space-fold-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
-            .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
-            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(14).flex_none())))
-          .child(div().id(`space-more-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
-            .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
-            .on_click((_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "orca-menu", kind: "popup", width: 220, height: 220, props: { tab: "group", target: { id: w.id, path: g?.top ?? w.folder } } }); })
-            .child(svg("mods/orca-spaces/ellipsis.svg").size(14).flex_none()))
-          .child(div().id(`space-new-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
-            .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
+      // Orca's hover cluster (`worktree-list/rows/ProjectHeaderActions.tsx:5-15`, used at
+      // `rows/SectionHeader.tsx:355-399`): an ABSOLUTE overlay — `can-hover:absolute right-1
+      // top-1/2 -translate-y-1/2`, `bg-worktree-sidebar pl-1` — that only fades
+      // (`can-hover:opacity-0`). It stays mounted for `has-[:focus-visible]` and
+      // `has-[button[aria-expanded=true]]`, so here it is always mounted and faded by opacity:
+      // the buttons join the Tab order (`stop` per control), the title is never re-truncated,
+      // and the sidebar-coloured bg masks the title behind it. The row is 28px and the slots
+      // 20px, so top-4 is `top-1/2 -translate-y-1/2` for this row.
+      .child(h_flex().absolute().right(4).top(4).flex_none().items_center().gap(2).rounded(6).bg(t.chrome).pl(4)
+        .opacity(this.hoveredRepo === key || this.menuKey === key ||
+          within(this, [id, `space-fold-${w.id}`, `space-more-${w.id}`, `space-new-${w.id}`]) ? 1 : 0)
+        // ORDER, from SectionHeader.tsx:355-414 — the collapse chevron comes FIRST in
+        // `ProjectHeaderActions`, then `RepoHeaderProjectActionsMenu` (the ellipsis, size-3.5,
+        // repo-header-project-actions.tsx:113), then `RepoHeaderCreateWorkspaceButton`
+        // (the plus, size-3, :250). Left to right: chevron, ellipsis, plus.
+        // `SectionHeader.tsx:190-192`: the chevron is omitted entirely when the group has no
+        // rows (`row.count > 0`); the menus/plus are not gated on it.
+        // SectionHeader.tsx:358: size-5 rounded-md text-muted-foreground,
+        // hover:bg-accent/70 and hover:text-foreground — a 70% accent wash, not a 70% white one.
+        .when(count > 0, el => el.child(stop(this, t, `space-fold-${w.id}`,
+          div().size(20).flex_none().flex().items_center().justify_center().rounded(6)
+            .role("button").accessibility_label(folded ? "Expand group" : "Collapse group")
+            .text_color(t.muted).hover((s) => s.bg("#404040b3").text_color(t.foreground))
+            .on_click((_e, cx) => { cx.stop_propagation(); this.toggleRepo(key, cx); })
+            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(14).flex_none()),
+          6, { enter: () => this.toggleRepo(key, null) })))
+        .child(stop(this, t, `space-more-${w.id}`,
+          div().size(20).flex_none().flex().items_center().justify_center().rounded(6)
+            .role("button").accessibility_label("Group menu")
+            .text_color(t.muted).hover((s) => s.bg("#404040b3").text_color(t.foreground))
+            .on_click((_e, cx) => {
+              cx.stop_propagation();
+              this.menuKey = key;
+              // RepoHeaderProjectActionsMenu's DropdownMenuContent has no width class, so Orca's
+              // dropdown-menu.tsx:80 `min-w-[11rem]` (176) applies.
+              openOverlay({ mod: "orca-menu", kind: "popup", width: 176, height: 220, props: { tab: "group", target: { id: w.id, path: g?.top ?? w.folder } } });
+              cx.notify();
+            })
+            .child(svg("mods/orca-spaces/ellipsis.svg").size(14).flex_none()),
+          6, { enter: () => { this.menuKey = key; openOverlay({ mod: "orca-menu", kind: "popup", width: 176, height: 220, props: { tab: "group", target: { id: w.id, path: g?.top ?? w.folder } } }); } }))
+        .child(stop(this, t, `space-new-${w.id}`,
+          div().size(20).flex_none().flex().items_center().justify_center().rounded(6)
+            .role("button").accessibility_label("New space")
+            .text_color(t.muted).hover((s) => s.bg("#404040b3").text_color(t.foreground))
             .on_click((_e, cx) => { cx.stop_propagation(); run("space.new", { folder: g?.top ?? w.folder }); })
-            .child(svg("mods/orca-spaces/plus.svg").size(12).flex_none())))), 6,
+            .child(svg("mods/orca-spaces/plus.svg").size(12).flex_none()),
+          6, { enter: () => run("space.new", { folder: g?.top ?? w.folder }) }))), 6,
       { enter: () => this.toggleRepo(key) });
   }
 
@@ -729,19 +756,23 @@ export default class Spaces extends View {
     const on = group.some(s => s.active);
     // Orca titles a card by its worktree's branch when the header above already says the
     // repo/folder (`herdr-file-viewer` -> `main`), else the space's own name
-    // (`default-workspace-card.json`: `title: trim(ws.title)`). The branch meta shows whenever
-    // there is a branch (`branch: !folder && len(branch) > 0 && !newStyle && (!compact || ...)`):
-    // classic non-compact cards print it even when it equals the title — hence master/master.
+    // (`default-workspace-card.json`: `title: trim(ws.title)`).
     const branch = g?.branch ?? w.branch ?? null;
     // Orca's worktree title is the branch for an unnamed worktree; a name the user gave wins.
     const title = !w.named && branch ? branch : w.name;
     // `default-workspace-card.json`: folder cards print the folder's own last segment
     // (`folderInMeta`, `WorktreeCardFolderPath` = `getDirectoryName`), branch cards the branch.
     const meta = g ? branch : base(place(w, ps));
+    // Orca's classic card draws the branch unconditionally (`default-workspace-card.json`
+    // `branch: ...`), and an automatic worktree name IS the branch
+    // (`shared/worktree/display-name-provenance.ts:17-19`), so Orca really prints `main` twice.
+    // DELIBERATE DEVIATION on a user report of that repeat: drop the meta line only when it
+    // equals the title after trimming (the branch stays on screen as the title). Named
+    // worktrees, differing branches and folder paths keep their meta row.
+    const metaText = g && meta?.trim() === title?.trim() ? null : meta;
     const metaMono = !g;
-    // Orca's card lists its own agents (inlineAgents) with a 6px status dot each, from
-    // agents(): the same rows the agents view reads, so a collapsed card shows the count
-    // of real rows and never invents one.
+    // Orca's card lists its own agents (inlineAgents) as `AgentStateDot` rows, from agents():
+    // the same rows the agents view reads, so a collapsed card shows real rows, never invented.
     const tabIds = new Set(group.flatMap(s => (s.tabs ?? []).map(c => c.id)));
     const mine = agents().filter(a => tabIds.has(a.tab));
     // The host already rolled each space's agents up (model.rs `rollup`); the worktree's rollup
@@ -762,35 +793,74 @@ export default class Spaces extends View {
       const label = a.title || a.app || a.program?.name || "agent";
       return label === w.name || label === `π: ${w.name}` ? (a.app || a.program?.name || "agent") : label;
     };
-    // worktree-card-compact-agent-row.tsx:305 — `flex h-6 items-center gap-1` = 24px; `px-1` = 4px.
-    const agentRow = (a) => h_flex().min_w(0).h(24).px(4).gap(4).items_center()
-      .text_size(11).line_height("11px").text_color(t.dim)
-      .child(statusMark(a.status, 12))
-      .child(div().min_w(0).flex_1().truncate().child(agentTitle(a)));
-    // `CompactAgentSummaryButton` (worktree-card-compact-agents.tsx:113-150): the label comes
-    // first and the chevron is the LAST child —
-    //   <span flex-1 truncate px-1 font-medium>subjectLabel</span>
-    //   <ChevronDown size-3 shrink-0 ... !expanded && '-rotate-90' />
-    // so the disclosure is on the right, not the left. `size-3` is 12px, and the rotation is
-    // -90 when collapsed (a right-pointing chevron), not a different glyph.
-    // The wrapper is `flex flex-col mt-1 gap-0.5` (WorktreeCardAgents.tsx:381), and a collapsed
-    // pill carries `border border-worktree-sidebar-border/70 bg-worktree-sidebar-accent/35`.
-    //
-    // `WorktreeCardAgents.tsx:371-416`: the summary button exists only in compact mode and only
-    // for MORE THAN ONE agent (`shouldUseSummaryRow = summaryAgents.length > 1`); a single agent
-    // is just its row, with no pill and no chevron. The list itself starts collapsed
-    // (`worktree-card-agents-expansion-state.ts:12-16`), so the pill is what you see first.
+    // worktree-card-compact-agent-row.tsx:301-305 — `flex h-6 items-center gap-1` = 24px,
+    // `px-1` = 4px, `text-[11px] text-muted-foreground`, and `worktree-agent-row-hover` washes
+    // the row with `--accent` at 18% in dark (assets/main.css:1568-1584,1787-1795).
+    // Herdr's `AgentInfo` has no parent/lineage, child count, timestamp or turn text, so Orca's
+    // `+N` child disclosure, `text-[10px]` timestamp, `" - "` secondary line and `.75rem`
+    // lineage indent (`worktree-card-compact-agent-row.tsx:226-297`) have no data here.
+    // The agent-type icon is the program table's `program.icon` (`AgentTypeIcon size={13}`).
+    const agentIcon = (a, size) => {
+      const p = a.program;
+      if (!p?.icon) return null;
+      return p.tint ? svg(p.icon).size(size).flex_none().text_color(t.muted) : image(p.icon).w(size).h(size).flex_none();
+    };
+    const agentRow = (a) => {
+      const type = agentIcon(a, 13);
+      return h_flex().min_w(0).h(24).px(4).gap(4).items_center()
+        .text_size(11).line_height("11px").text_color(t.muted)
+        .hover((s) => s.bg("#4040402e"))
+        // AgentStateDot size="sm": 10px box, 6px inner, `done` = CircleCheck
+        // (`src/renderer/src/components/AgentStateDot.tsx:114-116,148-157`) — not the card lane's StatusIndicator.
+        .child(agentStateMark(a.status))
+        .when(Boolean(type), (el) => el.child(type))
+        .child(div().min_w(0).flex_1().truncate().child(agentTitle(a)));
+    };
+    // `CompactAgentSummaryButton` (worktree-card-compact-agents.tsx:75-186): the collapsed pill
+    // draws per-state clusters — `AgentStateDot` + up to 3 overlapping `size-4` agent-type
+    // avatars + `+N` (`:158-176`) — and the text label is the EXPANDED header only (`:153-157`).
+    // Groups follow `buildSummaryAgentGroups` (`worktree-card-agent-summary.ts:201-216`) and
+    // SUMMARY_STATE_ORDER (`:12-26`), restricted to Herdr's four words; the last 3 groups show
+    // and the rest count (`worktree-card-compact-agents.tsx:78-84`).
+    const summaryOrder = ["blocked", "working", "done", "idle"];
+    const groups = summaryOrder
+      .map((state) => ({ state, agents: mine.filter((a) => a.status === state) }))
+      .filter((group) => group.agents.length > 0);
+    const visibleGroups = groups.slice(0, 3);
+    const hiddenGroupCount = groups.slice(3).reduce((n, g) => n + g.agents.length, 0);
+    const cluster = (group) => {
+      // Herdr has no agent-type; the program table's icon fills Orca's `size-4` identity
+      // circle, and is dropped when the table has none — the dot and `+N` still draw.
+      const icons = group.agents.map((a) => agentIcon(a, 13)).filter(Boolean).slice(0, 3);
+      const hidden = group.agents.length - icons.length;
+      return h_flex().flex_none().items_center().gap(2).rounded(2).px(4).py(2).bg("#2a2a2ab3")
+        .child(agentStateMark(group.state))
+        .child(h_flex().flex_none().items_center().pl(2)
+          .children(icons.map((type, i) => div().size(16).flex_none().flex().items_center().justify_center().rounded_full()
+            .border_1().border_color("#ffffff0d").bg(t.chrome).when(i > 0, (el) => el.ml(-2)).child(type))))
+        // `text-[10px] tabular-nums text-muted-foreground/70`; t.dim is exactly #acacacb3.
+        .when(hidden > 0, (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child(`+${hidden}`)));
+    };
+    // `WorktreeCardAgents.tsx:371-416`: the summary exists only for MORE THAN ONE agent
+    // (`shouldUseSummaryRow = summaryAgents.length > 1`); a single agent is just its row. The
+    // list starts collapsed (`worktree-card-agents-expansion-state.ts:12-16`).
     const agentList = v_flex().min_w(0).mt(4).gap(2).children(mine.map(agentRow));
     const agentSummary = v_flex().min_w(0).mt(4).gap(2)
       .child(h_flex().id(toggleId).h(24).w_full().min_w(0).px(4).gap(4).items_center().rounded(2)
-        .text_size(11).line_height("11px").text_color(t.dim).cursor_pointer()
+        .text_size(11).line_height("11px").text_color(t.muted).cursor_pointer()
         .role("button")
         .accessibility_label(expanded ? `Collapse ${mine.length} agents` : `Expand ${mine.length} agents`)
-        .when(!expanded, el => el.border_1().border_color("#f0f0f033").bg("#f0f0f009"))
-        .hover(s => s.text_color(t.foreground))
+        // Only the collapsed pill rests on a surface: `border-worktree-sidebar-border/70` =
+        // #ffffff 7% x 70%, `bg-worktree-sidebar-accent/35` = #353535 at 35%
+        // (`worktree-card-compact-agents.tsx:104-113`). Hover is a `foreground/[0.035]` wash
+        // (`#f0f0f009`), text unchanged.
+        .when(!expanded, el => el.border_1().border_color("#ffffff0d").bg("#35353559"))
+        .hover((s) => s.bg("#f0f0f009"))
         .on_click((_e, cx) => { cx.stop_propagation(); this.toggleAgents(w.id, cx); })
-        .child(div().min_w(0).truncate().px(4).font_medium().child(`${mine.length} agents`))
-        .child(div().flex_1())
+        .when(expanded, el => el.child(div().min_w(0).flex_1().truncate().px(4).font_medium().child(`${mine.length} agents`)))
+        .when(!expanded, el => el.child(h_flex().min_w(0).flex_1().items_center().gap(4).overflow_hidden()
+          .children(visibleGroups.map(cluster))
+          .when(hiddenGroupCount > 0, (s) => s.child(div().flex_none().text_size(10).text_color(t.dim).child(`+${hiddenGroupCount}`)))))
         .child(svg(`mods/orca-spaces/chevron-${expanded ? "down" : "right"}.svg`).size(12).flex_none()))
       .when(expanded, el => el.child(v_flex().min_w(0).gap(2).pt(2).children(mine.map(agentRow))));
     const agentBlock = mine.length > 1 ? agentSummary : agentList;
@@ -809,16 +879,26 @@ export default class Spaces extends View {
       ? getFolderWorkspaceCardSurfaceInset({ isGrouped: true, groupDepth: 1 })
       : getWorktreeCardSurfaceInset({ isGrouped: Boolean(g), groupDepth: 0 });
     const geometry = { cardPaddingLeft: getFlushWorktreeCardPaddingLeft(Math.max(0, contentIndent - surfaceInset), false), surfaceInset };
+    // `singleLine` (`default-workspace-card.json:33`) is the only shape with no second row:
+    // no meta text and no inline agents (`hasMetaRow` here is drawn from what the card shows).
+    const singleLine = !metaText && mine.length === 0;
     return stop(this, t, `space-${w.id}`, v_flex()
       .relative()
       .id(`space-${w.id}`)
-      .ml(WORKTREE_CARD_SURFACE_MARGIN + geometry.surfaceInset).pr(6).py(8)
+      // Orca's vertical padding (`worktree-card-surface.tsx:67`): `py-2` only for a title-only
+      // card (`default-workspace-card.json:33` `singleLine`); once there is a meta row or agent
+      // rows it is `pt-1.25 pb-1.5` = 5/6px.
+      .ml(WORKTREE_CARD_SURFACE_MARGIN + geometry.surfaceInset).pr(6)
+      .when(singleLine, (el) => el.py(8)).when(!singleLine, (el) => el.pt(5).pb(6))
       .flex_none()
       .rounded(8)
+      // `worktree-card-surface.tsx:71-76` draws `border border-transparent` on every card, so
+      // the active border adds no geometry and the title does not shift 1px on selection.
+      .border_1().border_color("#00000000")
       .role("button")
       .accessibility_label(w.name)
       // Orca active card: bg foreground/10 over sidebar, border foreground/18.
-      .when(on, (el) => el.bg("#3e3e3e").border_1().border_color("#f0f0f02e"))
+      .when(on, (el) => el.bg("#3e3e3e").border_color("#f0f0f02e"))
       // No background change on hover. Orca does have
       // `.worktree-sidebar-card-hover:hover { background: color-mix(in srgb, var(--sidebar-accent)
       // 40%, transparent) }` (main.css:1488), but washing the row repaints the whole project
@@ -899,11 +979,12 @@ export default class Spaces extends View {
       // the old `pt(2)` on the lane plus `items_start` is Orca's own optical nudge, and the
       // title's 20px line box is what puts the mark on the first line.
       .child(h_flex().w_full().min_w(0).items_start().gap(2).pl(geometry.cardPaddingLeft)
-        // WorktreeCardStatusLane, legacy style (the default: experimentalNewWorktreeCardStyle
-        // is false): `shrink-0 flex justify-center items-start pt-[2px]`, and no width — the
-        // new-style `w-5` lane belongs to the other card style. StatusIndicator's own box is
-        // h-3 w-3 holding an 8px dot.
-        .child(div().flex_none().flex().items_start().justify_center().pt(2)
+        // WorktreeCardStatusLane, legacy style (`worktree-card-status-lane.tsx:19-23`): the
+        // `shrink-0 flex justify-center items-start pt-[2px]` div around the unread button;
+        // `WorktreeCardStatusSlot.tsx:246-247` sizes that button `size-4` = 16px even when the
+        // card is not the new style, so the LANE is 16px wide while StatusIndicator's own box
+        // stays `h-3 w-3` (12px) holding an 8px dot.
+        .child(div().flex_none().w(LEGACY_STATUS_LANE_WIDTH).flex().items_start().justify_center().pt(2)
           .child(statusMark(dot, 12)))
         // `worktree-card-parent-content.tsx:66` — `flex min-w-0 flex-1 flex-col gap-1.5`, so
         // title row to meta row to agent summary is 6px. Herdr's gap() is pixels; 6 is 6.
@@ -922,12 +1003,12 @@ export default class Spaces extends View {
           // (`WorktreeCardFolderPath`: `font-mono text-[11px] leading-none`). The review badge
           // sits at the row's end, which is Orca's `ml-auto ... pr-1.5` cluster
           // (WorktreeCardMetaBadges.tsx:86) and the only thing it holds for a classic card.
-          .when(Boolean(meta), el => el.child(h_flex().w_full().min_w(0).items_center()
-            .child(div().min_w(0).truncate().text_size(11).line_height("11px").text_color(t.dim).when(metaMono, m => m.font_family("JetBrains Mono")).child(meta))
+          .when(Boolean(metaText), el => el.child(h_flex().w_full().min_w(0).items_center()
+            .child(div().min_w(0).truncate().text_size(11).line_height("11px").text_color(t.muted).when(metaMono, m => m.font_family("JetBrains Mono")).child(metaText))
             .child(div().flex_1())
             .when(Boolean(this.reviewOf(g)), row => row.child(this.prBadge(this.reviewOf(g), t, w.id)))))
-          // Orca's compact agent summary (worktree-card-compact-agents.tsx): h-6, px-1,
-          // 11px muted, a chevron that folds the rows, which carry a 6px status dot each.
+          // Orca's compact agent summary (worktree-card-compact-agents.tsx): h-6, px-1, 11px
+          // muted; the collapsed pill draws state clusters and the rows carry AgentStateDot.
           .when(mine.length > 0, el => el.child(agentBlock))),
       ),
       // A worktree with no space opens one in its folder; anything else selects the space.
@@ -981,26 +1062,34 @@ export default class Spaces extends View {
     const tool = (id, label, icon, fn, more) => tip(this.hot, t, id, label, stop(this, t, id, div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(this.hot === id ? t.foreground : t.dim).on_hover(this.glow(id)).role("button").accessibility_label(label).hover(s => s.bg(t.hover))
       .on_click(fn).child(svg(`mods/orca-spaces/${icon}.svg`).size(14))), more);
     return focusRoot(this, v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      // `overflow_y_scrollbar` — not `overflow_y_scroll`. The latter owns wheel scrolling but
-      // paints no bar, so the list could not be dragged; the shipped `spaces` mod uses
-      // `overflow_y_scrollbar().mode("always")` for exactly this list.
-      .child(v_flex().id("space-list").flex_1().min_h(0).overflow_y_scrollbar()
-        .on_mouse_up("left", (_e, cx) => { this.pressed = this.over = null; cx.notify(); })
-        // Herdr reports no release outside the sidebar, so leaving ends a drag, as in the inbox.
-        .on_hover((on, cx) => {
-          if (on || this.pressed === null) return;
-          this.pressed = this.over = null;
-          cx.notify();
-        })
-        .child(v_flex().id("space-content").w_full().flex_none().px(0).pb(8)
-          // `EmptyState.tsx:14-27` — Orca's only branch without filters, `flex flex-col
-          // items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground`,
-          // holding "No workspaces found". Orca also requires `startupWorktreeRefreshCompleted`;
-          // Herdr has no discovery flag to read, and a zero-row list is already settled.
-          // `WorktreeList.tsx:285-287`: the gate is the row plan (`rowModel.rows.length === 0`).
-          .when(rows.length === 0, el => el.child(div().flex().flex_col().items_center().gap(8).px(16).py(24).w_full()
-            .text_size(11).text_center().text_color(t.muted)
-            .child(div().child("No workspaces found"))))
-          .children(rows.length ? this.grouped(t, cx, rows) : []))));
+      // The bar gets its own strip so rows never paint under it: Orca reserves
+      // `padding-right: 4px` before an 8px bar (main.css:767-774), so the card and its
+      // hover outline stop 12px short of the edge. `overflow_y_scroll` plus a sibling
+      // `Scrollbar.vertical("space-list")` is the documented pair for a bar outside the
+      // scrolling box; the two halves are matched by name.
+      .child(h_flex().flex_1().min_h(0)
+        .child(v_flex().id("space-list").flex_1().min_h(0).pr(4).overflow_y_scroll()
+          .on_mouse_up("left", (_e, cx) => { this.pressed = this.over = null; cx.notify(); })
+          // Herdr reports no release outside the sidebar, so leaving ends a drag, as in the inbox.
+          .on_hover((on, cx) => {
+            if (on || this.pressed === null) return;
+            this.pressed = this.over = null;
+            cx.notify();
+          })
+          .child(v_flex().id("space-content").w_full().flex_none().px(0).pb(8)
+            // `EmptyState.tsx:14-27` — Orca's only branch without filters, `flex flex-col
+            // items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground`,
+            // holding "No workspaces found". Orca also requires `startupWorktreeRefreshCompleted`;
+            // Herdr has no discovery flag to read, and a zero-row list is already settled.
+            // `WorktreeList.tsx:285-287`: the gate is the row plan (`rowModel.rows.length === 0`).
+            .when(rows.length === 0, el => el.child(div().flex().flex_col().items_center().gap(8).px(16).py(24).w_full()
+              .text_size(11).text_center().text_color(t.muted)
+              .child(div().child("No workspaces found"))))
+            .children(rows.length ? this.grouped(t, cx, rows) : [])))
+        // Orca fades the thumb in on hover (main.css:783-790). Herdr's theme leaves an
+        // omitted-mode thumb unpainted, so `mode("always")` is deliberate: a visible,
+        // draggable bar beats one the theme never shows.
+        .child(div().w(8).flex_none().h_full()
+          .child(Scrollbar.vertical("space-list").size_full().mode("always")))));
   }
 }
