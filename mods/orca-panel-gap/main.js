@@ -31,6 +31,21 @@ const GAPS = {
     icon: "plug",
     title: "Ports",
     body: "Ports need Orca's port detection and SSH forwarding. Herdr exposes no port API."
+  },
+  tasks: {
+    icon: "list",
+    title: "Tasks",
+    body: "Orca's Tasks page reads GitHub/GitLab/Linear/Jira issue sources (task-page/components), and Herdr exposes no issue integration — the nearest real thing is an agent started with a task (commands.rs:32-33)."
+  },
+  automations: {
+    icon: "calendar-clock",
+    title: "Automations",
+    body: "Orca's Automations run scheduled work (AutomationsPageSurface.tsx), and Herdr has no scheduler."
+  },
+  mobile: {
+    icon: "smartphone",
+    title: "Orca Mobile",
+    body: "Orca pairs a phone to the desktop app (MobileHero.tsx pairing flow), while Herdr's remote surface is hc machine over SSH (machines.rs) and there is no web/pairing client."
   }
 };
 
