@@ -104,7 +104,7 @@ export default class PanelHead extends View {
         return div().id(`panel-${id}`).w(32).h_full().flex_none().flex().items_center().justify_center().relative()
           .text_color(on ? t.foreground : "#acacac99")
           .when(!on, el => el.hover(s => s.text_color(t.muted)))
-          .role("button").accessibility_label(title)
+          .role("button").accessibility_label(title).tooltip(title)
           .on_click(() => run("layout.select", { stack: "panel-body", child: id }))
           .child(svg(`mods/orca-panel-head/${icon}.svg`).size(16))
           // `activity-bar-buttons.tsx:175-177`: bottom-0, left/right 25%, h-2px,
