@@ -1,0 +1,34 @@
+// A pane's agent status, for layouts that frame their panes at the bottom edge:
+//   { "pane": { "header": { "position": "bottom", "height": 16, "content": { "mod": "pane-status" } } } }
+// Draws only the state mark of the pane's agent, hard right — the same glyph
+// `AgentStateDot` draws in Orca (src/renderer/src/components/AgentStateDot.tsx:157-201).
+// Props from the app: { pane, terminal }.
+
+import { View, div, svg } from "gpui-kit";
+import { h_flex } from "gpui-base";
+import { panes, props } from "herdr";
+
+export default class PaneStatus extends View {
+  me() {
+    return panes().find((p) => p.pane === props()?.pane);
+  }
+
+  render(cx) {
+    const p = this.me();
+    if (!p || !p.status) return div();
+    const dot = (color) => div().size(6).flex_none().rounded(3).bg(color);
+    return h_flex().size_full().px(6).items_center()
+      // src/renderer/src/components/AgentStateDot.tsx:104 — the compact box is `h-2.5 w-2.5` (10px), the inner dot
+      // `size-1.5` (6px), the glyph `size-2.5` (10px). `size="sm"` is what the tab and
+      // sidebar rows use, so the same mark is drawn at the same size here.
+      .child(div().ml_auto().size(10).flex_none().flex().items_center().justify_center()
+        // working → `AgentWorkingSpinner`, `border-agent-working` = the yellow-500 token
+        // (main.css:256,1836); done → CircleCheck in emerald-500 (src/renderer/src/components/AgentStateDot.tsx:176-180);
+        // blocked → the bare red-500 dot (src/renderer/src/components/AgentStateDot.tsx:194-201).
+        .when(p.status === "working", el => el.child(svg("mods/orca-pane-status/spinner.svg").size(10).text_color("#eab308").spin(1000)))
+        .when(p.status === "done", el => el.child(svg("mods/orca-pane-status/circle-check.svg").size(10).text_color("#10b981")))
+        .when(p.status === "blocked", el => el.child(dot("#ef4444")))
+        // idle → `bg-neutral-500/40` (src/renderer/src/components/AgentStateDot.tsx:199); Orca's bare dot is idle only.
+        .when(p.status === "idle", el => el.child(dot("#73737366"))));
+  }
+}
