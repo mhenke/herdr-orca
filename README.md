@@ -91,6 +91,23 @@ git pull && sh scripts/sync.sh
 
 All Git executions pass `--no-optional-locks -c core.fsmonitor=false` so locks are never held and file watches are not triggered in loops.
 
+## Releases and changelog
+
+Releases follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). All changes are documented in [CHANGELOG.md](CHANGELOG.md) using [git-cliff](https://git-cliff.org) from Conventional Commits.
+
+To cut a release:
+
+```sh
+# Dry-run checks and changelog preview
+./scripts/release.sh --dry-run 0.1.0
+
+# Perform checks, update CHANGELOG.md, commit, and tag
+./scripts/release.sh 0.1.0
+
+# Push and create a GitHub Release with assets
+./scripts/release.sh 0.1.0 --push --github-release
+```
+
 ## Credits and license
 
 Ported from [stablyai/orca](https://github.com/stablyai/orca) (MIT License, Copyright Orca). Space models and avatars informed by [herdr-t3](https://github.com/JinJieBeWater/herdr-t3) (Apache-2.0). Shipped under the Apache-2.0 License, matching Herdr App.
