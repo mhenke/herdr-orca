@@ -38,7 +38,7 @@ export default class WorkspaceChrome extends View {
       // with a 14px glyph (button.tsx:41, SidebarSettingsHelpMenu.tsx:203).
       const row = (id, icon, label, action) => div().id(id).size(24).flex_none().flex().items_center().justify_center().rounded(8)
         .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
-        .role("button").accessibility_label(label).on_click(action).child(svg(`mods/orca-chrome/${icon}.svg`).size(14));
+        .role("button").accessibility_label(label).tooltip(label).on_click(action).child(svg(`mods/orca-chrome/${icon}.svg`).size(14));
       return h_flex().size_full().items_center().justify_between().bg(t.chrome).border_t(1).border_color(t.border).px(8).text_size(12)
         .child(h_flex().items_center().gap(4)
           .child(row("settings", "settings", "Settings", () => run("app.settings")))

@@ -129,7 +129,7 @@ export default class Tabs extends View {
     // `rounded-md` resolves to 8px, not 6: --radius .625rem x .8 (main.css:175,195).
     const tabNew = (action) => div().id("tab-new").ml(8).size(28).flex_none().flex().items_center().justify_center().rounded(8)
       .text_color(t.muted).hover(s => s.bg("#40404080").text_color(t.foreground))
-      .role("button").accessibility_label("New tab")
+    .role("button").accessibility_label("New tab").tooltip("New tab")
       .on_mouse_down("left", stop).on_click(action)
       .child(svg("mods/orca-tabs/plus.svg").size(14).flex_none());
     const winBtn = (id, label, glyph, action, close) => div().id(id).w(46).h_full().flex_none().flex().items_center().justify_center()
@@ -141,7 +141,7 @@ export default class Tabs extends View {
     // muted, hover --accent + foreground). Herdr toggles it with `layout.toggle` (commands.rs:77).
     const panelToggle = (action) => div().id("panel-toggle").mr(8).w(32).h(24).flex_none().flex().items_center().justify_center().rounded(4)
       .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
-      .role("button").accessibility_label("Toggle right sidebar")
+    .role("button").accessibility_label("Toggle right sidebar").tooltip("Toggle right sidebar")
       .on_mouse_down("left", stop).on_click(action)
       .child(svg("mods/orca-tabs/panel-right.svg").size(16));
     const item = (c, i) => {
