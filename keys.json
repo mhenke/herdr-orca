@@ -1,5 +1,5 @@
 {
-  "layout:orca": {
+  "layout:herdr-orca": {
     "ctrl-shift-b": "layout.toggle:sidebar",
     "ctrl-shift-e": "layout.toggle:panel"
   }

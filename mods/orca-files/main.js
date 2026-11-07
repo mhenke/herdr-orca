@@ -8,7 +8,12 @@ function location() {
   const space = spaces().find(s => s.active), f = focused();
   const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
   const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
-  return { cwd: pane?.cwd || f?.cwd || space?.folder, on, space: space?.id };
+  // Orca scopes the panel to the project, not to whatever folder the focused
+  // terminal happens to sit in: a terminal in /tmp must not empty the tree.
+  const live = pane?.cwd || f?.cwd;
+  const project = space?.folder || live;
+  const cwd = live && project && !(live.startsWith(project + "/") || live === project) ? project : live || project;
+  return { cwd, on, space: space?.id };
 }
 const key = () => JSON.stringify(location());
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
@@ -45,7 +50,7 @@ export default class Files extends View {
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {};
     this.cx = cx;
     this.hits = null;
-    this.q = InputState.new({ placeholder: "Search files" });
+    this.q = InputState.new({ placeholder: "Find files" });
     let timer = null;
     this.q.on("change", (_e, cx) => {
       const v = this.q.value().trim();
@@ -249,7 +254,8 @@ export default class Files extends View {
     for (const entry of this.entries.get(prefix) ?? []) {
       if (out.length >= TOTAL) break;
       const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[`${this.root}/${path}`];
-      out.push(h_flex().id(`file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(t.hover))
+      // FileExplorerRow.tsx:152,147 — indent depth*16 + 8, gap 4, rounded-sm, text-xs, py 4.
+      out.push(h_flex().id(`file-${path}`).w_full().h(22).flex_none().pl(8 + depth * 16).pr(8).gap(4).items_center().rounded(2).text_size(12).cursor_pointer().hover(s => s.bg(t.hover))
         .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : this.show(path, cx))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.menu(path, entry); })
         .child(entry.dir ? svg(`mods/orca-files/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
@@ -300,15 +306,16 @@ export default class Files extends View {
     const t = theme();
     if (this.prompt) return this.promptView(t);
     if (props()?.tab === "file") return this.menuView(t);
-    return v_flex().id("files").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
-      .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
-        .when(Boolean(this.file), el => el.child(div().id("files-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => { this.show(null); cx.notify(); }).child("←")))
-        .child(div().font_semibold().child("Files"))
-        .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(this.file ?? this.root?.split(/[\\/]/).pop() ?? "")))
-      .when(!this.file, el => el.child(h_flex().flex_none().h(36).px(10).gap(6).items_center().border_b(1).border_color(t.border)
-        .child(svg("mods/orca-files/file.svg").size(13).flex_none().text_color(t.dim))
-        .child(div().flex_1().min_w(0).h(24).px(8).flex().items_center().rounded(6).bg(t.background).child(Input.new(this.q).h_full().text_size(12).text_color(t.foreground)))))
-      .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6)
+    return v_flex().id("files").size_full().min_h(0).overflow_hidden().bg(t.canvas).text_color(t.foreground).text_size(13)
+      .when(Boolean(this.file), el => el.child(h_flex().h(30).flex_none().px(10).gap(6).items_center().border_b(1).border_color(t.border)
+        .child(div().id("files-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => { this.show(null); cx.notify(); }).child("←"))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.dim).child(this.file ?? ""))))
+      // FileExplorerNameFilter.tsx:23 — h-8, rounded-md, border border, bg-input/50, ListFilter 14, text-xs.
+      .when(!this.file, el => el.child(h_flex().flex_none().p(6)
+        .child(h_flex().w_full().h(32).px(8).gap(4).items_center().rounded(6).overflow_hidden().border_1().border_color(t.border).bg(t.input)
+          .child(svg("mods/orca-files/list-filter.svg").size(14).flex_none().text_color(t.muted))
+          .child(Input.new(this.q).flex_1().min_w(0).text_size(12).text_color(t.foreground).bg("#00000000")))))
+      .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().py(4)
         .children(this.hits?.length
           ? this.hits.map((h, i) => h_flex().id(`hit-${i}`).h(26).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer().hover(s => s.bg(t.hover))
               .on_click((_e, cx) => this.show(h.file, cx))

@@ -1,6 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, exec, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
+import { spaces, panes, exec, run, openOverlay, theme, window, shared, layout, settings, setShared } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -34,17 +34,11 @@ export default class Tabs extends View {
     if (!space || !panel) return;
     const now = panel.hidden ? null : body?.active ?? null;
     if (space.id !== this.space) {
-      const first = this.space === undefined;
       this.space = space.id; this.pending = null;
-      if (!(first && !(space.id in this.panels))) {
-        const stored = this.panels[space.id] ?? null, want = enabled.includes(stored) ? stored : null;
-        if (want !== now) {
-          this.pending = { want, until: Date.now() + 1000 };
-          if (want) { run("layout.select", { stack: "panel-body", child: want }); run("layout.show", { id: "panel" }); }
-          else run("layout.hide", { id: "panel" });
-          return;
-        }
-      }
+      // Orca always shows the panel; restore the remembered tool but never hide it.
+      const stored = this.panels[space.id] ?? null, want = enabled.includes(stored) ? stored : null;
+      if (want && want !== now) run("layout.select", { stack: "panel-body", child: want });
+      if (panel.hidden) run("layout.show", { id: "panel" });
     }
     // Until the restore lands (or something else won), the old state isn't a choice.
     if (this.pending) {
@@ -66,9 +60,14 @@ export default class Tabs extends View {
     const item = (c, i) => {
       const program = panes().find(p => p.tab === c.id && p.program?.agent)?.program ?? panes().find(p => p.tab === c.id)?.program;
       const name = /^tb\d+$/.test(c.name) ? program?.name ?? "Terminal" : c.name;
-      return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
-        .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
-        .hover(s => s.bg(t.hover))
+      // Orca's tab: flat, full height, no pill. Active = card bg + a 2px bar under it.
+      // SortableTab.tsx:214 + drop-indicator.ts:15 — h-full px-1.5 text-xs; active bg-tab-active
+      // (--card #171717), inactive = foreground 4% over card, 2px full-width active indicator.
+      return h_flex().id(`tab-${c.id}`).h_full().px(6).gap(6).relative().items_center().flex_none().text_size(12)
+        .bg(c.active ? "#171717" : "#1c1c1c").text_color(c.active ? t.foreground : t.muted)
+        .when(!c.active, el => el.hover(s => s.text_color(t.foreground)))
+        .when(i < shown.length - 1, el => el.border_r(1).border_color(t.border))
+        .when(c.active, el => el.child(div().absolute().bottom(0).left(0).right(0).h(2).bg(t.foreground)))
         .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); this.pressed = i; if (e.click_count === 2) run("tab.rename", { id: c.id }); })
         .on_mouse_up("left", () => {
           const from = this.pressed; this.pressed = null;
@@ -78,9 +77,9 @@ export default class Tabs extends View {
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: { id: c.id, space: space.id } } }); })
         .when(Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
         .child(div().max_w(170).truncate().child(c.zoomed ? `${name} Z` : name))
-        .when(c.status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
+        .when(c.status === "working", el => el.child(svg("mods/orca-tabs/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
         .when(c.status === "blocked" || c.status === "done", el => el.child(div().size(6).rounded(3).bg(t[c.status])))
-        .when(c.active, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/pane/close.svg").size(12))));
+        .when(c.active, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/orca-tabs/close.svg").size(12))));
     };
     const root = layout(), sidebar = find(root, "sidebar"), w = window();
     // Old saved rails and a dragged-narrow sidebar can be smaller than the window buttons.
@@ -92,8 +91,8 @@ export default class Tabs extends View {
     this.syncPanel(space, panel, body, enabled);
     // Orca's right activity bar: 36px square buttons, 16px icons, one per activity.
     const cwd = panes().find(p => p.focused)?.cwd;
-    const items = [{ id: "files", icon: "mods/orca-files/file.svg", title: "Explorer" }];
-    if (gitRepo(cwd, cx)) items.push({ id: "changes", icon: "mods/workspace-chrome/git-branch.svg", title: "Source Control" });
+    const items = [{ id: "files", icon: "mods/orca-tabs/file.svg", title: "Explorer" }];
+    if (gitRepo(cwd, cx)) items.push({ id: "changes", icon: "mods/orca-tabs/git-branch.svg", title: "Source Control" });
     const panelButton = ({ id, icon, title }) => {
       const on = panel && !panel.hidden && body?.active === id;
       return div().id(`panel-${id}`).size(36).flex_none().flex().items_center().justify_center().rounded(6)
@@ -109,10 +108,16 @@ export default class Tabs extends View {
       .on_mouse_up("left", () => { this.pressed = null; })
       .on_scroll_wheel(e => { if (Math.abs(e.delta.y) >= 1) run(e.delta.y > 0 ? "tab.prev" : "tab.next"); })
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().children(shown.map(item)))
+      // TitlebarLeftControls: the sidebar toggle sits outside the sidebar, so it survives hiding it.
+      .child(button("sidebar-toggle", svg("mods/orca-tabs/sidebar.svg").size(14), () => {
+        const hidden = Boolean(find(layout(), "sidebar")?.hidden);
+        setShared("sidebar.collapsed", !hidden);
+        run(hidden ? "layout.show" : "layout.hide", { id: "sidebar" });
+      }))
       .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 })))
       .children(items.filter(it => enabled.includes(it.id)).map(it => panelButton(it)))
-      .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
+      .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/orca-tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
         .child(button("maximize", w.platform === "windows" ? svg(`mods/tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
-        .child(button("close-window", w.platform === "windows" ? svg("mods/tabs/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
+        .child(button("close-window", w.platform === "windows" ? svg("mods/orca-tabs/win-close.svg").size(16) : svg("mods/orca-tabs/close.svg").size(13), () => run("window.close"))));
   }
 }

@@ -411,9 +411,11 @@ export default class Spaces extends View {
       .flex_none()
       .justify_center()
       .rounded(8)
+      .mx(4)
       .role("button")
       .accessibility_label(w.name)
-      .when(on, (el) => el.bg(t.selected))
+      // Orca active card: bg foreground/10 over sidebar, border foreground/18.
+      .when(on, (el) => el.bg("#3e3e3e").border_1().border_color("#f0f0f02e"))
       .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
       .when(this.pressed === w.id && this.over !== w.id, (el) => el.opacity(0.5))
       .when(this.pressed !== null && this.over === w.id && this.pressed !== w.id, (el) => el.child(
@@ -455,8 +457,8 @@ export default class Spaces extends View {
           .items_center()
           .when(Boolean(tree), el => el.pl(20).child(h_flex().size(18).flex_none().items_center().justify_center()
             .child(svg("mods/orca-spaces/git-branch.svg").size(16).text_color(t.dim))))
-          .when(!tree, el => el.child(projectMark(w, 18, t, ps)))
-          .child(div().min_w(0).max_w(150).truncate().text_color(t.foreground).child(w.name))
+          .when(!tree, el => el.child(projectMark(w, 16, t, ps)))
+          .child(div().min_w(0).max_w(150).truncate().text_size(13).text_color(t.foreground).child(w.name))
           .child(g ? this.gitTail(g, tree, w.name, t, w.id) : div().flex_1())
           // -3: its chevron stands in the column of the heading's last button and a machine's chevron, 23 from the edge.
           .when(kids > 0, el => el.child(tip(this.hot, t, foldId, folded ? "Expand worktrees" : "Collapse worktrees", stop(this, t, foldId, div().id(foldId).h(20).min_w(20).mr(-3).px(4).gap(3).flex_none().flex().items_center().justify_center().rounded(4)
@@ -487,18 +489,6 @@ export default class Spaces extends View {
     const tool = (id, label, icon, fn, more) => tip(this.hot, t, id, label, stop(this, t, id, div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(this.hot === id ? t.foreground : t.dim).on_hover(this.glow(id)).role("button").accessibility_label(label).hover(s => s.bg(t.hover))
       .on_click(fn).child(svg(`mods/orca-spaces/${icon}.svg`).size(14))), more);
     return focusRoot(this, v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      .child(h_flex().id("spaces-heading").h(32).flex_none().pl(16).pr(10).items_center().justify_between().text_size(12).font_medium().text_color(t.dim)
-        .child(div().text_color(t.muted).child("Spaces"))
-        // The same two as Inbox's top row, so switching modes moves nothing.
-        .child(h_flex().flex_none().gap(2).items_center()
-          .child(tool("space-new", "New space", "folder-plus", (_e, cx) => {
-            this.hot = null;
-            // The layout's menu asks which machine, as its mod.json places it; the shipped one can't, so docked alone it's the active space's.
-            if (asks) openOverlay({ mod: props().newMenu, kind: "popup", at: "top", offset: 40, width: 576, height: 420, props: { pick: true } });
-            else run("space.new");
-            cx.notify();
-          }, { action: asks ? null : "space.new" }))
-          .child(tool("space-new-tab", "New tab", "square-pen", (_e, cx) => { this.hot = null; run("mod.open", { name: props()?.newMenu ?? "new-menu" }); cx.notify(); }))))
       .child(v_flex().id("space-list").flex_1().min_h(0).overflow_y_scroll()
         .on_mouse_up("left", (_e, cx) => { this.pressed = this.over = null; cx.notify(); })
         // Herdr reports no release outside the sidebar, so leaving ends a drag, as in the inbox.
@@ -507,7 +497,7 @@ export default class Spaces extends View {
           this.pressed = this.over = null;
           cx.notify();
         })
-        .child(v_flex().id("space-content").w_full().flex_none().px(8).pb(8)
+        .child(v_flex().id("space-content").w_full().flex_none().px(0).pb(8)
           .children(this.grouped(t)))));
   }
 }
