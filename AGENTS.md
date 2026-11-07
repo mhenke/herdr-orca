@@ -12,12 +12,18 @@ Read `GLOSSARY.md` for the domain: repo / space / main checkout / linked
 worktree / project group / top branch mean exactly one thing each here.
 ## Iron rules (paid for in full)
 
-1. **Orca's code is the spec, not screenshots.** Every geometry value, color,
-   status rule and grouping rule in this package traces to a file and line in
-   `~/Projects/orca`, quoted in the edit comment. Tailwind classes lie to the eye
-   (`mr-1` is 4px in a `w-5` lane); read the class, compute the pixel, verify by
-   pixel sampling with `herdr-app shot` + PIL. Vision models misread 8px marks
-   repeatedly — pixel evidence beats a vision read every time.
+1. **Orca's code is the spec, not screenshots, not pixels.** Every geometry value,
+   color, status rule and grouping rule in this package traces to a file and line
+   in `~/Projects/orca`, quoted in the edit comment. Tailwind classes lie to the
+   eye (`mr-1` is 4px); read the class, do the arithmetic from Orca's constants.
+   Never measure pixels to derive a value — pixel evidence misled this project
+   repeatedly (tool zoom, antialiasing, stale renders). Pixels may confirm a render
+   happened, never what the value should be.
+
+   **Query the Orca graph first.** `~/Projects/orca` carries a Graphify knowledge
+   graph (`graphify-out/`). Run `graphify query "<question>"` (or `graphify path` /
+   `graphify explain`) to find the file that owns a behavior instead of grepping the
+   tree; open the file it names and quote that file in the edit comment.
 2. **Copy the owning function, not its outputs.** Hand-tuned literals drift;
    the port of `indentation.ts` (`mods/orca-spaces/indentation.js`) ended five
    rounds of indent patches. If Orca computes it somewhere, port that module.
