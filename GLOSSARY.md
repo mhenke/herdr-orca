@@ -72,3 +72,15 @@ exactly one thing here.
 - **Saved project** — a folder someone added to the sidebar that outlives its space. It is a
   project that exists with nothing open on it; a folder that is gone stays listed and marked
   until it is removed, rather than disappearing.
+- **Space folder** — the one folder a space is bound to when it is created. Every surface that
+  follows the space reads this folder, never the focused terminal's working directory: a
+  terminal that `cd`s into another repo does not move the file explorer or its title, and a
+  space created on the wrong folder shows that folder everywhere until a new space is opened on
+  the right one. The space is the scope; the terminal is only where keystrokes go.
+- **Explorer mode** — which body the file explorer draws: **Names** filters the tree by path,
+  **Contents** searches file text. One panel, two modes, not two panels: switching keeps both
+  query rows mounted, does not run a search, and does not move focus. A search runs only when
+  the user types in the Contents row or submits it.
+- **Search result** — a Contents-mode answer, grouped by file: the file, its match count and its
+  matching lines. A result belongs to a file, and the summary counts matches *and* files, so
+  "no results" means no matching text, not an empty tree.

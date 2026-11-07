@@ -166,6 +166,33 @@ evidence over inference, fix the fault not the surface.
     could not be re-rendered; showing the last version that worked"*. The bar
     is the error, not the styling — the message names the fix. See
     `docs/adr/0002-render-failures-are-visible.md`.
+13. **The code is the truth — ask its graph before you assert.** Every behavior
+    starts with one question, asked in Orca's graph before any edit — including
+    a one-line fix: `cd ~/Projects/orca && graphify query "how does Orca <do
+    the thing>"`, then open the file the answer names and read the body. Only
+    then ask Herdr the Herdr half of the same question. `grep` and `find` are
+    not a substitute: they answer "where does this string appear", not "what
+    owns this behavior", and they miss the owning file whenever its name is not
+    the text you guessed. Use them to confirm a line the graph named, never to
+    choose the file. Three repos own every
+    fact this package ports, and each has a built graph:
+    - `~/Projects/orca` — what the UI looks like and how it behaves
+      (`graphify-out/graph.json`, 237,654 nodes).
+    - `~/Projects/herdr-app` — the host, its mods API, and the vendored kit at
+      `vendor/gpui-kit` (`gpui-base` elements, `gpui-kit`, `herdr`); it is the
+      only authority for what a builder method actually does.
+    - `~/Projects/herdr-core` — `hc`, files, processes, the core protocol.
+
+    `cd <repo> && graphify query "<question>"`, confirm the first output line
+    names the repo you meant, then open the file it names and read the body. A
+    `.d.ts` signature, a comment, this file, and an agent's report are all
+    *unverified*. Worked example from this package's own bug hunt: the typings
+    say `Input.new(state)` takes a state, but only
+    `vendor/gpui-kit/crates/base/src/input/input/mod.rs` — `Input` is a
+    `RenderOnce` holding `Entity<InputState>`, taken from the element value on
+    every render — settles whether swapping that state across renders rebinds.
+    Never fix a bug on a mechanism you have not read there; and never report a
+    capability blocked when the code says otherwise.
 
 ## Redesign from first principles — apply it constantly
 

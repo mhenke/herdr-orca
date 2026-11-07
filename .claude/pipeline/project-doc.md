@@ -41,14 +41,14 @@ Sixteen mods, all `"place": "none"` (composed into blocks rather than floated):
 | Mod | Owns | LOC |
 |---|---|---|
 | `orca-chrome` | titlebar strip and the sidebar footer | 66 |
-| `orca-nav` | Search, Tasks/Automations/Orca Mobile rows, history arrows, Projects header | 208 |
+| `orca-nav` | Search, Tasks/Automations/Orca Mobile rows, history arrows, Projects header | 142 |
 | `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, saved folders | 1141 |
 | `orca-tabs` | the tab rail, window controls, right-sidebar toggle | 311 |
 | `orca-pane` | the terminal pane header, incl. its right-click | 100 |
 | `orca-pane-status` | the agent mark drawn in a pane header | 35 |
 | `orca-panel-head` | the right panel's activity switcher | 115 |
 | `orca-panel-gap` | the honest body for a panel or page Herdr has no backend for | 61 |
-| `orca-files` | the file tree, preview, name/content search | 773 |
+| `orca-files` | the file tree (virtualized), preview, name/content search | 818 |
 | `orca-changes` | the source-control list and diff | 313 |
 | `orca-agents` | the agents panel | 110 |
 | `orca-status` | the bottom status bar | 68 |
@@ -75,7 +75,7 @@ Mods are isolated by rule: **a mod cannot import or read outside its own folder*
 
 ```
 layouts/            orca.json (the layout), orca.svg (its preview)
-mods/               ten self-contained mod folders, each with mod.json + main.js + assets
+mods/               sixteen self-contained mod folders, each with mod.json + main.js + assets
 extras/themes/      orca-dark.json, orca-light.json
 scripts/            sync.sh (install), verify.py (audit)
 docs/               superpowers plans/specs (historical)
@@ -118,7 +118,13 @@ No persistence layer of the package's own. Four data sources, read at different 
 
 ## Cross-Cutting Concerns
 
-- **Errors**: a mod exception does not exit the app — it is logged and the region goes blank. This is the dominant failure mode, so `verify.py --smoke` exists to fail on any script error in the log.
+- **Errors**: a mod exception does not exit the app — it is logged and the region keeps its last
+  good frame under a 2px bar naming the error (`docs/adr/0002-…`). Two engine limits shape the
+  code: a render call is cut off at 50 ms and an event handler at 500 ms (`gpui-kit`
+  `sandbox.rs` `Budgets`), so a list that can grow must render through `v_virtual_list` — it
+  hands the renderer a `{start,end}` range and takes `on_item_click`/`on_item_secondary_click`
+  instead of per-row handlers, which the runtime refuses inside an item renderer. Building every
+  row in one frame overruns the budget and paints the bar while the user types.
 - **Off-machine safety**: `exec` carries `on` (the machine name); git probes run there, but `gh` and `curl` are local-only because a remote may not be authenticated.
 - **No network by default**: only the repo avatar (one `curl` per owner, cached to `avatars/`) and `gh` reads. No telemetry.
 - **Settings are documented, never written** — fonts and sounds are the reader's to set.
@@ -136,8 +142,8 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 - **Overall coverage**: 0% by unit-test measure. There is no test runner, no `package.json` and no test files.
 - **Testing framework**: none. `scripts/verify.py` is an audit, not a suite.
 - **Rationale**: the defects this project actually shipped were four runtime throws, three invented values and three fabricated citations. None is visible to a unit test; the oracle for a value is `~/Projects/orca`, which is not a JS dependency. So the audit checks what would have caught them, and it did — it found three fabricated line citations in its first run.
-- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (423 citations); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
-- **Known untested areas**: pointer interaction. Injection is not blocked — Hyprland 0.57 dropped the plain `hyprctl dispatch` form and `hyprctl eval` needs the Lua `hl.dsp.*` API, so hover, click and drag stay code-verified unless one of those is finished.
+- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (428 citations); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
+- **Known untested areas**: pointer interaction. Keys are injectable — this build's `hyprctl` speaks the Lua dispatcher, and `hl.dsp.send_key_state({mods="", state="down", key="f"})` reaches the focused window (a programmatically focused `Input` accepted typed text this way). Pointer is not: `hl.dsp.cursor` exposes only `move` and `move_to_corner`, and `xdotool`, `ydotool`, `wlrctl` are absent while `/dev/uinput` is root-only. So hover, click and drag stay code-verified; typing is verifiable when a probe can focus an element.
 
 ## Entry Points
 
@@ -152,12 +158,15 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 
 ## Changed Files
 
-`.claude/pipeline/project-doc.md` is a DELTA patch over the 17:45 full scan: 46 commits,
-touching every mod under `mods/`, `layouts/orca.json`, `GLOSSARY.md`, `AGENTS.md`, and the four
-ADRs under `docs/adr/`. Sections re-read for this patch: Architecture Pattern (mod table,
-repo-anchored groups, pages, gaps), Folder Structure, Data Architecture (localStorage keys,
-layout selection), Test Coverage (citation count, pointer caveat).
+`.claude/pipeline/project-doc.md` is a DELTA patch over the 22:55 delta. Re-read for this patch:
+`AGENTS.md`, `GLOSSARY.md` (new terms: space folder, explorer mode, search result),
+`mods/orca-files/main.js` (tree now render-through-`v_virtual_list`; `rg` exit 2 kept as a
+partial result in both the listing and the content search; both query rows mounted, one hidden),
+`mods/orca-nav/main.js` (Add-project awaits `pickFolder()`), the tooltip sweep across
+`orca-chrome`, `orca-pane`, `orca-status`, `orca-tabs`. Sections re-read: Architecture Pattern
+(mod table sizes, virtualized tree), Folder Structure (mod count), Cross-Cutting Concerns
+(render budget, error bar), Test Coverage (citation count, injectability facts).
 
 ## Last Scanned
 
-2026-11-07T22:55:00Z
+2026-11-07T23:45:00Z
