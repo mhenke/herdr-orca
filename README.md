@@ -79,11 +79,17 @@ Mods reload on save. A layout change needs a restart. Your settings, key binding
 
 ## What it runs
 
-- `orca-spaces`: read-only `git status` / `git rev-parse` in your spaces' folders, and watches those repos for changes.
+- `orca-spaces`: read-only `git status` / `git rev-parse` / `git remote get-url` in your spaces'
+  folders, and watches those repos for changes.
 - `orca-files`: `rg --vimgrep` while you type in the search field, and file operations you ask for (create, rename, delete, reveal).
 - `orca-menu`: `wl-copy` / `xclip` / `pbcopy` for Copy Path, and `xdg-open` / `open` / `explorer.exe` for Reveal.
 
-No network requests.
+**One network request, once per repo.** Group headers show the repo's GitHub owner avatar, as
+Orca's `RepoIconGlyph` does (`repository-icon-github.ts`). The first time a repo whose origin
+remote names a GitHub owner is seen, `orca-spaces` fetches
+`https://github.com/<owner>.png?size=64` with `curl` and caches it in
+`~/.config/herdr-app/avatars/`; every later render reads that file. A failed fetch keeps the
+grey Folder icon. No telemetry, no other host.
 
 ## Credits and license
 

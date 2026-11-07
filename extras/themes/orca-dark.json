@@ -39,10 +39,10 @@
     "accent_foreground": "#ffffff",
     "ring": "#55a6ff",
     "selection": "#383a40",
-    "working": "#55a6ff",
-    "blocked": "#f39a3c",
-    "done": "#19c98a",
-    "idle": "#969eae",
+    "working": "#eab308",
+    "blocked": "#ea580c",
+    "done": "#10b981",
+    "idle": "#737373",
     "unknown": "#6b7280"
   }
 }
