@@ -64,11 +64,14 @@ function items(p, git) {
       ];
     }
     case "tab": {
-      // Orca's order (SortableTabContextMenu.tsx:154-231): split section (:157-176), separator
-      // (:178), Pin/Unpin (:187), Allow Auto-Close (:197-204), Copy Tab ID (:206), separator
-      // (:207), Close (:208), Close Others (:213), Close Split Pane (:216), separator (:217),
-      // Change Title (:218), Tab Color (:224-231). Allow Auto-Close, Close Split Pane and Tab
-      // Color have no Herdr command.
+      // Orca's order (SortableTabContextMenu.tsx:152-251): split section (:157-166), then
+      // "Continue with Terminal Agent" (:167-178, chat view only) and the
+      // TabSessionSurfaceSwitchMenuItems rows (:179-185), separator (:186), Pin/Unpin
+      // (:187-196), Allow Auto-Close (:197-205), Copy Tab ID (:206), separator (:207),
+      // Close (:208-212), Close Others (:213-215), Close Split Pane (:216), separator (:217),
+      // Change Title (:218-222), Tab Color (:223-250). The chat-view and session-switch rows,
+      // Allow Auto-Close, Close Split Pane (closes a tab group, not a pane) and Tab Color have
+      // no Herdr command (commands.rs:30-107).
       const own = spaces().find((s) => (s.tabs ?? []).some((x) => x.id === tg.id));
       const list = own?.tabs ?? [];
       const tab = list.find((x) => x.id === tg.id);
