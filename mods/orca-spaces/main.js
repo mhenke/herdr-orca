@@ -8,9 +8,25 @@ import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
 import { repoMark, tint } from "./project.js";
 import { statusMark } from "./status.js";
-import { getWorktreeCardContentIndent, getFlushWorktreeCardPaddingLeft, WORKTREE_CARD_SURFACE_MARGIN, LINEAGE_CHILDREN_INLINE_OFFSET } from "./indentation.js";
+import { getWorktreeCardContentIndent, getFlushWorktreeCardPaddingLeft, WORKTREE_CARD_SURFACE_MARGIN } from "./indentation.js";
 import { tip, tipMark } from "./tip.js";
 import { stopsInit, stop, focusRoot, enter } from "./focus.js";
+
+// `git worktree list --porcelain`, as Orca parses it
+// (`git-worktree-porcelain-parser.ts`): the first row emitted is the main checkout.
+function parseWorktreeList(output) {
+  const out = [];
+  for (const block of output.trim().split(/\r?\n\r?\n/)) {
+    let path = "", branch = "", bare = false;
+    for (const line of block.trim().split(/\r?\n/)) {
+      if (line.startsWith("worktree ")) path = line.slice(9);
+      else if (line.startsWith("branch ")) branch = line.slice(7).replace(/^refs\/heads\//, "");
+      else if (line === "bare") bare = true;
+    }
+    if (path && !bare) out.push({ path, branch });
+  }
+  return out;
+}
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 // `ps`: panes(), read once by the caller (each read copies every pane).
@@ -197,10 +213,11 @@ export default class Spaces extends View {
       }
       // The repo's own .git folder names it; a worktree's top differs from it.
       const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on });
+      const topDir = top.stdout.trim();
       const common = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, on });
       const repo = common.stdout.trim();
       const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
-      const info = { name, branch: null, ahead: 0, behind: 0, repo: JSON.stringify([on, repo]), linked: repo !== `${top.stdout.trim()}/.git` };
+      const info = { name, top: topDir, branch: null, ahead: 0, behind: 0, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
       for (const line of r.stdout.split("\n")) {
         if (line.startsWith("# branch.head ")) info.branch = line.slice(14);
         else if (line.startsWith("# branch.ab ")) {
@@ -210,6 +227,12 @@ export default class Spaces extends View {
         }
       }
       this.git[key] = info;
+      // Orca's rows are the repo's worktrees (`listRepoWorktrees`), not its open sessions, so an
+      // unopened worktree still draws a card. Record each one; rows without a space open in it on click.
+      if (!info.linked) {
+        const wt = await exec("git", ["worktree", "list", "--porcelain"], { cwd, on });
+        info.worktrees = wt.code === 0 ? parseWorktreeList(wt.stdout) : [];
+      }
       if (!on) this.watch(repo, cx);
     } catch {
       // Couldn't ask (the machine is away): keep what it showed, look again later.
@@ -244,33 +267,56 @@ export default class Spaces extends View {
       && this.ordering.machines.every(name => machines().some(m => m.name === name && m.layout === "ready"));
   }
 
-  // Spaces in order, each worktree space moved under its main checkout's.
+  // Orca's rows are worktrees, keyed by host+path (host-qualified-identity.ts), not by open
+  // session: two tabs on one checkout are one card. Merge Herdr spaces on the same worktree
+  // before emitting, so the card and its agents span them.
   ordered() {
     const sp = spaces(), ps = panes();
     const ready = (w) => this.shown.has(w.id) || where(w, ps) in this.git || Date.now() - (this.born[w.id] ??= Date.now()) > 1500;
     for (const w of sp) if (!this.shown.has(w.id) && ready(w)) this.shown.add(w.id);
-    const list = sp.map((w, i) => ({ w, i, g: this.git[where(w, ps)] ?? null }));
+    const rows = sp.map((w, i) => ({ w, i, g: this.git[where(w, ps)] ?? null }));
+    // A repo worktree is one card: `linked` worktrees and second same-checkout spaces fold
+    // into the first space on that top-level folder. Folder spaces merge only with themselves.
+    const seen = new Set(), list = [];
+    for (const r of rows) {
+      const key = r.g ? JSON.stringify([r.w.machine ?? null, r.g.top]) : `space:${r.w.id}`;
+      if (seen.has(key)) { (list.find(l => l.key === key).also ??= []).push(r); continue; }
+      seen.add(key); list.push({ ...r, key, also: [] });
+    }
+    // Sibling worktrees are flat cards under the group header, main first
+    // (`orderMainWorktreeFirst`). Orca nests only explicit lineage (created-from records),
+    // which Herdr doesn't track, so every row here is depth 0 — no tree indent, no wrapper.
     const mains = new Set(list.filter((r) => r.g && !r.g.linked).map((r) => r.g.repo));
     const nested = (r) => r.g?.linked && mains.has(r.g.repo);
     const out = [];
     const placed = new Set(); // repos whose worktrees are listed (under the first of its spaces)
     const headed = new Set(); // repos whose header is already drawn
     for (const r of list) {
-      if (nested(r)) continue;
       // Orca's `groupBy: 'repo'` plan emits ONE header per repo group
       // (sidebar-row-plan.ts -> buildOrderedGroups), with every worktree of that repo as a
       // card beneath it. A second space in the same repo is another card, not a new group.
       const head = !r.g || !headed.has(r.g.repo);
       if (r.g) headed.add(r.g.repo);
-      const top = { ...r, tree: null, kids: 0, head };
+      const top = { ...r, kids: 0, head };
       out.push(top);
       if (!r.g || r.g.linked || placed.has(r.g.repo)) continue;
       placed.add(r.g.repo);
       const kids = list.filter((k) => nested(k) && k.g.repo === r.g.repo);
       top.kids = kids.length;
+      // Orca lists every worktree of the repo, opened or not. A worktree with no space is a
+      // card that opens it on click (`space.new {folder}`), so the group's rows match git.
+      const opened = new Set(list.filter((k) => k.g?.repo === r.g.repo).map((k) => k.g.top));
+      for (const wt of (r.g.worktrees ?? []).slice(1)) {
+        if (opened.has(wt.path)) continue;
+        opened.add(wt.path);
+        const w = { id: `wt:${r.g.repo}:${wt.path}`, name: wt.branch || wt.path.split("/").pop(), named: false, tabs: [], active: false, status: null, machine: r.w.machine, folder: wt.path };
+        const g = { ...r.g, top: wt.path, branch: wt.branch || r.g.branch, ahead: 0, behind: 0, linked: true };
+        kids.push({ w, i: -1, g, key: `wt:${wt.path}`, also: [], unopened: true });
+      }
+      top.kids = kids.length;
       // Not filtered here: `row()` hides a folded repo's cards so its header stays, which is
       // what a fold means. Filtering here too made the whole group disappear.
-      kids.forEach((k, n) => out.push({ ...k, tree: n === kids.length - 1 ? "└─" : "├─", head: false }));
+      kids.forEach((k) => out.push({ ...k, head: false }));
     }
     // space.next/prev and ctrl-N follow the model, so it keeps the rows' order, folded rows included: folding moves nothing.
     // Simulate the batch so later indexes include earlier moves. An attempted write can lose a sync conflict: let its echo settle before retrying.
@@ -283,6 +329,8 @@ export default class Spaces extends View {
       const moved = new Set();
       this.ordering = { key, at: Date.now(), machines: [] };
       for (let i = 0; i < out.length; i++) {
+        // Synthetic worktree rows are not spaces: nothing may move or select them by id.
+        if (out[i].unopened) continue;
         const from = order.indexOf(out[i].w.id);
         if (from === i) continue;
         run("space.move", { id: out[i].w.id, index: i + 1 });
@@ -291,7 +339,7 @@ export default class Spaces extends View {
       }
       this.ordering.machines = [...moved];
     }
-    return out.filter(r => this.shown.has(r.w.id));
+    return out.filter(r => r.unopened || this.shown.has(r.w.id));
   }
 
   // Orca keeps each card's agent list open or folded on its own, remembered across runs.
@@ -436,10 +484,12 @@ export default class Spaces extends View {
   }
 
   // Orca's worktree card (worktree-card-surface.tsx): ml-1, py-2 (36px single line), rounded-lg,
-  // a w-5 status lane, a 13px/20px title, the primary pill on the main checkout.
-  card({ w, i, g, tree }, t, ps) {
-    const fromIndex = this.pressed === null ? -1 : spaces().findIndex(s => s.id === this.pressed);
-    const on = w.active;
+  // a status lane, a 13px/20px title, the primary pill on the main checkout.
+  card({ w, i, g, also, unopened }, t, ps) {
+    // A merged card lights with any of its spaces and rolls all of their tabs up, as one
+    // worktree with two open sessions is still one worktree.
+    const group = [w, ...(also ?? []).map(a => a.w)];
+    const on = group.some(s => s.active);
     // Orca titles a card by its worktree's branch when the header above already says the
     // repo/folder (`herdr-file-viewer` -> `main`), else the space's own name. The branch
     // follows as the meta row only when it adds to the title (default-workspace-card.json
@@ -451,16 +501,17 @@ export default class Spaces extends View {
     // Orca's card lists its own agents (inlineAgents) with a 6px status dot each, from
     // agents(): the same rows the agents view reads, so a collapsed card shows the count
     // of real rows and never invents one.
-    const tabIds = new Set((w.tabs ?? []).map(c => c.id));
+    const tabIds = new Set(group.flatMap(s => (s.tabs ?? []).map(c => c.id)));
     const mine = agents().filter(a => tabIds.has(a.tab));
-    // The host already rolled the space's agents up (model.rs `rollup`); re-deriving it here
-    // would let the card disagree with the app, and collapse `error` on its own.
-    const dot = w.status ?? null;
-    // `primary` marks the repo's top branch only: a folder workspace has no branch, and a
-    // linked worktree is secondary to its checkout.
-    // shortcut: main/master by name; a repo whose default branch is named otherwise shows
-    // none. Upgrade to `git symbolic-ref refs/remotes/origin/HEAD` if that ever matters.
-    const isPrimary = Boolean(g && !g.linked && (branch === "main" || branch === "master"));
+    // The host already rolled each space's agents up (model.rs `rollup`); the worktree's rollup
+    // is the most urgent of its sessions (STATUS order: blocked > done > working > idle).
+    const rank = { blocked: 4, done: 3, working: 2, idle: 1 };
+    const dot = group.map(s => s.status).reduce((b, s) => ((rank[s] ?? -1) > (rank[b] ?? -1) ? s : b), null);
+    // `primary` marks the worktree git itself lists first — its own checkout, not a linked
+    // one (`worktree-card-header.tsx:115`: `!compactCards && worktree.isMainWorktree && !isFolder`).
+    // Orca's parser sets `isMainWorktree: worktrees.length === 0`; ours marks `linked` when the
+    // top differs from the common dir's owner, so the check is simply `!linked`.
+    const isPrimary = Boolean(g && !g.linked);
     const folded = this.foldedAgents.has(w.id);
     const toggleId = `space-agents-${w.id}`;
     // An agent row shows the agent, not the folder it shares with the space.
@@ -482,20 +533,14 @@ export default class Spaces extends View {
         .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(10).flex_none())
         .child(div().min_w(0).truncate().child(`${mine.length} agent${mine.length === 1 ? "" : "s"}`)))
       .when(!folded, el => el.child(v_flex().min_w(0).gap(2).pt(2).children(mine.map(agentRow))));
-    // Orca's frame geometry: contentIndent from the group depth and lineage depth, then the
-    // flush-card padding that keeps the title under the header's label.
-    const contentIndent = getWorktreeCardContentIndent({
-      isGrouped: Boolean(g),
-      groupDepth: 0,
-      lineageDepth: tree ? 1 : 0,
-    });
+    // Orca's frame geometry: every row here is lineage depth 0 (no tree indent, no wrapper),
+    // so the padding is the grouped top-level value and the surface sits at ml-1.
+    const contentIndent = getWorktreeCardContentIndent({ isGrouped: Boolean(g), groupDepth: 0, lineageDepth: 0 });
     const geometry = { cardPaddingLeft: getFlushWorktreeCardPaddingLeft(contentIndent, true) };
     return stop(this, t, `space-${w.id}`, v_flex()
       .relative()
       .id(`space-${w.id}`)
-      // A nested card steps in with its surface. Orca derives this from the same module as the
-      // padding (`LINEAGE_CHILDREN_INLINE_OFFSET` = 18 - 4 - 2), not a second literal.
-      .ml(tree ? WORKTREE_CARD_SURFACE_MARGIN + LINEAGE_CHILDREN_INLINE_OFFSET : WORKTREE_CARD_SURFACE_MARGIN).pr(6).py(8)
+      .ml(WORKTREE_CARD_SURFACE_MARGIN).pr(6).py(8)
       .flex_none()
       .rounded(8)
       .role("button")
@@ -510,6 +555,7 @@ export default class Spaces extends View {
           .when(fromIndex > i, line => line.top(0)),
       ))
       .on_mouse_down("left", () => {
+        if (unopened) return;
         this.pressed = w.id;
         this.over = w.id;
       })
@@ -522,6 +568,7 @@ export default class Spaces extends View {
         }
       })
       .on_mouse_up("left", (_e, cx) => {
+        if (unopened) { run("space.new", { folder: g.top, machine: w.machine ?? undefined }); cx.notify(); return; }
         const from = this.pressed;
         const over = this.over;
         this.pressed = null;
@@ -558,8 +605,8 @@ export default class Spaces extends View {
           // 11px muted, a chevron that folds the rows, which carry a 6px status dot each.
           .when(mine.length > 0, el => el.child(agentBlock))),
       ),
-      // A space goes by its mouse-up, which a key isn't.
-      8, { enter: () => run("space.select", { id: w.id }) });
+      // A worktree with no space opens one in its folder; anything else selects the space.
+      8, { enter: () => unopened ? run("space.new", { folder: g.top, machine: w.machine ?? undefined }) : run("space.select", { id: w.id }) });
   }
 
   // A repo is a project group: a SectionHeader, then its worktree cards. A bare folder
