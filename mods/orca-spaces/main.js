@@ -14,6 +14,10 @@ import { stopsInit, stop, focusRoot, enter } from "./focus.js";
 
 // `git worktree list --porcelain`, as Orca parses it
 // (`git-worktree-porcelain-parser.ts`): the first row emitted is the main checkout.
+// `BRANCH_PR_LOOKUP_PAGE_SIZE` (pr-branch-lookup.ts:29): "GitHub lists a branch's PRs newest
+// first, so with a page of one a closed PR opened after the live one wins."
+const BRANCH_PR_LOOKUP_PAGE_SIZE = 10;
+
 function parseWorktreeList(output) {
   const out = [];
   for (const block of output.trim().split(/\r?\n\r?\n/)) {
@@ -55,7 +59,7 @@ export default class Spaces extends View {
         // Keys are the same ones `header()` folds on: repo name, or `space:<id>` for a folder.
         else if (cmd === "collapse-all" || cmd === "expand-all") {
           if (cmd === "collapse-all") {
-            for (const k of this.projectKeys()) this.foldedRepos.add(k);
+            for (const k of this.projectKeys(cx)) this.foldedRepos.add(k);
           } else {
             this.foldedRepos.clear();
           }
@@ -64,7 +68,16 @@ export default class Spaces extends View {
         }
       }
     });
-    this.git = {}; // where() -> { name, branch, owner, repo, linked, pr }, null: not a repo
+    this.git = {}; // where() -> { name, branch, owner, repo, linked }, null: not a repo
+    // Orca keeps reviews out of the worktree row: `buildWorkspaceReviewFacts` reads a
+    // persisted cache keyed `repo::branch` (`getGitHubPRCacheKeyCandidates`) and the card
+    // draws whatever sits there. Nothing is fetched while rendering. Same shape here:
+    // `prCache[key] = { data: { number, state } | null, at }`, keyed `<common-dir>::<branch>`.
+    // v2: v1 answered `--head <branch>` with no owner check, so a fork's `main` sat in the
+    // `stablyai/orca::main` slot. Bumping the key retires those entries instead of trusting them.
+    this.prCache = JSON.parse(localStorage.getItem("pr.cache.v2") ?? "{}");
+    this.prAsking = new Set(); // keys with a hydrating `gh` in flight
+    this.prChecked = {}; // key -> when the cache last answered
     this.checked = {}; // where() -> when it was last looked at
     this.unsure = new Set(); // where()s git couldn't answer for (a machine away)
     this.pending = new Set(); // where()s to look at next
@@ -97,7 +110,18 @@ export default class Spaces extends View {
     for (const s of sp) if (!this.shown.has(s.id)) this.born[s.id] ??= now;
     const due = this.due(now, sp, panes());
     if (due.size) this.refreshGit(due, cx);
-    if (sp.some((s) => !this.shown.has(s.id)) || this.orderingDue(now)) cx.notify();
+    // Agent state is read straight from the host model (`space.status`, `agent.status`), so a
+    // running agent changes it without touching git and without a new space. Nothing notified
+    // in that case, and the indicators sat on whatever the last render caught — the bug that
+    // made a working agent look idle. Repaint when any space or agent status differs from the
+    // last look. Same shape as the existing `shown` check: cheap, and only on a real change.
+    // `agents()` reports `address`, not `id` (an agent has address/pane/space/tab/status);
+    // keying on `a.id` made every entry `undefined:idle`, so a real change never differed.
+    const now2 = { spaces: sp.map((s) => `${s.id}:${s.status}`).join(","), agents: agents().map((a) => `${a.address}:${a.status}`).join(",") };
+    const changed = now2.spaces !== this.statusSeen?.spaces || now2.agents !== this.statusSeen?.agents;
+    this.statusSeen = now2;
+    if (changed || sp.some((s) => !this.shown.has(s.id)) || this.orderingDue(now)) cx.notify();
+
   }
 
   // Places whose git could have changed: new ones (a new space, a cd), where a
@@ -238,12 +262,20 @@ export default class Spaces extends View {
       // a renamed fork). Both reads are local/no-op-safe: `git remote get-url` reads no lock,
       // and `gh` is skipped entirely when the repo has no upstream and isn't a fork.
       let owner = null;
+      // `resolveGitHubApiRepositoryCandidates` asks `--repo <upstream>` with `headRepo: origin`
+      // (github-api-repository.ts:127-133), then `pullRequestMatchesHeadRepository` drops a PR
+      // whose head owner is not origin's (pull-request-lookup-data.ts:187-193). Both owners are
+      // needed to ask the question and to reject a fork's same-named branch.
+      let baseRepo = null; // the repo PRs are filed in: upstream when there is one
+      let head = null; // origin's owner: who the branch must belong to
       try {
         const origin = await exec("git", ["remote", "get-url", "origin"], { cwd, on });
         const o = origin.code === 0 ? parseRemote(origin.stdout) : null;
         if (o) {
+          head = o.owner;
           const up = await exec("git", ["remote", "get-url", "upstream"], { cwd, on }).catch(() => null);
           const u = up?.code === 0 ? parseRemote(up.stdout) : null;
+          baseRepo = `${(u ?? o).owner}/${(u ?? o).repo}`;
           let slug = u && !(u.owner === o.owner && u.repo === o.repo) ? u : null;
           // No `upstream` remote: ask GitHub whether origin is a fork. `exec` has its own 30s
           // cap (`gpui-kit.d.ts:22202`), so there is no per-call timeout to pass; off-machine
@@ -255,35 +287,25 @@ export default class Spaces extends View {
               const po = d?.parent?.owner?.login;
               const pr = d?.parent?.name;
               if (d?.isFork && po && pr) slug = { host: o.host, owner: po, repo: pr };
+              // A fork with no `upstream` remote still files its PRs on the parent.
+              if (slug) baseRepo = `${po}/${pr}`;
             }
           }
           // A renamed fork keeps its own identity; a same-name fork shows the parent's.
           owner = avatarUrlFor(slug && slug.repo !== o.repo ? o : (slug ?? o));
         }
       } catch {}
-      const info = { name, top: topDir, branch: null, owner, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
+      const info = { name, top: topDir, branch: null, owner, base: baseRepo, head, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
       // Only the branch name is read. `# branch.ab` (ahead/behind) fed the removed gitTail,
       // and Orca's card has no such element; the flag still prints the header we parse.
       for (const line of r.stdout.split("\n")) {
         if (line.startsWith("# branch.head ")) info.branch = line.slice(14);
       }
       this.git[key] = info;
-      // Orca's right-aligned meta badge cluster (`WorktreeCardMetaBadges.tsx:86` `ml-auto ...
-      // pr-1.5`) draws the linked review: `ReviewIcon` (worktree-review-presentation.tsx:105)
-      // picks GitPullRequestClosed / GitPullRequestDraft / GitMerge or the plain PR glyph by
-      // state, toned by `getStateTone` (merged purple, open emerald, closed/neutral muted).
-      // Herdr carries no PR, so it comes from `gh pr list --head <branch>`, which is also what
-      // Orca's review link resolves through. Only the current branch is asked, once per probe;
-      // no gh, no auth or no PR simply leaves the slot empty, as Orca's `review == null` does.
-      if (info.branch && !on) {
-        try {
-          const pr = await exec("gh", ["pr", "list", "--head", info.branch, "--json", "number,state,isDraft", "--limit", "1"], { cwd });
-          if (pr.code === 0) {
-            const [first] = JSON.parse(pr.stdout || "[]");
-            if (first?.number) info.pr = { number: first.number, state: first.isDraft ? "draft" : String(first.state ?? "").toLowerCase() };
-          }
-        } catch {}
-      }
+      // The review is NOT part of the worktree row. Orca's `buildWorkspaceReviewFacts` looks
+      // each worktree's own branch up in a persisted PR cache; the row never carries a PR to
+      // be inherited by other worktrees. Ask for this exact branch, and only on this machine.
+      if (!on && info.branch) this.lookupPRByBranch(`${repo}::${info.branch}`, info.base, info.head, info.branch, cwd, cx);
       // Orca's rows are the repo's worktrees (`listRepoWorktrees`), not its open sessions, so an
       // unopened worktree still draws a card. Record each one; rows without a space open in it on click.
       if (!info.linked) {
@@ -291,7 +313,7 @@ export default class Spaces extends View {
         info.worktrees = wt.code === 0 ? parseWorktreeList(wt.stdout) : [];
       }
       if (!on) this.watch(repo, cx);
-    } catch {
+    } catch (err) {
       // Couldn't ask (the machine is away): keep what it showed, look again later.
       this.git[key] ??= null;
       this.unsure.add(key);
@@ -312,6 +334,68 @@ export default class Spaces extends View {
     });
   }
 
+  // `readWorkspaceReviewPR` + `getGitHubPRCacheKeyCandidates`, in Herdr's terms: one key per
+  // repo+branch, read at render, refreshed out of band. A cache entry of `null` means asked
+  // and there is no PR — Orca's `{ data: null }` — so a miss and a known-empty differ.
+  reviewOf(info) {
+    if (!info?.branch || !info.repo) return null;
+    const entry = this.prCache[`${JSON.parse(info.repo)[1]}::${info.branch}`];
+    return entry === undefined ? null : entry.data;
+  }
+
+  // The writer half of Orca's pipeline, named for what it does. `lookupPRByBranchName`
+  // (pr-branch-lookup.ts) is Orca's refresh path; this is its `getRestPRForBranch` branch —
+  // REST first, because REST honors `head=<owner>:<branch>` and `gh pr list --head
+  // owner:branch` silently returns nothing.
+  lookupPRByBranch(key, base, head, branch, cwd, cx) {
+    // A settled answer is good for the life of the process: PR state changes on a merge or a
+    // close, and the repo watch above already re-asks git on every change under .git.
+    // shortcut: no periodic PR refresh, revisit if the badge looks stale after a merge.
+    if (this.prAsking.has(key) || this.prCache[key] !== undefined) return;
+    // No remote or no branch, no question: `head` is who the branch must belong to.
+    if (!base || !head || !branch) { this.setPr(key, null); return; }
+    this.prAsking.add(key);
+    cx.spawn(async (cx) => {
+      try {
+        // Orca's exact query (`getRestPRForBranch`, pr-branch-lookup.ts:41-46): the base repo,
+        // a head filter qualified with the owner, `state=all`, and a page of ten.
+        const [owner, repo] = base.split("/");
+        const q = `repos/${owner}/${repo}/pulls?head=${encodeURIComponent(`${head}:${branch}`)}`
+          + `&state=all&per_page=${BRANCH_PR_LOOKUP_PAGE_SIZE}`;
+        const r = await exec("gh", ["api", q], { cwd });
+        const list = r.code === 0 ? JSON.parse(r.stdout || "[]") : [];
+        // `pullRequestMatchesHeadRepository` (:187-193): the head owner must be this repo's
+        // origin, so a same-named branch on someone else's fork cannot answer.
+        const mine = list.filter(p => String(p.head?.repo?.owner?.login ?? "").toLowerCase() === String(head).toLowerCase());
+        // `preferOpenPullRequest` (:32-34): newest first, so prefer the live one.
+        const first = mine.find(p => String(p.state ?? "").toLowerCase() === "open") ?? mine[0];
+        // `mapRestPullRequest` (:132) is the one mapping that matters here: REST reports a
+        // merged PR as `state: "closed"` with a `merged_at` stamp, so `state` alone would paint
+        // every merged PR as closed and never reach `getStateTone`'s purple. Orca derives it.
+        // `readWorkspaceReviewFact` passes the cache's `state` through, while `ReviewIcon`
+        // switches on `merged`/`closed`/`draft` (review-state-presentation.ts:28-37) — so a
+        // draft has to be named too; REST reports it as `draft`.
+        this.setPr(key, first?.number
+          ? {
+            number: first.number,
+            state: first.merged_at ? "merged" : first.draft ? "draft" : String(first.state ?? "").toLowerCase(),
+          }
+          : null);
+      } catch {
+        this.setPr(key, null);
+      } finally {
+        this.prAsking.delete(key);
+        cx.notify();
+      }
+    });
+  }
+
+  setPr(key, data) {
+    this.prCache[key] = { data, at: Date.now() };
+    this.prChecked[key] = Date.now();
+    localStorage.setItem("pr.cache.v2", JSON.stringify(this.prCache));
+  }
+
   menu(w) {
     // A popup is as tall as its items; height is only the most.
     const s = spaces().find((x) => x.id === w.id);
@@ -327,7 +411,7 @@ export default class Spaces extends View {
   // Orca's rows are worktrees, keyed by host+path (host-qualified-identity.ts), not by open
   // session: two tabs on one checkout are one card. Merge Herdr spaces on the same worktree
   // before emitting, so the card and its agents span them.
-  ordered() {
+  ordered(cx) {
     const sp = spaces(), ps = panes();
     const ready = (w) => this.shown.has(w.id) || where(w, ps) in this.git || Date.now() - (this.born[w.id] ??= Date.now()) > 1500;
     for (const w of sp) if (!this.shown.has(w.id) && ready(w)) this.shown.add(w.id);
@@ -367,10 +451,21 @@ export default class Spaces extends View {
         if (opened.has(wt.path)) continue;
         opened.add(wt.path);
         const w = { id: `wt:${r.g.repo}:${wt.path}`, name: wt.branch || wt.path.split("/").pop(), named: false, tabs: [], active: false, status: null, machine: r.w.machine, folder: wt.path };
-        const g = { ...r.g, top: wt.path, branch: wt.branch || r.g.branch, linked: true };
+        // No `...r.g`: a sibling worktree shares the repo but not the review. Orca reads each
+        // worktree's own branch, so carrying the main worktree's PR onto this row was the bug.
+        const g = { ...r.g, top: wt.path, branch: wt.branch || r.g.branch, linked: true, pr: undefined };
         kids.push({ w, i: -1, g, key: `wt:${wt.path}`, also: [], unopened: true });
       }
       top.kids = kids.length;
+      // Rows with no open space still need their review: nothing probed their branch, so ask
+      // for it here, keyed exactly like `reviewOf` looks it up. Local machine only — `gh` on
+      // the far side of an ssh may not be authenticated.
+      if (cx && !r.w.machine) {
+        for (const k of kids) {
+          if (!k.unopened || !k.g.branch) continue;
+          this.lookupPRByBranch(`${JSON.parse(k.g.repo)[1]}::${k.g.branch}`, k.g.base, k.g.head, k.g.branch, k.g.top, cx);
+        }
+      }
       // Not filtered here: `row()` hides a folded repo's cards so its header stays, which is
       // what a fold means. Filtering here too made the whole group disappear.
       kids.forEach((k) => out.push({ ...k, head: false }));
@@ -422,8 +517,8 @@ export default class Spaces extends View {
     };
   }
 
-  grouped(t) {
-    const rows = this.ordered(), ps = panes();
+  grouped(t, cx) {
+    const rows = this.ordered(cx), ps = panes();
     const draw = (r) => this.row(r, t, ps);
     const flat = (r) => draw(r);
     const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name), ...Object.keys(this.reconnecting)])].sort();
@@ -496,17 +591,29 @@ export default class Spaces extends View {
     });
   }
 
-  // `ReviewIcon` (worktree-review-presentation.tsx:105-120): the glyph is state-specific —
+  // `ReviewIcon` (worktree-review-presentation.tsx:74-94): the glyph is state-specific —
   // merged GitMerge, closed GitPullRequestClosed, draft GitPullRequestDraft, else the plain
   // PullRequestIcon — and the tone is `getStateTone` (:54-70): merged purple-400/70, open
   // emerald-500/80, closed muted-foreground/60, draft muted-foreground/50. `size-3` is the
   // MetaIconBadge glyph size.
   prBadge(pr, t, id) {
     const icon = pr.state === "merged" ? "git-merge" : pr.state === "closed" ? "git-pull-request-closed" : pr.state === "draft" ? "git-pull-request-draft" : "git-pull-request";
+    // `getStateTone` (worktree-review-presentation.tsx:58-72), dark-mode values:
+    //   merged  text-purple-400/70           -> #c084fcb3
+    //   open    text-emerald-500/80          -> #10b981cc
+    //   closed  text-muted-foreground/60     -> #acacac99
+    //   draft   text-muted-foreground/50     -> #acacac80
+    //   (none)  text-muted-foreground opacity-70 -> #acacacb3
+    // `text-muted-foreground` is `--orca-security-muted-foreground` = #acacac in dark
+    // (main.css:328 -> :519), so every muted tone below is that hex at an alpha.
     const tone = pr.state === "merged" ? "#c084fcb3" : pr.state === "open" ? "#10b981cc" : pr.state === "draft" ? "#acacac80" : pr.state === "closed" ? "#acacac99" : "#acacacb3";
+    // `MetaIconBadge` (WorktreeCardMetadataControls.tsx:33) is `inline-flex size-3.5
+    // shrink-0 items-center justify-center text-muted-foreground/70 [&>svg]:size-3.5` — a 14px
+    // box whose glyph is also 14px, 12 was too small. `text-muted-foreground/70` is its default
+    // colour; `getStateTone` overrides it per state.
     return div().flex_none().flex().items_center().justify_center().pr(6)
       .child(tip(this.hot, t, `pr-${id}`, `PR #${pr.number}`, stop(this, t, `pr-${id}`, div().id(`pr-${id}`)
-        .child(svg(`mods/orca-spaces/${icon}.svg`).size(12).flex_none().text_color(tone)))));
+        .child(svg(`mods/orca-spaces/${icon}.svg`).size(14).flex_none().text_color(tone)))));
   }
 
   // `gitTail` used to draw `↑N`/`↓N` at the end of the title row. That was ours, not
@@ -526,9 +633,9 @@ export default class Spaces extends View {
   // Every project key currently rendered, for `setAllProjectsCollapsed`. Orca collects them
   // from the row plan (`getRenderedProjectCollapseKeys`, project-collapse-all.ts:5); the
   // equivalent here is the group header each rendered row emits.
-  projectKeys() {
+  projectKeys(cx) {
     const keys = new Set();
-    for (const r of this.ordered()) if (!r.unopened) keys.add(this.foldKey(r));
+    for (const r of this.ordered(cx)) if (!r.unopened) keys.add(this.foldKey(r));
     return [...keys];
   }
 
@@ -709,7 +816,7 @@ export default class Spaces extends View {
           .when(Boolean(meta), el => el.child(h_flex().w_full().min_w(0).items_center()
             .child(div().min_w(0).truncate().text_size(11).line_height("11px").text_color(t.dim).when(metaMono, m => m.font_family("JetBrains Mono")).child(meta))
             .child(div().flex_1())
-            .when(Boolean(g?.pr), row => row.child(this.prBadge(g.pr, t, w.id)))))
+            .when(Boolean(this.reviewOf(g)), row => row.child(this.prBadge(this.reviewOf(g), t, w.id)))))
           // Orca's compact agent summary (worktree-card-compact-agents.tsx): h-6, px-1,
           // 11px muted, a chevron that folds the rows, which carry a 6px status dot each.
           .when(mine.length > 0, el => el.child(agentBlock))),
@@ -737,20 +844,29 @@ export default class Spaces extends View {
     return [this.header(r, t, ps), this.card(r, t, ps)];
   }
 
-  render() {
+  render(cx) {
     const t = theme();
     const sp = spaces();
     // The shipped mods (the Terminals picker) still color spaces from "space.colors": the same color, from the name.
     const colors = Object.fromEntries(sp.filter(p => p.name !== "~").map(p => [p.id, tint(p.name, false)]));
     if (JSON.stringify(colors) !== JSON.stringify(shared("space.colors") ?? {})) setShared("space.colors", colors);
+    // ProjectsCollapseAllButton's `allCollapsed` prop: Orca computes it from the same set the
+    // header folds on (`useAppStore` allCollapsed), so publish the identical predicate here and
+    // let orca-nav pick the glyph and the toggle direction. `setShared` does not notify
+    // (AGENTS.md rule 9), which is fine: orca-nav re-reads it when orca-spaces re-renders.
+    const allCollapsed = this.projectKeys(cx).every((k) => this.foldedRepos.has(k));
+    if (allCollapsed !== Boolean(shared("projects.allCollapsed"))) setShared("projects.allCollapsed", allCollapsed);
     const asks = props()?.newMenu && machines().length > 1;
     // One fetch per repo per session; `ensureAvatar` writes the file and notifies once, so the
     // next render draws the avatar instead of the Folder.
-    for (const g of Object.values(this.git)) if (g?.owner) ensureAvatar(g.owner, this.cx);
+    for (const g of Object.values(this.git)) if (g?.owner) ensureAvatar(g.owner, cx);
     const tool = (id, label, icon, fn, more) => tip(this.hot, t, id, label, stop(this, t, id, div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(this.hot === id ? t.foreground : t.dim).on_hover(this.glow(id)).role("button").accessibility_label(label).hover(s => s.bg(t.hover))
       .on_click(fn).child(svg(`mods/orca-spaces/${icon}.svg`).size(14))), more);
     return focusRoot(this, v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      .child(v_flex().id("space-list").flex_1().min_h(0).overflow_y_scroll()
+      // `overflow_y_scrollbar` — not `overflow_y_scroll`. The latter owns wheel scrolling but
+      // paints no bar, so the list could not be dragged; the shipped `spaces` mod uses
+      // `overflow_y_scrollbar().mode("always")` for exactly this list.
+      .child(v_flex().id("space-list").flex_1().min_h(0).overflow_y_scrollbar()
         .on_mouse_up("left", (_e, cx) => { this.pressed = this.over = null; cx.notify(); })
         // Herdr reports no release outside the sidebar, so leaving ends a drag, as in the inbox.
         .on_hover((on, cx) => {
@@ -766,6 +882,6 @@ export default class Spaces extends View {
           .when(sp.length === 0, el => el.child(div().flex().flex_col().items_center().gap(2).px(16).py(24).w_full()
             .text_size(11).text_center().text_color(t.muted)
             .child(div().child("No workspaces found"))))
-          .children(sp.length ? this.grouped(t) : []))));
+          .children(sp.length ? this.grouped(t, cx) : []))));
   }
 }

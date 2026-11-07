@@ -20,6 +20,35 @@ worktree / project group / top branch mean exactly one thing each here.
    repeatedly (tool zoom, antialiasing, stale renders). Pixels may confirm a render
    happened, never what the value should be.
 
+   **Port Orca, do not transcribe it — and never invent it.** These are three
+   different things:
+
+   | | Meaning | Allowed? |
+   |---|---|---|
+   | **Transcribe** | Copy Orca's JSX/TSX line-for-line into Herdr builders | **No.** |
+   | **Port** | Reproduce the *behavior and result* using Herdr's primitives | **Yes — the job.** |
+   | **Invent** | Write something Orca has no counterpart for, or name an Orca symbol that does not exist | **No** (rule 11). |
+
+   Herdr is not React: no `div` trees with Tailwind, no Radix, no hooks, no
+   DOM hover groups, no `localStorage`-backed store. So a literal transcription
+   cannot work, and a behavior with no Herdr primitive gets the closest honest
+   equivalent with the gap named in the comment. Two worked examples from this
+   project:
+   - `ProjectsCollapseAllButton` is a Radix `Tooltip` + `Button` with a
+     `group-hover/sidebar-header` reveal. Ported as one 24px `div` whose glyph
+     and handler switch on `allCollapsed`; the hover reveal is **dropped
+     because Herdr has no header-hover group**, and the comment says so.
+   - Orca reads a persisted `prCache` written by `src/main` IPC. Herdr mods
+     cannot share a process like that, so the cache lives in `localStorage`,
+     the *reader* stays pure, and the *writer* runs in the refresh cycle —
+     Orca's layering kept, its transport replaced.
+
+   The rule for a dropped detail: **state it in the edit comment, in one line,
+   with the reason.** A silent omission reads as parity. A named omission is
+   honest. And when a port needs a new name, it belongs to Herdr's vocabulary
+   (`lookupPRByBranch`, `foldKey`, `setPr`) — never to a plausible-looking Orca
+   name it is merely reminiscent of.
+
    **Query the Orca graph first — once it exists.** `~/Projects/orca` is meant to
    carry a Graphify graph in `graphify-out/`, and the query form to use is
    `graphify query "<question>"` (or `graphify path` / `graphify explain`) so you
@@ -87,6 +116,29 @@ worktree / project group / top branch mean exactly one thing each here.
 10. **Wayland blocks pointer injection.** Hover/click states are code-verified
     only (`xdotool` fails, `/dev/uinput` is root-only). Say so when reporting;
     never claim a hover was seen.
+11. **Do not guess — open the file.** A name in this repo must denote a real
+    Orca symbol or an honest Herdr equivalent, never a plausible invention.
+    This project shipped three guesses that each looked right and were wrong:
+    - `askPr()` — no such function in Orca. The real pair is
+      `lookupPRByBranchName` (`src/main/github/client/lookup/pr-branch-lookup.ts`)
+      **writes** the cache and `readWorkspaceReviewPR`
+      (`src/shared/sidebar-list/workspace-review-facts.ts`) **only reads** it.
+      Fetching from render was the bug; the invented name hid it.
+    - A two-button collapse/expand pair — Orca has **one** toggle,
+      `ProjectsCollapseAllButton.tsx`, whose glyph is
+      `allCollapsed ? ChevronsUpDown : ChevronsDownUp` (`:23`) and whose click
+      always toggles (`:51`).
+    - `gh pr list --head <branch>` — Orca's **primary** path is REST,
+      `repos/<owner>/<repo>/pulls?head=<owner>:<branch>&state=all&per_page=10`
+      (`getRestPRForBranch`), with `pullRequestMatchesHeadRepository` rejecting a
+      mismatched head. `gh pr list --head owner:branch` silently returns `[]`,
+      and the unscoped form matches a fork's same-named branch.
+
+    The check is cheap: `grep -rn "<name>" ~/Projects/orca/src` before writing
+    the comment. If it returns nothing, the name is yours and the comment must
+    say so — with the Orca behavior it is standing in for. A comment that cites
+    a path which does not exist is worse than no comment: it reads as verified.
+    **When a claim in a comment has not been re-read this session, re-read it.**
 
 ## Verification loop
 

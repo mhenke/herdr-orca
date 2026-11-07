@@ -2,7 +2,7 @@
 // then the Projects header. The project tree below is orca-spaces.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, run, openOverlay } from "herdr";
+import { theme, run, openOverlay, shared } from "herdr";
 
 export default class Nav extends View {
   row(t, id, icon, label, action) {
@@ -18,6 +18,9 @@ export default class Nav extends View {
   }
   render() {
     const t = theme();
+    // orca-spaces owns the fold set, so it publishes whether every project is closed;
+    // ProjectsCollapseAllButton takes `allCollapsed` as a prop.
+    const allCollapsed = Boolean(shared("projects.allCollapsed"));
     const noop = () => {}; // no destination in Herdr: inert, not hidden
     // SidebarNav.tsx:99-116 — container gap-0.5 px-2; Search is a button, not an input: full width, gap 8,
     // rounded 6, bg foreground/5, px 8, text 13 medium foreground/60, icon 16 at /30.
@@ -41,21 +44,17 @@ export default class Nav extends View {
       .child(h_flex().w_full().h(32).mt(8).px(8).gap(6).items_center().justify_between()
         .child(h_flex().min_w(0).items_center()
           .child(div().pl(8).pr(2).text_size(12).font_semibold().text_color("#969eaecc").child("Projects"))
-          // ProjectsCollapseAllButton.tsx:41-47 — `flex shrink-0 overflow-hidden
-          // text-muted-foreground` that is `w-0 opacity-0` until the header is hovered, then
-          // `w-6 opacity-100`. ChevronsDownUp collapses, ChevronsUpDown expands (:23-24).
-          // Herdr exposes no header-hover group, so the button stays visible: same slot and
-          // glyph, without the reveal.
+          // ProjectsCollapseAllButton.tsx — ONE button, not two. `allCollapsed` decides both the
+          // glyph and the label/handler: `Icon = allCollapsed ? ChevronsUpDown : ChevronsDownUp`
+          // (:23) and clicking it always toggles (:51). The wrapper is `w-0 opacity-0` until the
+          // header is hovered, then `w-6 opacity-100` (:35-37); Herdr has no header-hover group,
+          // so the slot stays visible and only the reveal is dropped.
+          // `allCollapsed` arrives over `setShared` from orca-spaces, which owns the fold state.
           .child(div().id("proj-collapse-all").size(24).flex_none().flex().items_center().justify_center().rounded(6)
             .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
-            .role("button").accessibility_label("Collapse all projects")
-            .on_click(() => run("orca-spaces.collapse-all"))
-            .child(svg("mods/orca-nav/chevrons-down-up.svg").size(14)))
-          .child(div().size(24).flex_none().flex().items_center().justify_center().rounded(6)
-            .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
-            .role("button").accessibility_label("Expand all projects")
-            .on_click(() => run("orca-spaces.expand-all"))
-            .child(svg("mods/orca-nav/chevrons-up-down.svg").size(14))))
+            .role("button").accessibility_label(allCollapsed ? "Expand all projects" : "Collapse all projects")
+            .on_click(() => run(allCollapsed ? "orca-spaces.expand-all" : "orca-spaces.collapse-all"))
+            .child(svg(allCollapsed ? "mods/orca-nav/chevrons-up-down.svg" : "mods/orca-nav/chevrons-down-up.svg").size(14))))
         .child(h_flex().flex_none().items_center().gap(4)
           // sidebar-header-actions.tsx:89-91 — the first of three slots is
           // `flex size-6 shrink-0 items-center` (24x24), holding a `Button variant="ghost"

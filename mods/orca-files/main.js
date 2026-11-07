@@ -324,6 +324,11 @@ export default class Files extends View {
           : this.hits ? [] : this.rows("", 0, [], t))
         .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "No folder"))))
         .when(this.limited, el => el.child(div().p(8).text_size(11).text_color(t.dim).child("File list limited to 500 entries per folder and 5,000 total")))))
-      .when(Boolean(this.file), el => el.child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.dim).child(this.fileError || "Loading file…")));
+      .when(Boolean(this.file), el => el.child(this.code
+        // The editor is a native element with no scroll API of its own, so it rides the
+        // retained scroll container: the same `overflow_y_scrollbar` the tree uses, or a long
+        // file cannot be read past the first screen.
+        ? div().flex_1().min_h(0).overflow_y_scrollbar().child(Editor.new(this.code))
+        : div().p(12).text_color(t.dim).child(this.fileError || "Loading file…")));
   }
 }

@@ -58,10 +58,14 @@ const avatarWritten = new Set();
 // under the app folder, so the first sight downloads once to `avatars/<host>_<owner>.png`; a
 // failed download leaves the lucide Folder, which is what repo-icon.tsx:158 `onError` falls
 // back to. `fetch` returns text only (`ShellFetchResponse`), so the bytes come from curl.
-export async function ensureAvatar(url, cx) {
+export function ensureAvatar(url, cx) {
   if (!url || avatarTried.has(url)) return;
   avatarTried.add(url);
   const path = `${appHome()}/${avatarPath(url)}`;
+  // `cx` here is the render's own handle, and the download outlives it: notifying through it
+  // throws "cx is no longer valid: it was captured during an earlier call and used later".
+  // Spawn so the notify belongs to a live callback, which is what that error asks for.
+  cx.spawn(async (cx) => {
   try {
     const { default: fsp } = await import("fs/promises");
     try {
@@ -74,6 +78,7 @@ export async function ensureAvatar(url, cx) {
     avatarWritten.add(url);
     cx.notify();
   } catch (e) { console.log("avatar", url, String(e)); }
+  });
 }
 
 export const avatarFile = (url) => (url && avatarWritten.has(url) ? avatarPath(url) : null);
