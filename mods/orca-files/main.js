@@ -30,6 +30,32 @@ function fade(color, factor) {
   return color.slice(0, 7) + Math.round(alpha * factor).toString(16).padStart(2, "0");
 }
 
+// splitSearchGlobPatterns (text-search-glob-patterns.ts:2-62): a comma separates several
+// globs unless escaped or inside `{…}` / `[…]`; trim each piece and drop empties.
+// shortcut: POSIX classes (`[[:alpha:],]`) are not tracked for rg; upgrade if one is needed.
+function splitGlobs(text) {
+  const out = [];
+  let cur = "", escape = false, brace = 0, classStart = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { cur += "\\" + ch; escape = false; continue; }
+    if (ch === "\\" && classStart === -1) { escape = true; continue; }
+    if (classStart !== -1) { if (ch === "]" && i > classStart) classStart = -1; }
+    else if (ch === "[") classStart = i + (text[i + 1] === "!" || text[i + 1] === "^" ? 2 : 1);
+    else if (ch === "{") brace++;
+    else if (ch === "}") brace = Math.max(0, brace - 1);
+    if (ch === "," && !brace && classStart === -1) {
+      if (cur.trim()) out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (escape) cur += "\\";
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
 // Orca's FileTypeIcon tables (file-type-icons.ts:24-54, file-type-icon-extension-table.ts,
 // file-type-icon-name-table.ts). Grouped by icon so the port stays one table, not two hundred.
 const FILE_ICONS = Object.assign(Object.create(null), {
@@ -160,18 +186,28 @@ export default class Files extends View {
     });
     // SearchQueryRow.tsx:53 — the Contents input's placeholder is `Search`.
     this.q = InputState.new({ placeholder: "Search" });
+    // SearchQueryRow.tsx:12-20 / SearchFilters.tsx:9-13 — Contents owns three match toggles
+    // and the include/exclude pair. Orca keeps them per worktree in the file-search store
+    // (useFileSearchPanel.ts:47-51); here they live on the view and reset in refresh().
+    this.caseSensitive = false; this.wholeWord = false; this.useRegex = false;
+    this.include = InputState.new({ placeholder: "e.g. *.ts, src/**" });   // SearchFilters.tsx:76-79
+    this.exclude = InputState.new({ placeholder: "e.g. *.min.js, dist/**" }); // SearchFilters.tsx:97-100
+    this.filtersOpen = false; // SearchFilters.tsx:31 — defaultOpen is activeCount > 0
+    // useFileSearchPanel.ts:294-300 — a filter edit reruns the current query at once.
+    for (const state of [this.include, this.exclude]) state.on("change", (_e, cx) => this.rerun(cx));
     // Debounce through `cx.timer.after`, not `setTimeout`: a `cx` captured in a
     // `setTimeout` closure is stale by the time it fires, and the runtime rejects it
     // ("cx is no longer valid…", `scope.rs:420`). A rejected build makes the shell
     // replace the pane with its "could not be re-rendered" banner — which is the
     // orange 2px bar at the top of the sidebar that appeared while typing.
     // `cx.timer.after` hands each callback a fresh context (`typings.rs:3914-3921`).
-    let timer = null;
+    this.searchTimer = null;
     this.q.on("change", (_e, cx) => {
       const v = this.q.value().trim();
-      timer?.cancel();
+      this.searchTimer?.cancel();
       this.searching = Boolean(v); cx.notify();
-      timer = cx.timer.after(200, (cx) => {
+      this.searchTimer = cx.timer.after(200, (cx) => {
+        this.searchTimer = null;
         if (!v) { this.hits = null; this.searching = false; cx.notify(); return; }
         cx.spawn(async (cx) => {
           const h = await this.search(v);
@@ -229,6 +265,10 @@ export default class Files extends View {
       this.pending = new Set(); this.marks = {}; this.folderMarks = {}; this.folderErrors = {};
       this.ignored = new Set(); this.git = false;
       this.names = null; this.nfMap = null; this.nfCollapsed = new Set(); this.nfLoading = false;
+      // The file-search store is per worktree (useFileSearchPanel.ts:43-51), so the match
+      // toggles and patterns start empty again for the worktree being entered.
+      this.caseSensitive = false; this.wholeWord = false; this.useRegex = false;
+      this.include.set_value(""); this.exclude.set_value(""); this.filtersOpen = false;
       this.show(null); this.watched = null; this.error = null; this.limited = false;
       this.loading = false;
       if (saved?.file) this.show(saved.file, cx);
@@ -534,10 +574,34 @@ export default class Files extends View {
 
   command(c, cx) { if (c === "remove") return this.remove(cx); }
 
+  // useFileSearchPanel.ts:276-300 — flipping a toggle or editing a filter reruns the
+  // current query immediately, rather than waiting for the next keystroke.
+  rerun(cx) {
+    const v = this.q.value().trim();
+    if (!v) { this.hits = null; this.searching = false; cx.notify(); return; }
+    this.searching = true; cx.notify();
+    cx.spawn(async (cx) => {
+      const h = await this.search(v);
+      this.hits = h; this.searching = false; cx.notify();
+    });
+  }
+
   // Bounded: exec caps at 8 MiB / 30s, so cap hits rather than fail.
+  // Argv order and flags port `buildRgArgs` (src/shared/text-search.ts:46-77): a
+  // case-insensitive search gets `--ignore-case` (Orca has no smart-case), whole word
+  // gets `--word-regexp`, a non-regex query `--fixed-strings`, each include glob
+  // `--glob <pat>` and each exclude `--glob !<pat>`. `--vimgrep` keeps this mod's
+  // existing `file:line:column:text` parser instead of Orca's `--json` stream.
   async search(query) {
     if (!query) return [];
-    const r = await exec("rg", ["--vimgrep", "--smart-case", "--max-count", "20", query], { cwd: this.root, on: this.on }).catch(() => null);
+    const args = ["--vimgrep"];
+    if (!this.caseSensitive) args.push("--ignore-case");      // text-search.ts:56-58
+    if (this.wholeWord) args.push("--word-regexp");            // text-search.ts:59-61
+    if (!this.useRegex) args.push("--fixed-strings");          // text-search.ts:62-64
+    for (const pat of splitGlobs(this.include.value())) args.push("--glob", pat);       // :65-69
+    for (const pat of splitGlobs(this.exclude.value())) args.push("--glob", `!${pat}`); // :70-74
+    args.push("--max-count", "20", "--", query);              // :75 — `--` ends option parsing
+    const r = await exec("rg", args, { cwd: this.root, on: this.on }).catch(() => null);
     // Same as the listing: rg exits 2 after an unreadable directory and still printed
     // the hits; only a run that produced nothing is a failure.
     if (!r?.stdout) return [];
@@ -739,14 +803,18 @@ export default class Files extends View {
         .child(seg("files-names", "Names", "files"))
         .child(seg("files-contents", "Contents", "search")))
       .child(this.queryRow(this.name, "names", !search, !search && this.nfLoading, t))
-      .child(this.queryRow(this.q, "contents", search, search && this.searching, t));
+      .child(this.queryRow(this.q, "contents", search, search && this.searching, t, this.searchToggles(t)))
+      // SearchFilters.tsx:29-108 nests under the Contents row in FileExplorer.tsx:307-309.
+      .child(this.filtersRow(t));
   }
 
   // FileExplorerNameFilter.tsx:23 / SearchQueryRow.tsx:47 — shared `h-8 rounded-md`
   // chrome; `focus-within:border-ring ring-1` paints the border in ring colour.
   // FileExplorerNameFilter.tsx:47-62 / SearchQueryRow.tsx:50-51 — Loader2 while the
   // listing or the search runs; X clears that input and its projection.
-  queryRow(state, id, active, busy, t) {
+  // `controls` are SearchQueryRow.tsx:75-101's toggles, appended after Clear; the Names
+  // row has none because FileExplorerNameFilter.tsx has no equivalent.
+  queryRow(state, id, active, busy, t, controls) {
     return h_flex().w_full().h(32).min_h(0).px(8).gap(4).items_center().rounded(8).overflow_hidden().border_1().border_color(this.qFocused ? t.ring : t.border).bg(fade(t.input, 0.5))
       .when(!active, el => el.hidden())
       .child(svg("mods/orca-files/list-filter.svg").size(14).flex_none().text_color(t.muted))
@@ -759,7 +827,52 @@ export default class Files extends View {
           else { this.nfMap = null; this.nfCollapsed = new Set(); this.nfLoading = false; }
           cx.notify();
         })
-        .child(svg("mods/orca-files/x.svg").size(12))));
+        .child(svg("mods/orca-files/x.svg").size(12))))
+      .children(controls ?? []);
+  }
+
+  // SearchQueryRow.tsx:75-101, styled by ToggleButton (SearchResultItems.tsx:18-57): three
+  // icon-only ghost buttons after Clear, `bg-accent text-accent-foreground` when active and
+  // muted otherwise. Herdr announces the label but has no aria-pressed on a plain div, so
+  // the fill is the pressed state. Each flip reruns via `rerun` (useFileSearchPanel.ts:276-288).
+  searchToggles(t) {
+    const toggle = (id, value, set, label, icon) => div().id(id).flex_none().p(2).rounded(4).cursor_pointer()
+      .role("button").accessibility_label(label).tooltip(label)
+      .when(value, s => s.bg(t.accent).text_color(t.accent_foreground))
+      .when(!value, s => s.text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)))
+      .on_click((_e, cx) => { set(!value); this.rerun(cx); })
+      .child(svg(`mods/orca-files/${icon}.svg`).size(14).flex_none());
+    return [
+      toggle("files-case", this.caseSensitive, v => { this.caseSensitive = v; }, "Match Case", "case-sensitive"),
+      toggle("files-word", this.wholeWord, v => { this.wholeWord = v; }, "Match Whole Word", "whole-word"),
+      toggle("files-regex", this.useRegex, v => { this.useRegex = v; }, "Use Regular Expression", "regex"),
+    ];
+  }
+
+  // SearchFilters.tsx:26-108 — the right-aligned ellipsis trigger carries an `N active`
+  // badge; opening it unfolds `files to include` and `files to exclude`. `defaultOpen`
+  // (:31) is `activeCount > 0`; the worktree reset empties both patterns, so closed is the
+  // same initial state. Herdr has no height animation, so the content mounts when open.
+  filtersRow(t) {
+    const include = this.include.value(), exclude = this.exclude.value();
+    const activeCount = Number(Boolean(include.trim())) + Number(Boolean(exclude.trim()));
+    const field = (id, label, state) => v_flex().id(id).gap(2)
+      .accessibility_label(label).tooltip(label)
+      .child(div().text_size(10).text_color(t.muted).child(label))
+      .child(Input.new(state).h(26).px(6).rounded(6).border_1().border_color(t.input)
+        .bg(t.surface).text_size(12).text_color(t.foreground));
+    return v_flex().id("files-filters").w_full().gap(4)
+      .when(this.view !== "search", el => el.hidden())
+      .child(h_flex().w_full().h(24).items_center().justify_end().gap(6)
+        .when(activeCount > 0, el => el.child(div().text_size(10).text_color(t.muted).child(`${activeCount} active`)))
+        .child(div().id("files-filters-toggle").p(2).flex_none().flex().items_center().justify_center().rounded(4).cursor_pointer()
+          .role("button").accessibility_label("Toggle search details").tooltip("Toggle search details")
+          .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+          .on_click((_e, cx) => { this.filtersOpen = !this.filtersOpen; cx.notify(); })
+          .child(svg("mods/orca-files/ellipsis.svg").size(14))))
+      .when(this.filtersOpen, el => el.child(v_flex().gap(6).pb(2)
+        .child(field("files-include", "files to include", this.include))
+        .child(field("files-exclude", "files to exclude", this.exclude))));
   }
 
   render(cx) {
