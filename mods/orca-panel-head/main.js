@@ -94,6 +94,10 @@ export default class PanelHead extends View {
     // (`right-sidebar-titlebar-drag-regions.ts:5`). Each button is 32px wide here with a
     // 16px glyph; inactive is text-muted-foreground/60 and hover text-muted-foreground
     // (`activity-bar-buttons.tsx:156-157`) — a colour change, not element opacity.
+    // The toggle is NOT drawn here. Orca moves the same `.sidebar-toggle` into this header while
+    // the panel is open (`right-sidebar/index.tsx:124-144`), but the port keeps one fixed slot in
+    // the titlebar (`orca-tabs`) so the control never moves; drawing it here too put two on
+    // screen. `layout.toggle` from that slot closes this panel.
     return h_flex().w_full().h_full().items_center().pl(8).pr(4).border_b(1).border_color(t.border)
       .children(tools.map(({ id, icon, title }) => {
         const on = active === id;
@@ -107,12 +111,6 @@ export default class PanelHead extends View {
           // bg-foreground, rounded-t. 25% of 32px is 8px.
           .when(on, el => el.child(div().absolute().bottom(0).left(8).right(8).h(2).bg(t.foreground).rounded_t(4)));
       }))
-      .child(div().flex_1())
-      // Orca's right-sidebar toggle: .sidebar-toggle mr-1, PanelRight size 16, inside
-      // a pr-1 wrapper (right-sidebar/index.tsx:122-136, main.css:1213-1225).
-      .child(div().w(32).h(24).mr(4).flex_none().flex().items_center().justify_center().rounded(4)
-        .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
-        .role("button").accessibility_label("Toggle right sidebar").on_click(() => run("layout.hide", { id: "panel" }))
-        .child(svg("mods/orca-panel-head/panel-right.svg").size(16)));
+      .child(div().flex_1());
   }
 }
