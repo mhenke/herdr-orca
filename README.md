@@ -21,6 +21,7 @@ The layout coordinates 16 self-contained mods under `mods/`:
   - Repositories organize into collapsible groups with folder glyphs.
   - Worktrees render as cards carrying branch identities, with `primary` badges on main checkouts.
   - Linked worktrees nest under their checkout with Orca-accurate 18px indentation.
+  - Main checkout auto-discovery: even when a repository is opened only on linked worktrees, the main checkout is discovered and shown as the canonical header.
   - Sidebar scrollbar sits in Orca's dedicated gutter to preserve card pitch.
   - Concurrent Git discovery (`Promise.allSettled`) with an authentic "Loading workspaces…" indicator.
   - Saved custom project folders persist across restarts in `localStorage`.
@@ -131,7 +132,7 @@ All Git executions pass `--no-optional-locks -c core.fsmonitor=false` so locks a
 Releases adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Release notes and version history are maintained in [CHANGELOG.md](CHANGELOG.md) via [git-cliff](https://git-cliff.org) from Conventional Commits.
 
 ### Releasing via the `herdr-orca-release` Skill
-When working with coding agents (such as Antigravity, Claude Code, or OpenCode), release workflows are governed by the specialized [`herdr-orca-release`](~/.gemini/skills/herdr-orca-release/SKILL.md) skill. The skill guides pre-flight verification gates, SemVer determination, changelog previews, tag creation, and GitHub release publication.
+When working with coding agents (such as Antigravity, Claude Code, or OpenCode), release workflows are governed by the specialized [`herdr-orca-release`](.agents/skills/herdr-orca-release/SKILL.md) skill. The skill guides pre-flight verification gates, SemVer determination, changelog previews, tag creation, and GitHub release publication.
 
 ### Releasing via CLI Script
 You can also run the release automation directly:
