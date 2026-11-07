@@ -66,29 +66,38 @@ export default class Nav extends View {
             .on_click(() => run(allCollapsed ? "orca-spaces.expand-all" : "orca-spaces.collapse-all"))
             .child(svg(allCollapsed ? "mods/orca-nav/chevrons-up-down.svg" : "mods/orca-nav/chevrons-down-up.svg").size(14))))
         .child(h_flex().flex_none().items_center().gap(4)
-          // sidebar-header-actions.tsx:89-91 — the first of three slots is
-          // `flex size-6 shrink-0 items-center` (24x24), holding a `Button variant="ghost"
-          // size="icon-xs"` which is `size-6 rounded-md` (button.tsx:41) with a `size-3.5`
-          // SlidersHorizontal (SidebarWorkspaceOptionsMenu.tsx:66). The bell is the Agents-view
-          // toggle in SidebarHeader.tsx and is `w-8`; this slot is not.
-          // Drawn inert: Orca's menu filters/groups the worktree list, and Herdr has no filter
-          // model to drive — same convention as Tasks/Automations/Orca Mobile (RECIPE.md:50).
+          // ORDER, from SidebarHeader.tsx: bottom of the header is the bell popover (its own
+          // Button, `w-8`, SidebarHeader.tsx:89-97), and only THEN `SidebarHeaderActions`
+          // (sidebar-header-actions.tsx:88-100) which is options -> AddProject -> NewWorkspace.
+          // So left to right: bell, options, add-project, new-workspace. We had the options
+          // slot before the bell.
+          // The bell is `w-8` with a Bell `size-3` and a status badge in its top-right
+          // (`:108-127`); the badge shows a question glyph when anything needs attention, a
+          // small dot while working, and the count below. Herdr has no attention count for the
+          // sidebar, so the badge stays off rather than inventing a number.
+          .child(div().id("proj-activity").w(32).h(24).flex().items_center().justify_center().rounded(6).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
+            .role("button").accessibility_label("View activity")
+            .on_click(noop)
+            .child(svg("mods/orca-nav/bell.svg").size(12).flex_none()))
+          // sidebar-header-actions.tsx:90-97 — first slot is `flex size-6 shrink-0 items-center`
+          // (24x24) holding a `Button size="icon-xs"` (`size-6 rounded-md`) with a `size-3.5`
+          // SlidersHorizontal (SidebarWorkspaceOptionsMenu.tsx:66). Inert: Orca's menu filters
+          // and groups the worktree list, and Herdr has no filter model to drive.
           .child(div().id("proj-workspace-options").size(24).flex().items_center().justify_center().rounded(6).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
             .role("button").accessibility_label("Workspace options")
             .on_click(noop)
             .child(svg("mods/orca-nav/sliders-horizontal.svg").size(14)))
-          // Bell = activity view toggle, w-8 in Orca; no Herdr equivalent, so inert and honest.
-          .child(div().id("proj-activity").w(32).h(24).flex().items_center().justify_center().rounded(6).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
-            .role("button").accessibility_label("View activity")
-            .on_click(noop)
-            .child(svg("mods/orca-nav/bell.svg").size(14)))
+          // AddProjectButton (:27-31) — FolderPlus `size-3.5` at the explicit `strokeWidth={2.25}`.
           .child(div().id("proj-add-repo").size(24).flex().items_center().justify_center().rounded(6).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
             .role("button").accessibility_label("Add project")
             .on_click(() => run("space.new"))
             .child(svg("mods/orca-nav/folder-plus.svg").size(14)))
+          // NewWorkspaceButton (:60-64) — Plus `size-3.5`, same 2.25 stroke. Orca's header
+          // actions are `size="icon-xs"` buttons, which are 24x24, so this is not wider than
+          // the options slot.
           .child(div().id("proj-new").size(24).flex().items_center().justify_center().rounded(6).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
             .role("button").accessibility_label("New workspace")
             .on_click(() => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 }))
-            .child(svg("mods/orca-nav/plus.svg").size(14)))));
+            .child(svg("mods/orca-nav/plus.svg").size(14)))));;
   }
 }
