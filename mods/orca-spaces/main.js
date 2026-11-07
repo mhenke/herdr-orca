@@ -6,7 +6,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
-import { repoMark, tint } from "./project.js";
+import { repoMark, tint, githubAvatarUrl, ensureAvatar } from "./project.js";
 import { statusMark } from "./status.js";
 import { getWorktreeCardContentIndent, getFlushWorktreeCardPaddingLeft, getWorktreeCardSurfaceInset, getFolderWorkspaceCardContentIndent, getFolderWorkspaceCardSurfaceInset, getProjectGroupHeaderPaddingLeft, WORKTREE_CARD_SURFACE_MARGIN } from "./indentation.js";
 import { tip, tipMark } from "./tip.js";
@@ -44,6 +44,7 @@ const FALLBACK = 60000;
 export default class Spaces extends View {
   init(_props, cx) {
     stopsInit(this, cx, "entry");
+    this.cx = cx;
     // pane.go onto this list (mod.json's "focusable"): the keyboard starts at the heading's button.
     cx.spawn(async (cx) => {
       for (;;) if (await nextCommand() === "focus") enter(this, cx, "space-new");
@@ -217,7 +218,14 @@ export default class Spaces extends View {
       const common = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, on });
       const repo = common.stdout.trim();
       const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
-      const info = { name, top: topDir, branch: null, ahead: 0, behind: 0, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
+      // Orca's RepoIconGlyph falls back to a GitHub owner avatar only when the repo has one;
+      // the origin remote is what tells us. `git remote get-url` is local and reads no config lock.
+      let owner = null;
+      try {
+        const url = await exec("git", ["remote", "get-url", "origin"], { cwd, on });
+        if (url.code === 0) owner = githubAvatarUrl(url.stdout.trim());
+      } catch {}
+      const info = { name, top: topDir, branch: null, ahead: 0, behind: 0, owner, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
       for (const line of r.stdout.split("\n")) {
         if (line.startsWith("# branch.head ")) info.branch = line.slice(14);
         else if (line.startsWith("# branch.ab ")) {
@@ -471,9 +479,11 @@ export default class Spaces extends View {
       .role("button").accessibility_label(g?.name ?? w.name)
       .on_mouse_down("right", () => this.menu(w))
       .on_click((_e, cx) => this.toggleRepo(key, cx))
-      // Orca's RepoIconGlyph: a lucide icon (Folder by default) in a 16px rounded square,
-      // not a letter monogram. A project's own favicon still wins when it has one.
-      .child(repoMark(w, 16, t, ps))
+      // Orca's RepoIconGlyph: the repo's own image when it has one, else a lucide Folder
+      // (repo-icon.tsx:145). Herdr has no per-repo icon, so the origin remote's GitHub owner
+      // avatar is the image source; the first render kicks off a one-time fetch and writes it
+      // under the app folder, and `image()` reads that cached file from then on.
+      .child(repoMark(w, 16, t, ps, g?.owner ?? null))
       .child(div().min_w(0).flex_1().truncate().text_size(13).font_semibold().line_height("16px").text_color(t.foreground).child(g?.name ?? w.name))
       // SectionHeader.tsx:358: size-5 rounded-md text-muted-foreground, hover:bg-accent/70
       // and hover:text-foreground — a 70% accent wash, not a 70% white one.
@@ -649,6 +659,9 @@ export default class Spaces extends View {
     const colors = Object.fromEntries(sp.filter(p => p.name !== "~").map(p => [p.id, tint(p.name, false)]));
     if (JSON.stringify(colors) !== JSON.stringify(shared("space.colors") ?? {})) setShared("space.colors", colors);
     const asks = props()?.newMenu && machines().length > 1;
+    // One fetch per repo per session; `ensureAvatar` writes the file and notifies once, so the
+    // next render draws the avatar instead of the Folder.
+    for (const g of Object.values(this.git)) if (g?.owner) ensureAvatar(g.owner, this.cx);
     const tool = (id, label, icon, fn, more) => tip(this.hot, t, id, label, stop(this, t, id, div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(this.hot === id ? t.foreground : t.dim).on_hover(this.glow(id)).role("button").accessibility_label(label).hover(s => s.bg(t.hover))
       .on_click(fn).child(svg(`mods/orca-spaces/${icon}.svg`).size(14))), more);
     return focusRoot(this, v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)

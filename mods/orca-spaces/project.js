@@ -2,8 +2,9 @@
 // and only uses an image when the user set one on the repo. Herdr stores no per-space icon, so
 // every repo draws the folder; scraping favicons off disk (T3's ProjectFavicon) put site logos
 // in the header, which Orca never shows.
-import { svg } from "gpui-kit";
+import { svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
+import { appHome, exec } from "herdr";
 
 // T3's project colors in its order, each as Tailwind's 400 (dark themes) and 600 (light).
 const PALETTE = [
@@ -29,7 +30,49 @@ export function tint(name, dark) {
 // sets no badge color. That inline color wins over the wrapper's text-muted-foreground.
 const REPO_BADGE_COLOR = "#737373";
 
-export function repoMark(s, size, t, ps) {
-  return h_flex().size(size).flex_none().items_center().justify_center()
-    .child(svg("mods/orca-spaces/folder.svg").size(14).text_color(REPO_BADGE_COLOR));
+// `shared/repo-icon.ts` `githubAvatarIcon`: `https://<host>/<owner>.png?size=64`, host
+// `github.com` unless a GHES host is configured, and `isSupportedImageSrc` accepts only an
+// owner-avatar path (`/^\/[^/?#]+\.png$/i`). The owner comes from the origin remote — the same
+// identity Orca resolves through `gh repoUpstream`. No remote (or no owner) means no image.
+export function githubAvatarUrl(remoteUrl) {
+  const m = String(remoteUrl ?? "").trim().match(/^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^/:]+)[/:]([^/]+)\/[^/]+?(?:\.git)?\/?$/i);
+  if (!m || !/^[A-Za-z0-9-]+$/.test(m[2])) return null;
+  return `https://${m[1].toLowerCase()}/${m[2]}.png?size=64`;
+}
+
+const avatarPath = (url) => `avatars/${url.replace(/[^A-Za-z0-9.-]+/g, "_")}.png`;
+const avatarTried = new Set();
+const avatarWritten = new Set();
+
+// RepoIconGlyph prefers the repo's image; Herdr has no per-repo icon, so a repo whose origin
+// names a GitHub owner gets Orca's owner avatar (`githubAvatarIcon`). `image()` takes a path
+// under the app folder, so the first sight downloads once to `avatars/<host>_<owner>.png`; a
+// failed download leaves the lucide Folder, which is what repo-icon.tsx:158 `onError` falls
+// back to. `fetch` returns text only (`ShellFetchResponse`), so the bytes come from curl.
+export async function ensureAvatar(url, cx) {
+  if (!url || avatarTried.has(url)) return;
+  avatarTried.add(url);
+  const path = `${appHome()}/${avatarPath(url)}`;
+  try {
+    const { default: fsp } = await import("fs/promises");
+    try {
+      await fsp.access(path);
+    } catch {
+      await fsp.mkdir(`${appHome()}/avatars`, { recursive: true });
+      const r = await exec("curl", ["-sfL", "--max-time", "10", url, "-o", path]);
+      if (r.code !== 0) return;
+    }
+    avatarWritten.add(url);
+    cx.notify();
+  } catch (e) { console.log("avatar", url, String(e)); }
+}
+
+export const avatarFile = (url) => (url && avatarWritten.has(url) ? avatarPath(url) : null);
+
+export function repoMark(s, size, t, ps, avatarUrl) {
+  const file = avatarFile(avatarUrl);
+  return h_flex().size(size).flex_none().items_center().justify_center().rounded(4).overflow_hidden()
+    .child(file
+      ? image(file).size(16)
+      : svg("mods/orca-spaces/folder.svg").size(14).text_color(REPO_BADGE_COLOR));
 }
