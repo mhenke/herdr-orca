@@ -44,12 +44,10 @@ export default class WorkspaceChrome extends View {
           .child(row("settings", "settings", "Settings", () => run("app.settings")))
           // Herdr has no dropdown menu; Help opens the command surface. CircleHelp,
           // not CircleCheck (SidebarSettingsHelpMenu.tsx:233).
-          .child(row("help", "circle-help", "Help", () => run("app.palette"))))
-        // `Add machine` is Herdr's own control (defaults workspace-chrome:46), absent
-        // from Orca's footer; it keeps the right-hand cluster Orca gives its two actions.
-        // Orca's two are Reveal active workspace and Workspace board (SidebarToolbar.tsx:73-112);
-        // Herdr has no equivalent, so they are omitted rather than faked.
-        .child(row("machine", "plus", "Add machine", () => run("mod.open", { name: "machine-add" })));
+          .child(row("help", "circle-help", "Help", () => run("app.palette"))));
+        // Orca's right cluster holds Reveal active workspace and Workspace board
+        // (SidebarToolbar.tsx:76-112); neither has a Herdr command, so nothing is drawn.
+        // The Herdr-only `+` (Add machine) that sat here is gone: Orca's footer has no plus.
     }
     // TitlebarLeftControls.tsx: with a custom titlebar (Linux/Windows) the row is the logo,
     // then the application-menu button; macOS instead reserves `.titlebar-traffic-light-pad`
