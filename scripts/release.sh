@@ -143,4 +143,3 @@ if [[ "$GH_RELEASE" = true ]]; then
 fi
 
 echo "==> Release ${TAG} completed successfully!"
-EOF

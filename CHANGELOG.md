@@ -67,6 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **orca-float:** Compose the empty state and title bar as one panel shell
 - **orca-float:** Keep Orca's Minimize row in the empty state
 - **orca-files:** Filter by name over the flat worktree listing
+- **orca-pane:** Show the tab's given name as the pane title
+- **orca-spaces:** Keep saved project folders in the sidebar
+- **orca-tabs:** Show the tab colour dot from the menu's store
+- **orca-float:** Give Orca's New Terminal row a working action
+- **skills:** Add herdr-orca-release skill and update verify.py local citations
 
 ### Miscellaneous
 
@@ -90,11 +95,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Install graphify project-scoped for this layout port
 - Orca status marks: the glyphs Orca draws, and the colours its tokens have
 - Landing page, collapse-all gating, pane header, hover fixes
+- Add release automation, workflows, and changelog
 
 ### Refactoring
 
 - **orca-spaces:** Rebase onto t3-spaces for project avatars
 - **comments:** Trim redundant commentary in the spaces mod and README
+- **mods:** Deepen worktree plan, status mark, and git inspection modules
 
 ### Styling
 
