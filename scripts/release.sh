@@ -51,8 +51,23 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$VERSION" ]]; then
-  echo "Error: Version argument required (e.g. 0.1.0)." >&2
-  usage
+  SUGGESTED=$(uvx git-cliff --offline --bumped-version 2>/dev/null || true)
+  if [[ -n "$SUGGESTED" ]]; then
+    SUGGESTED="${SUGGESTED#v}"
+    if [ -t 0 ]; then
+      read -r -p "No version provided. Bump to suggested version ${SUGGESTED}? [Y/n] " choice
+      if [[ "$choice" =~ ^[Nn]$ ]]; then
+        echo "Error: Version argument required (e.g. 0.1.1)." >&2
+        usage
+      fi
+    else
+      echo "No version provided. Using suggested version: ${SUGGESTED}"
+    fi
+    VERSION="$SUGGESTED"
+  else
+    echo "Error: Version argument required (e.g. 0.1.1)." >&2
+    usage
+  fi
 fi
 
 # Normalize version to strip leading 'v' for standard formatting, but tag with 'v'
@@ -129,14 +144,24 @@ fi
 # 7. GitHub Release if requested
 if [[ "$GH_RELEASE" = true ]]; then
   if command -v gh >/dev/null 2>&1; then
+    echo "==> Packaging distribution archives..."
+    DIST_DIR=$(mktemp -d)
+    ARCHIVE_BASE="herdr-orca-${TAG}"
+    tar -czf "$DIST_DIR/${ARCHIVE_BASE}.tar.gz" \
+      layouts/ mods/ extras/ keys.json scripts/sync.sh README.md RECIPE.md CHANGELOG.md
+    zip -rq "$DIST_DIR/${ARCHIVE_BASE}.zip" \
+      layouts/ mods/ extras/ keys.json scripts/sync.sh README.md RECIPE.md CHANGELOG.md
+
     echo "==> Creating GitHub Release for ${TAG}..."
     NOTES_FILE=$(mktemp)
     uvx git-cliff --offline --tag "$TAG" --latest --strip header > "$NOTES_FILE"
     gh release create "$TAG" \
+      "$DIST_DIR/${ARCHIVE_BASE}.tar.gz" \
+      "$DIST_DIR/${ARCHIVE_BASE}.zip" \
       --title "${TAG}" \
       --notes-file "$NOTES_FILE"
-    rm -f "$NOTES_FILE"
-    echo "    GitHub Release created: https://github.com/mhenke/herdr-orca/releases/tag/${TAG}"
+    rm -rf "$NOTES_FILE" "$DIST_DIR"
+    echo "    GitHub Release created with assets: https://github.com/mhenke/herdr-orca/releases/tag/${TAG}"
   else
     echo "Warning: gh CLI not found. Skipping GitHub Release creation." >&2
   fi

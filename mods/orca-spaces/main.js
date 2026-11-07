@@ -338,12 +338,12 @@ export default class Spaces extends View {
       // each worktree's own branch up in a persisted PR cache; the row never carries a PR to
       // be inherited by other worktrees. Ask for this exact branch, and only on this machine.
       if (!on && info.branch) this.lookupPRByBranch(`${repo}::${info.branch}`, info.base, info.head, info.branch, cwd, cx);
-      // Orca's rows are the repo's worktrees (`listRepoWorktrees`), not its open sessions, so an
-      // unopened worktree still draws a card. Record each one; rows without a space open in it on click.
-      if (!info.linked) {
-        const wt = await exec("git", ["worktree", "list", "--porcelain"], { cwd, on });
-        info.worktrees = wt.code === 0 ? parseWorktreeList(wt.stdout) : [];
-      }
+      // Orca's rows are the repo's worktrees (`listRepoWorktrees`), not its open sessions. A
+      // repo is one group whether the open space is the main checkout or a linked worktree —
+      // `git worktree list` answers for both — so read it every time. Without this, a repo
+      // opened only on linked worktrees could never show its main checkout or its siblings.
+      const wt = await exec("git", ["worktree", "list", "--porcelain"], { cwd, on });
+      info.worktrees = wt.code === 0 ? parseWorktreeList(wt.stdout) : [];
       if (!on) this.watch(repo, cx);
     } catch (err) {
       // Couldn't ask (the machine is away): keep what it showed, look again later.
