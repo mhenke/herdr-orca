@@ -15,7 +15,7 @@ Every number here was read from Orca's renderer source, not estimated from a scr
 ## Features
 
 - **Three columns at Orca's widths**: left sidebar 280 (min 220, max 500), right panel 280 (min 220), 1px dividers, 2px pane corners. The center reads flat, as Orca's does.
-- **Project cards in the sidebar**: each space draws its project's mark — the repo's own icon when it has one, else a monogram in a stable color — with its branch and ahead/behind where they matter. Linked worktrees fold under their checkout. Drag a row to reorder it.
+- **Project cards in the sidebar**: each repo draws Orca's folder glyph in its section header, then one card per worktree titled by its branch, with `primary` on the repo's own checkout and ahead/behind where they matter. Linked worktrees fold under their checkout. Drag a row to reorder it.
 - **Activity rail**: 36×36 buttons with 16px icons at the right of the tab strip, matching Orca's activity bar. Explorer is always there; Source Control appears only in a git repository, which is Orca's `gitOnly` rule. Pressing the active one hides the column again; each space remembers its own choice.
 - **Space menu**: right-click a space for Rename, Copy Path, Copy Worktree Name, Open in Terminal, New/Open/Remove worktree and Close.
 - **File row menu**: right-click any file or folder for New File, New Folder, Copy Path, Copy Relative Path, Open in Terminal, Reveal, Rename and Delete. New and Rename ask for the name in place.
