@@ -54,8 +54,15 @@ Left to right, divider 1px `border` (`#2e2e2e`):
   - Center: Agent rollup status indicator.
   - Right: Host machine count, update status indicator, and workspace connection state.
 
-- **Floating overlay** (`float-workspace`, anchored to bottom-end):
-  - Mod `orca-float` / `orca-pane-status`: contextual status pill or notifications overlay.
+- **Floating workspace** (`float-workspace`, `edge: bottom`, `align: end`; `layouts/orca.json`):
+  - Mod `orca-float`: Orca's `Mod+Alt+A` panel, toggled here by `ctrl-alt-a` →
+    `orca-float.toggle` (`keys.json`). Opens a 920x560 panel (min 420x280, clamped to the
+    viewport as `floating-terminal-panel-bounds.ts:89-97` does) at bottom-right, listing the
+    live agent sessions; a row focuses its agent, `×` hides the panel.
+  - Named divergence: Herdr cannot toggle a float's visibility by command (`layout.toggle`
+    walks nodes, not floats) and a mod cannot host a terminal, so the panel floats agents
+    rather than a tabbed terminal/browser/markdown workspace. See
+    `docs/adr/0003-a-float-cannot-hold-a-toggleable-terminal.md`.
 
 ### Colour and theme tokens
 
@@ -155,7 +162,10 @@ A missing token paints **magenta** (`hsla(0.83, 1.0, 0.5, 1.0)` by design; `sett
   - `mods/orca-status`: 24px bottom status bar spanning the full window width.
   - `mods/orca-menu`: 208px / 176px context menu overlay for cards, spaces, and tabs.
   - `mods/new-menu`: 288px create dropdown overlay for creating terminals and worktrees.
-  - `mods/orca-float` & `mods/orca-pane-status`: Floating bottom-right status pill overlay.
+  - `mods/orca-float`: Bottom-right floating workspace panel (`ctrl-alt-a`) listing live agent
+    sessions; named divergence documented in
+    `docs/adr/0003-a-float-cannot-hold-a-toggleable-terminal.md`.
+  - `mods/orca-pane-status`: Pane-footer agent state mark, hard right (16px pane header).
 
 - **Herdr commands & APIs**:
   - Navigation & spaces: `layout.switch`, `layout.resize`, `space.select`, `space.new`, `space.rename`, `space.close`.
