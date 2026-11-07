@@ -32,10 +32,28 @@ worktree / project group / top branch mean exactly one thing each here.
    packaging, sync, keys and mod-structure questions; use the Orca graph for what
    the UI looks like and how it behaves. Its graph is built, no need to rebuild.
 
-   **Run graph queries with `env -u GRAPHIFY_OUT`.** `~/.zshrc:164` exports
-   `GRAPHIFY_OUT="$HOME/.graphify/oh-my-opencode-slim"`, so a bare `graphify query`
-   silently answers from that graph instead of the one in the current folder
-   (7348 nodes vs 874). Prefix every query: `env -u GRAPHIFY_OUT graphify query "…"`.
+   **Point every query at the graph explicitly — the env is rigged.**
+   `~/.zshrc:164` exports `GRAPHIFY_OUT="$HOME/.graphify/oh-my-opencode-slim"`,
+   and that wins over cwd: a bare `graphify query` in `herdr-t3` answered from
+   7348 nodes of a different project instead of its own 874, so "how does
+   sync.sh install layouts" returned `src/cli/install.ts` and never `sync.sh`.
+   It does not warn. Always pass the graph:
+
+   ```
+   graphify query "<question>" --graph ~/Projects/orca/graphify-out/graph.json
+   graphify query "<question>" --graph ~/Projects/herdr-t3/graphify-out/graph.json
+   graphify path A B --graph ~/Projects/orca/graphify-out/graph.json
+   ```
+
+   `--graph` beats the variable and works from any cwd. `env -u GRAPHIFY_OUT
+   graphify query …` also works, but only from the project folder. Check the
+   first output line: it prints the graph it used and its node count — if that
+   is not the project you meant, the answer is about the wrong codebase.
+   Related traps: `extract` takes no `--graph`; it writes wherever `GRAPHIFY_OUT`
+   points, so an extract run outside one `env -u GRAPHIFY_OUT graphify extract .`
+   lands in that other project's folder and prunes the graph already there (9097
+   nodes went once). An interrupted extract leaves only `.graphify_build.json`,
+   so a missing `graph.json` means rebuild, not query.
 2. **Copy the owning function, not its outputs.** Hand-tuned literals drift;
    the port of `indentation.ts` (`mods/orca-spaces/indentation.js`) ended five
    rounds of indent patches. If Orca computes it somewhere, port that module.
