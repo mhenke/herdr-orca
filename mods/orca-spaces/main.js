@@ -615,12 +615,15 @@ export default class Spaces extends View {
   }
 
   // A repo is a project group: a SectionHeader, then its worktree cards. A bare folder
-  // workspace has no repo to head it, so it is one top-level card (Orca's folder row) —
-  // heading it would print its folder name twice. A linked worktree hangs under the card
-  // its main checkout leads, so it draws no second header.
+  // workspace renders its folder row (folder glyph + name, `folder-row.tsx`) above its
+  // session card — hence tmp three times: folder row, card title, card path meta.
   row(r, t, ps) {
     if (r.g?.linked) return [this.card(r, t, ps)];
-    if (!r.g) return [this.card(r, t, ps)];
+    if (!r.g) {
+      const key = `space:${r.w.id}`;
+      if (this.foldedRepos.has(key)) return [this.header(r, t, ps)];
+      return [this.header(r, t, ps), this.card(r, t, ps)];
+    }
     // Orca folds the whole repo group, so every card of it hides, not only the head's.
     if (this.foldedRepos.has(r.g.repo)) return r.head ? [this.header(r, t, ps)] : [];
     // Only the repo's first space heads the group; its later spaces are further cards.

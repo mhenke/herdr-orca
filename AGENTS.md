@@ -1,29 +1,23 @@
 # herdr-orca — agent notes
 
-Orca-layout port for herdr-app, packaged like herdr-t3.
-Read `GLOSSARY.md` for the domain: repo / space / main checkout / linked worktree /
-project group / top branch mean exactly one thing each here.
+> **We have the Orca codebase at `~/Projects/orca`. Read it. Never guess.**
+> Every behavior in this package is a port of a specific Orca file. Before
+> editing a Herdr mod, open the Orca file that owns the behavior, quote its
+> path and rule in the edit comment. A diff that cannot name its Orca source
+> file does not ship. Screenshots show symptoms; `~/Projects/orca` shows causes.
+> Related code lives in `~/Projects/herdr-app` (`src/model.rs`, `herdr.d.ts`)
+> and the packaging example `~/Projects/herdr-t3`.
 
-   Codebases (read, never guess):
-   - Orca (design + behavior spec): `~/Projects/orca`
-     (`src/renderer/.../sidebar` for layout, `src/shared/sidebar-list` for row
-     plan, `src/main/git/worktrees` for worktree identity).
-   - herdr-app (host behavior + mod API): `~/Projects/herdr-app`
-     (`src/model.rs` for spaces/agents/rollup, `herdr.d.ts` for the JS contract).
-   - herdr-t3 (packaging example): `~/Projects/herdr-t3`.
-
+Read `GLOSSARY.md` for the domain: repo / space / main checkout / linked
+worktree / project group / top branch mean exactly one thing each here.
 ## Iron rules (paid for in full)
 
-0. **No Herdr change without its Orca counterpart open in `~/Projects/orca`.** Before
-   editing a Herdr mod, read the Orca file that owns the behavior and quote its path
-   and rule in the edit comment. A diff that cannot name its Orca source does not
-   ship. The Orca codebase is read-only truth; this repo is the translation.
 1. **Orca's code is the spec, not screenshots.** Every geometry value, color,
    status rule and grouping rule in this package traces to a file and line in
-   `~/Projects/orca`. Tailwind classes lie to the eye (`mr-1` is 4px in a
-   `w-5` lane); read the class, compute the pixel, verify by pixel sampling
-   with `herdr-app shot` + PIL. Vision models misread 8px marks repeatedly —
-   pixel evidence beats a vision read every time.
+   `~/Projects/orca`, quoted in the edit comment. Tailwind classes lie to the eye
+   (`mr-1` is 4px in a `w-5` lane); read the class, compute the pixel, verify by
+   pixel sampling with `herdr-app shot` + PIL. Vision models misread 8px marks
+   repeatedly — pixel evidence beats a vision read every time.
 2. **Copy the owning function, not its outputs.** Hand-tuned literals drift;
    the port of `indentation.ts` (`mods/orca-spaces/indentation.js`) ended five
    rounds of indent patches. If Orca computes it somewhere, port that module.
