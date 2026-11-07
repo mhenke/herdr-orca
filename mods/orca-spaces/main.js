@@ -4,7 +4,7 @@
 // the agents list, not here. Click to switch, right-click for its menu, drag to reorder.
 
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex, Scrollbar } from "gpui-base";
+import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
 import { repoMark, tint, parseRemote, avatarUrlFor, ensureAvatar } from "./project.js";
 import { statusMark, agentStateMark } from "./status.js";
@@ -79,7 +79,16 @@ export default class Spaces extends View {
         }
       }
     });
-    this.git = {}; // where() -> { name, branch, owner, repo, linked }, null: not a repo
+    // where() -> { name, branch, owner, repo, linked }, null: not a repo.
+    //
+    // Seeded from the last session, like Orca's persisted worktree store: its sidebar paints
+    // from hydrated state and lets the refresh purge what is stale
+    // (`hydrated-worktree-purge.ts:19-31`, purge log at `:92`). Starting from `{}` is why a
+    // launch here showed "Loading workspaces…" and then rebuilt every card; with the last
+    // answer in hand the first paint is the finished list, and the refresh only corrects it.
+    // A recorded repo path is re-checked by key on the first pass, so a stale entry shows for
+    // one tick at most; `null` (not a repo) is kept too, so plain folders never re-ask.
+    this.git = stored("git.cache.v1", {});
     // Orca keeps reviews out of the worktree row: `buildWorkspaceReviewFacts` reads a
     // persisted cache keyed `repo::branch` (`getGitHubPRCacheKeyCandidates`) and the card
     // draws whatever sits there. Nothing is fetched while rendering. Same shape here:
@@ -96,9 +105,11 @@ export default class Spaces extends View {
     this.ready = {}; // machine -> its layout was readable at the last look
     this.at = {}; // space -> its where() at the last look
     this.watching = new Set(); // local repos' git folders
-    // Discovery: false until the first git pass answers for every place, which is the moment
-    // Orca starts drawing rows (`startupWorktreeRefreshCompleted`).
-    this.loaded = false;
+    // Orca's `startupWorktreeRefreshCompleted` (`startup-worktree-refresh.ts:80`). With hydrated
+    // rows the list is already correct at first paint, exactly as Orca's is — it draws from the
+    // persisted store and never shows an empty panel while refreshing. The gate only has to
+    // suppress rows when there is nothing to draw, so a cold cache is the only "loading" case.
+    this.loaded = Object.keys(this.git).length > 0;
     this.pressed = null;
     // The group whose menu overlay is open: its header cluster stays visible while the
     // pointer is over the overlay instead of the header.
@@ -124,10 +135,10 @@ export default class Spaces extends View {
     const sp = spaces();
     const due = this.due(now, sp, panes());
     if (due.size) this.refreshGit(due, cx);
-    // While discovery is running the list is deliberately empty, so something must repaint when
-    // it ends. The git pass notifies on completion; this covers the case where there is nothing
-    // to ask (no spaces at all), so the empty state appears rather than a blank pane.
-    const discovering = !this.loaded;
+    else if (!this.loaded && !this.refreshing) {
+      this.loaded = true;
+      cx.notify();
+    }
     // The row order git implies is committed here, in the task phase, not from `render`.
     this.settleRows(cx);
     // Agent state is read straight from the host model (`space.status`, `agent.status`), so a
@@ -140,8 +151,7 @@ export default class Spaces extends View {
     const now2 = { spaces: sp.map((s) => `${s.id}:${s.status}`).join(","), agents: agents().map((a) => `${a.address}:${a.status}`).join(",") };
     const changed = now2.spaces !== this.statusSeen?.spaces || now2.agents !== this.statusSeen?.agents;
     this.statusSeen = now2;
-    if (changed || discovering) cx.notify();
-
+    if (changed) cx.notify();
   }
 
   // Places whose git could have changed: new ones (a new space, a cd), where a
@@ -240,12 +250,8 @@ export default class Spaces extends View {
     });
   }
 
-  // One look at a time, each place once however often it was asked for meanwhile.
-  //
-  // The keys run together, not one after another: Orca refreshes every host concurrently
-  // (`startup-worktree-refresh.ts:41-45` `Promise.allSettled`), and a serial queue here meant the
-  // last row of a big list waited behind every earlier repo's six `git` calls. `check` asks git
-  // for read-only facts, so overlapping is safe; the loop stays for keys that arrive mid-batch.
+  // Runs git checks concurrently across hosts, matching startup-worktree-refresh.ts:51-68
+  // Promise.allSettled. A serial queue caused rows to stall behind earlier repositories.
   refreshGit(keys, cx) {
     for (const k of keys) this.pending.add(k);
     if (this.refreshing) return;
@@ -254,12 +260,14 @@ export default class Spaces extends View {
       while (this.pending.size) {
         const batch = [...this.pending];
         this.pending.clear();
-        await Promise.all(batch.map((key) => this.check(key, cx).catch(() => {})));
+        await Promise.all(batch.map((key) => this.check(key, cx)));
       }
       const used = new Set(Object.values(this.git).filter(Boolean).map((g) => readPair(g.repo)).filter(([on]) => !on).map(([, repo]) => repo));
       for (const repo of this.watching) if (!used.has(repo)) this.watching.delete(repo);
       this.refreshing = false;
       this.loaded = true;
+      // The refresh is the only writer, so one write per completed pass is enough.
+      localStorage.setItem("git.cache.v1", JSON.stringify(this.git));
       cx.notify();
     });
   }
@@ -442,11 +450,9 @@ export default class Spaces extends View {
   // the frame. Reordering is the drag handler's job (`use-document-drop.ts:72` fires
   // `onReorderWorktrees`); nothing here moves a space.
   //
-  // Orca draws no rows until discovery finishes, then all of them at once
-  // (`startup-worktree-refresh.ts:75-80` sets `startupWorktreeRefreshCompleted` in a `finally`;
-  // `EmptyState.tsx:14` gates its "No workspaces found" on the same flag). Building the list
-  // row by row as each repo answered was the visible defect: cards appeared without a repo,
-  // then jumped into one. There is no timer here, only "has the first pass finished".
+  // Orca draws rows only after discovery completes.
+  // startup-worktree-refresh.ts:78-82 sets startupWorktreeRefreshCompleted in a finally block,
+  // and EmptyState.tsx:14 gates "No workspaces found" on that flag.
   discoverable(w, ps) {
     return this.loaded || where(w, ps) in this.git;
   }
@@ -786,12 +792,17 @@ export default class Spaces extends View {
     // (`folderInMeta`, `WorktreeCardFolderPath` = `getDirectoryName`), branch cards the branch.
     const meta = g ? branch : base(place(w, ps));
     // Orca's classic card draws the branch unconditionally (`default-workspace-card.json`
-    // `branch: ...`), and an automatic worktree name IS the branch
-    // (`shared/worktree/display-name-provenance.ts:17-19`), so Orca really prints `main` twice.
-    // DELIBERATE DEVIATION on a user report of that repeat: drop the meta line only when it
-    // equals the title after trimming (the branch stays on screen as the title). Named
-    // worktrees, differing branches and folder paths keep their meta row.
-    const metaText = g && meta?.trim() === title?.trim() ? null : meta;
+    // `branch: "!vars.folder && len(ws.branch) > 0 && !vars.newStyle && ..."`), and an automatic
+    // worktree name IS the branch (`shared/worktree/display-name-provenance.ts:17-19`), so Orca
+    // really does print `main` twice on such a card.
+    //
+    // We briefly suppressed that repeat on a user report. It was the wrong fix: `singleLine` is
+    // derived from this value (`:912`), so nulling it collapsed EVERY card to a title-only one
+    // and the list lost Orca's two-line shape entirely. The duplicate is Orca's, and a card that
+    // matches Orca beats a card that is one line short. Reverting rather than special-casing:
+    // if the repeat is to go, it goes back as a recorded deviation that keeps the meta row's
+    // height, not by pretending the row is title-only.
+    const metaText = meta;
     const metaMono = !g;
     // Orca's card lists its own agents (inlineAgents) as `AgentStateDot` rows, from agents():
     // the same rows the agents view reads, so a collapsed card shows real rows, never invented.
@@ -1084,43 +1095,30 @@ export default class Spaces extends View {
     const tool = (id, label, icon, fn, more) => tip(this.hot, t, id, label, stop(this, t, id, div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(this.hot === id ? t.foreground : t.dim).on_hover(this.glow(id)).role("button").accessibility_label(label).hover(s => s.bg(t.hover))
       .on_click(fn).child(svg(`mods/orca-spaces/${icon}.svg`).size(14))), more);
     return focusRoot(this, v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      // The bar gets its own strip so rows never paint under it: Orca reserves
-      // `padding-right: 4px` before an 8px bar (main.css:767-774), so the card and its
-      // hover outline stop 12px short of the edge. `overflow_y_scroll` plus a sibling
-      // `Scrollbar.vertical("space-list")` is the documented pair for a bar outside the
-      // scrolling box; the two halves are matched by name.
-      .child(h_flex().flex_1().min_h(0)
-        .child(v_flex().id("space-list").flex_1().min_h(0).pr(4).overflow_y_scroll()
-          .on_mouse_up("left", (_e, cx) => { this.pressed = this.over = null; cx.notify(); })
-          // Herdr reports no release outside the sidebar, so leaving ends a drag, as in the inbox.
-          .on_hover((on, cx) => {
-            if (on || this.pressed === null) return;
-            this.pressed = this.over = null;
-            cx.notify();
-          })
-          .child(v_flex().id("space-content").w_full().flex_none().px(0).pb(8)
-            // `StartupWorktreeRefreshStatus.tsx:19-30` — one status row, `mx-3 mb-2 flex
-            // items-center gap-2 text-xs text-muted-foreground`, spinner then "Loading
-            // workspaces…". Orca holds it back 200ms (`:14-16`) so a fast load draws nothing;
-            // the delay is not ported because Herdr has no per-frame timer to spend on it and a
-            // visible loader for a moment is honest.
+      // `overflow_y_scrollbar()` is what `orca-files` uses for its tree and it paints a working
+      // bar. The sibling `Scrollbar.vertical("space-list")` pair used here before needs the bar
+      // to fill a parent it never got (the row was `flex_1` with no height of its own), so the
+      // sidebar scrolled with no visible thumb. One container, one bar, no name to match.
+      .child(v_flex().id("space-list").flex_1().min_h(0).overflow_y_scrollbar().mode("always")
+        .on_mouse_up("left", (_e, cx) => { this.pressed = this.over = null; cx.notify(); })
+        // Herdr reports no release outside the sidebar, so leaving ends a drag, as in the inbox.
+        .on_hover((on, cx) => {
+          if (on || this.pressed === null) return;
+          this.pressed = this.over = null;
+          cx.notify();
+        })
+        .child(v_flex().id("space-content").w_full().flex_none().px(0).pb(8)
+            // StartupWorktreeRefreshStatus.tsx:22-29 status row with mx-3 mb-2 gap-2 text-xs text-muted-foreground.
+            // StartupWorktreeRefreshStatus.tsx:14-16 delays 200ms before showing; omitted because Herdr has no frame timer.
             .when(!this.loaded, el => el.child(h_flex().flex_none().mx(12).mb(8).gap(8).items_center()
-              .text_size(11).text_color(t.muted)
-              .child(div().size(14).flex_none().spin(1000).child(svg("mods/orca-spaces/loader-circle.svg").size(14)))
+              .text_size(12).text_color(t.muted)
+              .child(svg("mods/orca-spaces/loader-circle.svg").size(16).flex_none().spin(1000))
               .child(div().child("Loading workspaces\u2026"))))
-            // `EmptyState.tsx:14-27` — Orca's only branch without filters, `flex flex-col
-            // items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground`,
-            // holding "No workspaces found". It is gated on `discoveryCompleted` (`:14`), so
-            // "found nothing" cannot be claimed while the list is still being discovered.
-            // `WorktreeList.tsx:285-287`: the gate is the row plan (`rowModel.rows.length === 0`).
+            // EmptyState.tsx:22-27 renders "No workspaces found" when rows are empty.
+            // EmptyState.tsx:14 and WorktreeList.tsx:285-287 gate this on startupWorktreeRefreshCompleted.
             .when(this.loaded && rows.length === 0, el => el.child(div().flex().flex_col().items_center().gap(8).px(16).py(24).w_full()
               .text_size(11).text_center().text_color(t.muted)
               .child(div().child("No workspaces found"))))
-            .children(rows.length ? this.grouped(t, cx, rows) : [])))
-        // Orca fades the thumb in on hover (main.css:783-790). Herdr's theme leaves an
-        // omitted-mode thumb unpainted, so `mode("always")` is deliberate: a visible,
-        // draggable bar beats one the theme never shows.
-        .child(div().w(8).flex_none().h_full()
-          .child(Scrollbar.vertical("space-list").size_full().mode("always")))));
+            .children(rows.length ? this.grouped(t, cx, rows) : []))));
   }
 }
