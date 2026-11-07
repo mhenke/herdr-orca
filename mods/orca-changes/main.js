@@ -1,4 +1,4 @@
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar, v_virtual_list } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings } from "herdr";
 
@@ -29,6 +29,18 @@ function diffRows(lines) {
     if (kind === " ") { old++; return { kind, number: next++, text: line.slice(1) || " " }; }
     return { kind: "", text: line };
   });
+}
+
+// Git decoration tones, `git-path-decoration.ts:5-12` -> main.css:489-496 (dark).
+function gitTone(mark, t) {
+  switch (mark) {
+    case "A": return "#81b88b";
+    case "D": return "#c74e39";
+    case "M": return "#e2c08d";
+    case "R": case "U": case "C": return "#73c991";
+    case "!": return "#808080";
+    default: return t.dim;
+  }
 }
 
 export default class Changes extends View {
@@ -170,31 +182,42 @@ export default class Changes extends View {
 
   diffRow({ kind, number, text }, t) {
     if (kind === "@") return div().w_full().px(12).h(20).flex_none().truncate().bg(t.raised).text_color(t.dim).child(text);
-    return h_flex().w_full().h(20).flex_none().gap(10).when(kind === "+", (e) => e.bg(t.ansi2 + "18")).when(kind === "-", (e) => e.bg(t.ansi1 + "18"))
-      .child(div().w(30).flex_none().text_right().text_color(t.dim).child(number === undefined ? "" : String(number)))
+    // Inline diff convention: main.css:498-502 tints added 16% / removed 18%, gutters 30% / 32%.
+    return h_flex().w_full().h(20).flex_none().when(kind === "+", (e) => e.bg(gitTone("A", t) + "29")).when(kind === "-", (e) => e.bg(gitTone("D", t) + "2e"))
+      .child(div().w(30).flex_none().pr(6).text_right().text_color(t.dim).when(kind === "+", (e) => e.bg(gitTone("A", t) + "4d")).when(kind === "-", (e) => e.bg(gitTone("D", t) + "52")).child(number === undefined ? "" : String(number)))
+      .child(div().w(12).flex_none().text_center().text_color(kind === "+" ? gitTone("A", t) : kind === "-" ? gitTone("D", t) : t.dim).child(kind || " "))
       .child(div().flex_1().min_w(0).truncate().child(text));
   }
 
   render(cx) {
-    if (key() !== this.context) this.refresh(cx);
+    // A task's error is reported, not thrown into the paint: a failed refresh
+    // must never replace the pane with the shell's "could not be re-rendered" bar.
+    if (key() !== this.context) cx.spawn((cx) => this.refresh(cx));
     const t = theme(), add = this.files.reduce((n, f) => n + f.add, 0), del = this.files.reduce((n, f) => n + f.del, 0);
     const enabled = Boolean(this.message.trim() && this.root && !this.busy && !this.loading);
-    return v_flex().id("changes").size_full().min_h(0).overflow_hidden().bg(t.canvas).text_color(t.foreground).text_size(13).track_focus(this.handle)
+    return v_flex().id("changes").size_full().min_h(0).overflow_hidden().text_color(t.foreground).text_size(13).track_focus(this.handle)
       .on_key_down((e, cx) => {
         if (e.key === "escape" && this.typing) { this.typing = false; this.handle.focus(); cx.stop_propagation(); cx.notify(); }
       })
-            .child(h_flex().h(20).flex_none().px(10).gap(6).items_center().text_size(10).text_color(t.dim)
-        .child(`${this.files.length} files`).child(div().flex_1())
-        .child(div().text_color(t.ansi2).child(`+${add}`)).child(div().text_color(t.ansi1).child(`−${del}`)))
-      .child(v_flex().id("changes-list").flex_none().h(Math.min(200, Math.max(44, this.files.length * 28 + 12))).overflow_y_scrollbar().p(6).border_b(1).border_color(t.border).children(this.files.map((f) => {
+            .child(h_flex().h(20).flex_none().px(10).gap(4).items_center().text_size(11).text_color(t.dim)
+        .child(div().font_medium().child(`${this.files.length} files`)).child(div().flex_1())
+        .child(div().text_color(gitTone("A", t)).child(`+${add}`)).child(div().text_color(gitTone("D", t)).child(`-${del}`)))
+      .child(v_flex().id("changes-list").flex_none().h(Math.min(200, Math.max(44, this.files.length * 24 + 12))).overflow_y_scrollbar().py(6).border_b(1).border_color(t.border).children(this.files.map((f) => {
         const parts = f.path.split("/"), name = parts.pop();
-        return h_flex().id(`change-${f.path}`).w_full().h(22).flex_none().px(8).gap(8).items_center().rounded(2).cursor_pointer().when(this.open === f.path, (e) => e.bg(t.selected)).hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.pick(f.path, cx))
-          .child(div().w(14).text_size(11).text_color(f.status === "A" ? t.ansi2 : f.status === "D" ? t.ansi1 : f.status === "U" ? t.ansi1 : t.blocked).child(f.status))
-          .child(h_flex().flex_1().min_w(0).child(div().text_color(t.dim).truncate().child(parts.length ? parts.join("/") + "/" : "")).child(div().max_w(260).min_w(0).truncate().child(name)))
-          .when(f.add > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`))).when(f.del > 0, (e) => e.child(div().text_size(11).text_color(t.ansi1).child(`−${f.del}`)));
+        // uncommitted-entry-row.tsx:123 `gap-1 pr-3 py-1` (4/12/4px), :128 pl=20, :211 letter last (w-4, 10px bold).
+        // Divergence: one Lucide File fallback (`lib/file-type-icons.ts:58`) instead of per-extension icons; hover stays the theme wash token.
+        return h_flex().id(`change-${f.path}`).w_full().h(24).flex_none().pl(20).pr(12).gap(4).items_center().cursor_pointer().when(this.open === f.path, (e) => e.bg(t.selected)).hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.pick(f.path, cx))
+          .child(svg("mods/orca-changes/file.svg").size(14).flex_none().text_color(gitTone(f.status, t)))
+          .child(h_flex().flex_1().min_w(0).items_center()
+            .child(div().flex_none().max_w(260).truncate().text_color(t.foreground).child(name))
+            .when(parts.length > 0, (e) => e.child(div().ml(6).flex_1().min_w(0).truncate().text_size(11).text_color(t.muted).child(parts.join("/")))))
+          .when(f.add > 0 || f.del > 0, (e) => e.child(h_flex().flex_none().gap(3)
+            .when(f.add > 0, (x) => x.child(div().text_size(10).text_color(gitTone("A", t)).child(`+${f.add}`)))
+            .when(f.del > 0, (x) => x.child(div().text_size(10).text_color(gitTone("D", t)).child(`-${f.del}`)))))
+          .child(div().w(16).flex_none().text_center().text_size(10).font_bold().text_color(gitTone(f.status, t)).child(f.status));
       })).when(!this.files.length, (e) => e.child(div().p(8).text_color(t.dim).child(this.error || (this.loading ? "Loading changes…" : this.root ? "No uncommitted changes" : "No folder")))))
       .when(this.limited, el => el.child(div().px(12).py(4).text_size(11).text_color(t.dim).child("Showing the first 1,000 changed files")))
-      .child(div().flex_1().min_h(0).relative().font_family(settings().font_family ?? "JetBrains Mono").text_size(11)
+      .child(div().flex_1().min_h(0).relative().font_family(settings()?.font_family ?? "JetBrains Mono").text_size(11)
         .child(div().id("changes-diff-x").size_full().overflow_x_scrollbar()
           .child(div().w_full().min_w(this.diffWidth).h_full().child(v_virtual_list("changes-diff", this.rows.length, 20, (i) => String(i),
             (range) => this.rows.slice(range.start, range.end).map((row) => this.diffRow(row, t))).size_full())))

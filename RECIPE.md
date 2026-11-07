@@ -30,19 +30,29 @@ root (column)
 | Figure | Value | Source |
 | --- | --- | --- |
 | Sidebar width | 280 (min 220, max 500) | `ui-slice-agent-actions.ts:48`, `sidebar/index.tsx:47-48` |
-| Right panel width | 350 (min 220) | `startup-ui-hydration.ts:45`, `right-sidebar-width.ts` |
+| Right panel width | 350 (min 220; this layout caps it at 900) | `startup-ui-hydration.ts:45`, `right-sidebar-width.ts:1` |
 | Top band height | 36 in all three columns | `main.css:1072-1074` (`titlebar`), `:1086-1088` (`titlebar-left`), `right-sidebar-top-activity-bar.tsx:40` |
 | Status bar | 24, `px-3 gap-4`, `border-t`, `text-xs` | `StatusBarSurface.tsx:121` |
+| App canvas | `#0a0a0a` | `main.css:336` (`--background`) |
+| Sidebar surface | `#2a2a2a` | `main.css:384` (`--worktree-sidebar`) |
 | Panel surface | `#171717` | `main.css:392` (`--sidebar`) |
-| Sidebar surface | `#2a2a2a` | `main.css` (`--worktree-sidebar`) |
+| Terminal background | `#282c34` | `terminal-themes/defaults.ts:6-12` (Ghostty Default Style Dark) |
 
-Sizes must be written as `"size": { "px": 36 }`. A bare `"px": 36` is ignored silently — the node then falls back to content size.
+Sizes must be written as `"size": { "px": 36 }` (`layout.rs:81-84`, the field at `:324`). A bare `"px": 36` on the node is ignored silently — `Node` has no `px` field, so the node falls back to content size.
 
 ## Colour
 
-Mods read `theme()` from the **nested `colors` map** in `themes/orca-dark.json`. `apply_theme` (`mods.rs:1109-1126`) maps a fixed token list onto them; a made-up top-level key never arrives. `canvas` is the panel surface (`#171717`), `chrome` is the sidebar (`#2a2a2a`), `background` is the terminal (`#0e1116`).
+A mod's `theme()` is the theme JSON `mods.rs:1049` serialises: the **resolved** theme, one flat object mapping colour names to `#rrggbb[aa]` strings (`Theme` at `settings.rs:301`). `t.canvas`, `t.muted`, `t.ansi4` — there is no nested `colors` object and no `ColorTokens` in it. (`apply_theme`, `mods.rs:1110-1131`, separately maps a fixed token list onto `gpui_base::ColorTokens` for `cx.theme()` inside native render code; that is a different view. The old note here claiming mods read it was wrong.)
 
-Adding a token to the JSON is therefore not enough — only the names already in that list take effect.
+`themes/<name>.json` is a palette plus overrides (`settings.rs:103-114`): top-level `background`, `foreground`, `selection`, `cursor` (optional) and exactly sixteen `ansi` entries, each `#rrggbb`; optional `colors` map, each value `#rrggbb` or `#rrggbbaa` (`settings.rs:190-215`). The struct denies unknown fields, so any other top-level key makes the theme fail to parse (`settings.rs:105`).
+
+`resolve` turns the palette into names (`settings.rs:306-363`): `background`, `terminal_foreground`, `foreground`, `surface`, `canvas`, `chrome`, `popover`, `raised`, `hover`, `selected`, `border`, `input`, `muted`, `dim`, `accent`, `accent_foreground`, `solid`, `solid_foreground`, `ring`, `selection`, `cursor`, `working`, `blocked`, `done`, `idle`, `unknown` (`settings.rs:326-352`), plus `ansi0`…`ansi15` (`:357-358`). The file's `colors` map is inserted last (`:360-362`), so it replaces any of those names and adds new ones — that is how `extras/themes/orca-dark.json` carries Orca's greys.
+
+A name that does not exist paints **magenta** by design, `hsla(0.83, 1.0, 0.5, 1.0)` (`settings.rs:654-655`). Magenta on screen is a misspelt token, not a styling bug.
+
+The terminal's background is the resolved `background` name (`vt.rs:72`). The theme file's top-level `background` seeds it (`settings.rs:327`), so `extras/themes/orca-dark.json` paints the terminal `#282c34` (`terminal-themes/defaults.ts:6-12`, Ghostty Default Style Dark, Orca's default) — distinct from the chrome `#0a0a0a` (`main.css:336`). A `colors.background` entry overrides the name, because the `colors` map is inserted last (`:360-362`); neither theme in `extras/themes/` changes the terminal background.
+
+The layout names its theme as a string or a `{ "light": …, "dark": … }` pair (`layout.rs:176-183`); `layouts/orca.json` says `"theme": "orca-dark"`. The name resolves to `themes/<name>.json` (`settings.rs:180-188`).
 
 ## Left column — `orca-nav`, `orca-spaces`, `orca-chrome`
 
@@ -77,7 +87,7 @@ Icons are copied into each mod that uses them. A mod cannot read outside its own
 
 ## After a Herdr upgrade
 
-Re-clone `pane`, `tabs`, `files`, `spaces` and re-apply the diffs described above. Do not hand-merge: the point of the clone is that the diff stays small enough to redo.
+Re-clone the shipped mods these folders started from — `pane`, `tabs`, `files`, `menu` and `spaces` (`orca-spaces` from herdr-t3's `t3-spaces`) — and re-apply the diffs described above. Do not hand-merge: the point of the clone is that the diff stays small enough to redo.
 
 ## What is deliberately not ported
 
@@ -96,4 +106,10 @@ sh scripts/sync.sh
 herdr-app do layout.switch '{"name":"orca"}'
 ```
 
-Restart after the first sync: a running window keeps the layout set it loaded at start. Settings that belong to the person — fonts, sounds — are documented, never written.
+`sync.sh` copies `layouts/orca.json` and `layouts/orca.svg`, every `extras/themes/*.json`, and every `mods/orca-*/` folder into `$HERDR_APP_HOME` (`~/.config/herdr-app` by default), deleting each destination mod folder first. It merges `keys.json` by section: a binding in this package's sections replaces the same keystroke in the person's file, and every other key and section is left alone (`scripts/sync.sh`). It never writes `settings.json`.
+
+A key section is named `layout:<layout name>`: the window's key context is `Herdr layout = <name>` (`window.rs:4859`) and `keys.rs:118-125` builds `layout == <name>` from the suffix. This package therefore needs `layout:orca` for `layouts/orca.json`.
+
+Nothing needs a restart. `layout.switch` replaces the chrome in the running window (`window.rs:964-1000`); the shown layout file is re-read when it changes (`window.rs:1002-1034`); an edited mod hot-reloads (`window.rs:3872-3884`); and a new mod folder is found by the recursive watch of `mods/` (`window.rs:3891-3920`, `files.rs:15-33`). If the app is not running, start it after the sync; it opens the layout that `layout.switch` saved.
+
+Settings that belong to the person — fonts, sounds — are documented, never written.

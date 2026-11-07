@@ -5,17 +5,6 @@ import { v_flex, h_flex } from "gpui-base";
 import { theme, run, openOverlay, shared } from "herdr";
 
 export default class Nav extends View {
-  row(t, id, icon, label, action) {
-    // SidebarNav.tsx buttons: gap 8, px 8, py 6, rounded 6, 13px medium;
-    // inactive text foreground/60, icon foreground/30, hover bg foreground/8.
-    return h_flex().id(id).w_full().h(28).px(8).gap(8).items_center().rounded(6)
-      .text_size(13).font_medium().text_color("#f0f0f099").cursor_pointer()
-      .role("button").accessibility_label(label)
-      .hover(s => s.bg("#f0f0f014"))
-      .on_click(action)
-      .child(svg(`mods/orca-nav/${icon}.svg`).size(16).flex_none().text_color("#f0f0f04d"))
-      .child(div().child(label));
-  }
   render() {
     const t = theme();
     // orca-spaces owns the fold set, so it publishes whether every project is closed;
@@ -56,7 +45,7 @@ export default class Nav extends View {
       // font-semibold text-muted-foreground/80`; actions group `flex shrink-0 items-center gap-1`.
       // Icons are plain Lucide at their default stroke-width 2 — there is no global override in
       // Orca's CSS (main.css:3090 is a feature-wall decoration, not icons).
-      .child(h_flex().w_full().h(32).mt(8).px(8).gap(6).items_center().justify_between()
+      .child(h_flex().w_full().h(32).mt(8).gap(6).items_center().justify_between()
         // `SidebarHeader.tsx:70` is `group/sidebar-header`; the collapse-all wrapper is
         // `can-hover:w-0 can-hover:opacity-0` and only becomes `w-6 opacity-100` on
         // `group-hover/sidebar-header` or `focus-within` (ProjectsCollapseAllButton.tsx:35-37).
@@ -64,7 +53,8 @@ export default class Nav extends View {
         // renders only then — same result, script instead of CSS.
         .on_hover((on, cx) => { if (on !== this.headerHover) { this.headerHover = on; cx.notify(); } })
         .child(h_flex().min_w(0).items_center()
-          .child(div().pl(8).pr(2).text_size(12).font_semibold().text_color("#969eaecc").child("Projects"))
+          // `text-muted-foreground/80`: main.css:365 #acacac at 80% = #8a8a8a.
+          .child(div().pl(8).pr(2).text_size(12).font_semibold().text_color("#8a8a8a").child("Projects"))
           // ProjectsCollapseAllButton.tsx — ONE button, not two. `allCollapsed` decides both the
           // glyph and the label/handler: `Icon = allCollapsed ? ChevronsUpDown : ChevronsDownUp`
           // (:23) and clicking it always toggles (:51). The wrapper is `w-0 opacity-0` until the
@@ -79,7 +69,9 @@ export default class Nav extends View {
             .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
             .role("button").accessibility_label(allCollapsed ? "Expand all projects" : "Collapse all projects")
             .on_click(() => run(allCollapsed ? "orca-spaces.expand-all" : "orca-spaces.collapse-all"))
-            .child(svg(allCollapsed ? "mods/orca-nav/chevrons-up-down.svg" : "mods/orca-nav/chevrons-down-up.svg").size(14)))))
+            // ProjectsCollapseAllButton.tsx:51 renders a bare `<Icon />`, so the icon-xs
+            // `[&_svg:not([class*='size-'])]:size-3` rule (button.tsx:59) applies: 12px.
+            .child(svg(allCollapsed ? "mods/orca-nav/chevrons-up-down.svg" : "mods/orca-nav/chevrons-down-up.svg").size(12)))))
         .child(h_flex().flex_none().items_center().gap(4)
           // ORDER, from SidebarHeader.tsx: bottom of the header is the bell popover (its own
           // Button, `w-8`, SidebarHeader.tsx:89-97), and only THEN `SidebarHeaderActions`

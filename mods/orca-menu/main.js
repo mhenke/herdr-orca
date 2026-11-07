@@ -33,10 +33,17 @@ function items(p, git) {
       const parent = term?.parent && all.find((t) => t.address === term.parent);
       // Once they go to the program, Shift+right-click still opens this menu.
       const toProgram = term?.labels?.["herdr.right-click"] === "program";
+      // Orca's close row names the tab when this is its last pane
+      // (terminal-pane-close-affordance.ts:16).
+      const own = panes().find((x) => x.pane === tg.pane);
+      const alone = own && panes().filter((x) => x.tab === own.tab).length < 2;
       return [
-        ["Split right", "pane.split", { direction: "right", pane: tg.pane }],
-        ["Split down", "pane.split", { direction: "down", pane: tg.pane }],
-        ["Zoom", "pane.zoom", { pane: tg.pane }],
+        // Orca's order (TerminalContextMenu.tsx:265-302): splits, then expand/collapse.
+        ["Split Terminal Right", "pane.split", { direction: "right", pane: tg.pane }],
+        ["Split Terminal Down", "pane.split", { direction: "down", pane: tg.pane }],
+        [own?.zoomed ? "Collapse Pane" : "Expand Pane", "pane.zoom", { pane: tg.pane }],
+        // Herdr-only: Orca has no right-click routing or park command; kept between the
+        // layout block and Close, where Orca's title/ID block sits.
         ...(term
           ? [
               toProgram
@@ -45,19 +52,20 @@ function items(p, git) {
             ]
           : []),
         ...(parent ? [[`Send back to ${parent.name || parent.address}`, "terminal.park", { terminal: term.address }]] : []),
-        ["Close pane", "pane.close", { pane: tg.pane }],
+        [alone ? "Close tab" : "Close Pane", "pane.close", { pane: tg.pane }],
       ];
     }
     case "tab":
+      // Orca's order (SortableTabContextMenu.tsx:206-222): Copy Tab ID, Close, Change Title.
+      // New tab is the tab strip's + button (orca-tabs/main.js), not a menu row in Orca.
       return [
-        ["Rename", "tab.rename", { id: tg.id }],
-        ["New tab", "tab.new", { space: tg.space }],
+        ["Copy Tab ID", "orca-menu.copy-tab-id", { id: tg.id }],
         ["Close", "tab.close", { id: tg.id }],
+        ["Change Title", "tab.rename", { id: tg.id }],
       ];
-    // `RepoHeaderProjectActionsMenu` (repo-header-project-actions.tsx:90-118): the ellipsis on a
-    // project group header. It acts on the REPO, not on one of its worktrees, so it is its own
-    // case rather than `space`. Orca's items there are project rename/remove plus the reveal and
-    // delete groups; Herdr has no project entity, so only what maps is offered.
+    // `RepoHeaderProjectActionsMenu` (repo-header-project-actions.tsx:121-186): the ellipsis on a
+    // project group header. Its rows are project settings/icon/visibility/groups/remove, none of
+    // which Herdr has (there is no project entity), so the rows below are Herdr's own.
     case "group":
       return [
         ["New worktree", "worktree", { space: tg.id, action: "new" }],
@@ -67,11 +75,13 @@ function items(p, git) {
         ["Close workspace", "space.close", { id: tg.id }],
       ];
     case "space":
+      // Orca's order (WorktreeContextMenuView.tsx:165-205): Update, then Open in / Copy Path /
+      // Copy Worktree Name, then worktree work, then the destructive row.
       return [
-        ["Rename", "space.rename", { id: tg.id }],
+        ["Update", "space.rename", { id: tg.id }],
+        ["Open in Terminal", "orca-menu.open-terminal", { id: tg.id }],
         ["Copy Path", "orca-menu.copy-path", { path: tg.path ?? null, id: tg.id }],
         ["Copy Worktree Name", "orca-menu.copy-name", { id: tg.id }],
-        ["Open in Terminal", "orca-menu.open-terminal", { id: tg.id }],
         ...(git ? [["New worktree", "worktree", { space: tg.id, action: "new" }], ["Open worktree", "worktree", { space: tg.id, action: "open" }]] : []),
         ...(git === "linked" ? [["Remove worktree", "worktree", { space: tg.id, action: "remove" }]] : []),
         ["Close", "space.close", { id: tg.id }],
@@ -88,18 +98,51 @@ function items(p, git) {
   }
 }
 
-function menuIcon(command) {
+// Orca's lucide glyph for each row, taken from the component named in the citation.
+function menuIcon(it, zoomed) {
+  const [, command, args] = it;
+  if (command === "pane.split") return `mods/orca-menu/${args?.direction === "down" ? "panel-bottom-close" : "panel-right-close"}.svg`;
+  if (command === "pane.zoom") return `mods/orca-menu/${zoomed ? "minimize-2" : "maximize-2"}.svg`;
+  if (command === "worktree") return `mods/orca-menu/${args?.action === "new" ? "git-branch-plus" : args?.action === "open" ? "workflow" : "unlink"}.svg`;
   const name = command === "orca-menu.copy-path" || command === "orca-menu.copy-name" ? "copy"
-    : command === "orca-menu.open-terminal" ? "terminal"
-    : command.endsWith(".close") ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : command === "pane.split" ? "panel-right" : command === "pane.zoom" ? "square" : "terminal";
+    : command === "orca-menu.open-terminal" ? "folder-open"
+    : command.endsWith(".close") ? "x"
+    : command.endsWith(".rename") ? "pencil"
+    : command.endsWith(".new") ? "plus"
+    : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : "terminal";
   return `mods/orca-menu/${name}.svg`;
+}
+
+// Orca's separators, by menu: DropdownMenuSeparator at mx-10 my-5
+// (dropdown-menu.tsx:208).
+function section(p, list, i) {
+  const it = list[i], prev = list[i - 1];
+  if (!prev) return false;
+  if (it[1].endsWith(".close")) return true;
+  if (p?.tab === "tab" && it[0] === "Change Title") return true;
+  if (p?.tab === "space" && (it[0] === "Open in Terminal" || (it[1] === "worktree" && prev[1] !== "worktree"))) return true;
+  // The global list is Herdr's own; keep its rows apart as before.
+  if (!p?.tab || p.tab === "global") return it[1] === "app.help" || (it[1] === "app.theme" && prev[1] !== "app.theme");
+  return false;
+}
+
+// Orca's destructive row is --destructive: #ff6568 dark, #e40014 light (main.css:474,437);
+// Herdr has no such token.
+function destructive() {
+  return window.appearance() === "dark" ? "#ff6568" : "#e40014";
+}
+
+// Orca marks only the pane and workspace close rows destructive; the tab's Close is plain
+// (TerminalContextMenu.tsx:351, WorktreeContextMenuView.tsx:353, SortableTabContextMenu.tsx:206).
+function isDestructive(p, it) {
+  return it[1] === "pane.close" || ((p?.tab === "space" || p?.tab === "group") && it[1] === "space.close");
 }
 
 // The key bound to a command, for the hint on the right.
 function shortcut(name, args) {
   // `pane.split:right` binds pane.split with { direction: "right" }.
   const value = args && Object.values(args)[0];
-  const k = keys().find((b) => b.section === "global" && (b.action === name || b.action === `${name}:${value}`));
+  const k = (keys() ?? []).find((b) => b.section === "global" && (b.action === name || b.action === `${name}:${value}`));
   return k ? k.keys : "";
 }
 
@@ -126,9 +169,9 @@ export default class Menu extends View {
     if (it[1].startsWith("orca-menu.")) {
       const space = spaces().find((s) => s.id === (props()?.target?.id ?? ""));
       const folder = space ? place(space) : "";
+      if (it[1] === "orca-menu.copy-tab-id") void copyText(it[2].id ?? "");
       if (it[1] === "orca-menu.copy-path") void copyText(it[2].path || folder);
       if (it[1] === "orca-menu.copy-name") void copyText(space?.name ?? "");
-      if (it[1] === "orca-menu.open-terminal") run("terminal.open", { folder });
       return;
     }
     if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
@@ -137,43 +180,62 @@ export default class Menu extends View {
 
   render(cx) {
     const t = theme();
-    const list = items(props(), this.git);
+    const p = props();
+    const list = items(p, this.git);
+    const zoomed = panes().find((x) => x.pane === p?.target?.pane)?.zoomed;
+    const bad = destructive();
     return v_flex()
       .id("menu")
       .track_focus(this.handle)
       .w_full()
       .min_h(0)
-      .p(5)
+      // Content: rounded-[11px] border p-[4px] min-w-[11rem] (dropdown-menu.tsx:80). The
+      // overlay frame owns radius, border and shadow; a mod cannot set them.
+      .p(4)
       .bg(t.popover)
-      .text_size(12.8)
+      .text_size(13)
       .on_key_down((e, cx) => {
         if (e.key === "down") this.at = (this.at + 1) % list.length;
         else if (e.key === "up") this.at = (this.at + list.length - 1) % list.length;
         else if (e.key === "enter") this.choose(this.at, cx);
-        else if (e.key === "escape") closeOverlay(props().overlay);
+        else if (e.key === "escape") closeOverlay(props()?.overlay);
         else return;
         cx.notify();
       })
-      .children(
-        list.map((it, i) =>
-          v_flex()
-            .when(i > 0 && (it[1].endsWith(".close") || it[1] === "app.help" || (it[1] === "app.theme" && list[i - 1][1] !== "app.theme")), el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
+      .children([
+        // Orca's workspace menu starts with a label (WorktreeContextMenuView.tsx:160-162).
+        ...(p?.tab === "space"
+          ? [div().px(10).pt(5).pb(3).text_size(11).font_semibold().text_color(t.muted).child("Workspace")]
+          : []),
+        ...list.map((it, i) => {
+          const red = isDestructive(p, it);
+          // Orca's Copy Tab ID is `inset`: no icon, 32px left pad (CopyTabIdMenuItem.tsx:24).
+          const inset = it[1] === "orca-menu.copy-tab-id";
+          return v_flex()
+            // Separator: mx-2.5 my-[5px] h-px (dropdown-menu.tsx:208).
+            .when(section(p, list, i), (el) => el.child(div().mx(10).my(5).h(1).bg(t.border)))
             .child(h_flex()
             .id(`mi-${i}`)
-            .h(31)
-            .px(8)
-            .gap(9)
-            .rounded(7)
+            // Item: gap-2 rounded-md px-2.5 py-1 text-[13px] leading-4 = 24px row
+            // (dropdown-menu.tsx:115); icon 3.5 = 14.
+            .h(24)
+            .px(10)
+            .when(inset, (el) => el.pl(32))
+            .gap(8)
+            .rounded(6)
             .items_center()
             .justify_between()
-            .text_color(t.foreground)
-            .when(i === this.at, (el) => el.bg(t.selected))
-            .hover((s) => s.bg(t.hover))
+            .line_height("16px")
+            .text_color(red ? bad : t.foreground)
+            .when(i === this.at, (el) => el.bg(red ? `${bad}1a` : t.selected))
+            .hover((s) => s.bg(red ? `${bad}1a` : t.hover))
             .on_click((_e, cx) => this.choose(i, cx))
-            .child(svg(menuIcon(it[1])).size(14).flex_none().text_color(t.muted))
+            .when(!inset, (el) => el.child(svg(menuIcon(it, zoomed)).size(14).flex_none().text_color(red ? bad : t.muted)))
             .child(div().flex_1().child(it[0]))
-            .child(div().text_size(11).text_color(t.dim).child(shortcut(it[1], it[2])))),
-        ),
-      );
+            // Shortcut: ml-auto pl-4 text-muted-foreground, same 13px as the label
+            // (dropdown-menu.tsx:219).
+            .child(div().pl(16).flex_none().text_color(t.muted).child(shortcut(it[1], it[2]))));
+        }),
+      ]);
   }
 }

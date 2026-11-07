@@ -47,18 +47,22 @@ export default class WorkspaceChrome extends View {
           .child(row("help", "circle-help", "Help", () => run("app.palette"))))
         // `Add machine` is Herdr's own control (defaults workspace-chrome:46), absent
         // from Orca's footer; it keeps the right-hand cluster Orca gives its two actions.
+        // Orca's two are Reveal active workspace and Workspace board (SidebarToolbar.tsx:73-112);
+        // Herdr has no equivalent, so they are omitted rather than faked.
         .child(row("machine", "plus", "Add machine", () => run("mod.open", { name: "machine-add" })));
     }
     // TitlebarLeftControls.tsx: with a custom titlebar (Linux/Windows) the row is the logo,
-    // the application-menu button, then the sidebar toggle. The app-name label is macOS-only,
-    // so the brand text and the extra search button are gone. `···` opens the same command
-    // surface the sidebar's search row does, since Herdr has no native app menu.
-    return h_flex().size_full().bg(t.chrome).pl(collapsed ? 6 : 10).pr(10).gap(4).items_center().border_b(1).border_color(t.border).text_size(13.5)
-      .when(window()?.platform === "macos" && !window()?.fullscreen && !collapsed, el => el.pl(76))
-      .when(!collapsed, el => el.child(h_flex().gap(0).items_center()
-        .child(image("frame/welcome/herdr.png").size(16).opacity(0.75).mr(4))
+    // then the application-menu button; macOS instead reserves `.titlebar-traffic-light-pad`
+    // (80px, main.css:1109-1113) or `pl-2` in full screen (line 62), and never shows the
+    // app-name label or a logo. `···` opens the same command surface the sidebar's search
+    // row does, since Herdr has no native app menu. Herdr's own logo replaces Orca's.
+    const mac = window()?.platform === "macos";
+    const leftPad = collapsed ? 6 : mac ? (window()?.fullscreen ? 8 : 80) : 10;
+    return h_flex().size_full().bg(t.chrome).pl(leftPad).pr(10).gap(4).items_center().border_b(1).border_color(t.border).text_size(13.5)
+      .when(!collapsed && !mac, el => el.child(h_flex().gap(0).items_center()
+        .child(image("frame/welcome/herdr.png").size(16).opacity(0.75))
         .child(this.button("menu", svg("mods/orca-chrome/menu.svg").size(14), () => run("mod.open", { name: "picker" })))))
       // On the macOS rail the traffic lights fill the row; the agents list's » unfolds it.
-      .when(!(collapsed && window()?.platform === "macos"), el => el.child(this.button("sidebar-toggle", svg("mods/orca-chrome/panel-left.svg").size(16), toggleSidebar, 32, 24)));
+      .when(!(collapsed && mac), el => el.child(this.button("sidebar-toggle", svg("mods/orca-chrome/panel-left.svg").size(16), toggleSidebar, 32, 24)));
   }
 }

@@ -185,7 +185,12 @@
                         "weight": 1
                       }
                     }
-                  ]
+                  ],
+                  "background": "surface",
+                  "border": {
+                    "width": 1,
+                    "color": "border"
+                  }
                 }
               ]
             }

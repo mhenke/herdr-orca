@@ -150,6 +150,16 @@ worktree / project group / top branch mean exactly one thing each here.
     say so — with the Orca behavior it is standing in for. A comment that cites
     a path which does not exist is worse than no comment: it reads as verified.
     **When a claim in a comment has not been re-read this session, re-read it.**
+12. **A mod's `cx` lives only as long as the call that handed it over.** Use
+    `cx.timer.after` / `cx.timer.every` / `cx.spawn`, and take `cx` from the
+    callback's arguments; never `setTimeout` / `setInterval`, never
+    `this.cx = cx`. A stored context is rejected on its next use with
+    `cx is no longer valid: it was captured during an earlier call and used
+    later` (`scope.rs:419-422`), and because that happens while the view is
+    built, the pane paints a 2px orange bar across its top reading *"This view
+    could not be re-rendered; showing the last version that worked"*. The bar
+    is the error, not the styling — the message names the fix. See
+    `docs/adr/0002-render-failures-are-visible.md`.
 
 ## Before a medium or large change: redesign from first principles
 

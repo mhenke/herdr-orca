@@ -77,6 +77,20 @@ def check_citations():
                 if not hits:
                     problems.append(f"  MISSING  {cited}  <- {os.path.relpath(path, ROOT)}")
                     continue
+                # A citation that names a directory must name the RIGHT one. Indexing by
+                # basename alone let `sidebar/ProjectsCollapseAllButton.tsx:23` pass while the
+                # file actually lives at `sidebar/worktree-list/controls/` — the gate proved the
+                # filename existed, not the path, so a wrong path read as verified.
+                if "/" in cited:
+                    want = "/" + cited.strip("/")
+                    paths = [h for h in hits if h.replace(os.sep, "/").endswith(want)]
+                    if not paths:
+                        problems.append(
+                            f"  BADPATH  {cited}  (file exists elsewhere: "
+                            f"{os.path.relpath(hits[0], ORCA)})  <- {os.path.relpath(path, ROOT)}"
+                        )
+                        continue
+                    hits = paths
                 if not first:
                     continue
                 longest = max(line_count(h) for h in hits)
@@ -156,8 +170,60 @@ def check_smoke():
     return not errors
 
 
+def check_assets():
+    """Every `svg("mods/<mod>/<name>.svg")` must name a real file in that mod's own folder.
+
+    Earned by three defects that shipped and drew nothing: `orca-files/circle-slash.svg` and
+    `orca-files/folder-open.svg` did not exist, and `orca-spaces` loaded its machine glyphs
+    from `mods/t3-inbox/`, a different package. `herdr-app check` passes on all of them —
+    a missing asset resolves to nothing rather than an error (`assets.rs:109-115`), so the
+    only signal is a blank icon nobody files a bug about.
+    """
+    import glob
+
+    mods = {os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(MODS, "*") + os.sep)}
+    problems = []
+    seen = 0
+    for path in sorted(glob.glob(os.path.join(MODS, "*", "main.js"))):
+        with open(path, encoding="utf-8", errors="ignore") as fh:
+            text = fh.read()
+        for match in re.finditer(r'\bsvg\(\s*(`[^`]*`|"[^"]*")', text):
+            body = match.group(1)[1:-1]
+            line = text[: match.start()].count("\n") + 1
+            head = re.match(r"mods/([\w-]+)/(.*)$", body)
+            if not head:
+                continue
+            mod, rest = head.group(1), head.group(2)
+            names, unresolved = [""], False
+            for part in re.split(r"(\$\{[^}]*\})", rest):
+                if part.startswith("${"):
+                    branches = re.findall(r'"([\w.-]+)"', part)
+                    if branches:
+                        names = [n + b for n in names for b in branches]
+                    else:
+                        unresolved = True
+                else:
+                    names = [n + part for n in names]
+            if unresolved:
+                continue  # a helper parameter; its call sites are the real claim
+            for name in names:
+                if not name.endswith(".svg"):
+                    continue
+                seen += 1
+                where = os.path.join(MODS, mod, name)
+                if mod not in mods:
+                    problems.append(f"  FOREIGN  mods/{mod}/{name} (another package's mod folder)"
+                                    f"  <- {os.path.relpath(path, ROOT)}:{line}")
+                elif not os.path.exists(where):
+                    problems.append(f"  MISSING  mods/{mod}/{name}  <- {os.path.relpath(path, ROOT)}:{line}")
+    print(f"assets: {seen} resolved, {len(problems)} problem(s)")
+    for line in problems:
+        print(line)
+    return not problems
+
+
 def main():
-    results = [check_citations(), check_syntax(), check_mods()]
+    results = [check_citations(), check_syntax(), check_mods(), check_assets()]
     if "--smoke" in sys.argv:
         results.append(check_smoke())
     ok = all(results)

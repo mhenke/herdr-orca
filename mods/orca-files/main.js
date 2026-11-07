@@ -44,31 +44,53 @@ async function directory(path, on) {
   return out;
 }
 
+// Git decoration tones, `git-path-decoration.ts:5-12` -> main.css:489-496 (dark).
+function gitTone(mark, t) {
+  switch (mark) {
+    case "A": return "#81b88b";               // added
+    case "D": return "#c74e39";               // deleted
+    case "M": return "#e2c08d";               // modified
+    case "R": case "U": case "C": return "#73c991"; // renamed / untracked / copied
+    case "!": return "#808080";               // ignored
+    default: return t.dim;
+  }
+}
+
 export default class Files extends View {
   init(_props, cx) {
     this.saved = new Map();
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {};
-    this.cx = cx;
-    this.hits = null;
+    this.inputHandle = cx.focus_handle();
+    this.hits = null; this.searching = false;
     this.q = InputState.new({ placeholder: "Find files" });
+    // Debounce through `cx.timer.after`, not `setTimeout`: a `cx` captured in a
+    // `setTimeout` closure is stale by the time it fires, and the runtime rejects it
+    // ("cx is no longer valid…", `scope.rs:420`). A rejected build makes the shell
+    // replace the pane with its "could not be re-rendered" banner — which is the
+    // orange 2px bar at the top of the sidebar that appeared while typing.
+    // `cx.timer.after` hands each callback a fresh context (`typings.rs:3914-3921`).
     let timer = null;
     this.q.on("change", (_e, cx) => {
       const v = this.q.value().trim();
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        if (!v) { this.hits = null; cx.notify(); return; }
-        void this.search(v).then(h => { this.hits = h; cx.notify(); });
-      }, 200);
+      timer?.cancel();
+      this.searching = Boolean(v); cx.notify();
+      timer = cx.timer.after(200, (cx) => {
+        if (!v) { this.hits = null; this.searching = false; cx.notify(); return; }
+        cx.spawn(async (cx) => {
+          const h = await this.search(v);
+          this.hits = h; this.searching = false; cx.notify();
+        });
+      });
     });
     this.input = InputState.new({ placeholder: "Name" });
     this.input.on("change", (_e, cx) => cx.notify());
-    this.input.on("submit", (_e, cx) => { void this.apply(this.input.value().trim()); cx.notify(); });
+    this.input.on("submit", (_e, cx) => { void this.apply(this.input.value().trim(), cx); cx.notify(); });
     this.refresh(cx);
     cx.timer.every(10000, cx => this.refresh(cx));
     cx.spawn(async cx => {
       for (;;) {
         const c = await nextCommand();
-        if (c) await this.command(c).catch(() => {});
+        if (c) await this.command(c, cx).catch(() => {});
         cx.notify();
       }
     });
@@ -120,11 +142,11 @@ export default class Files extends View {
         const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on }).catch(() => null);
         const marks = {};
         if (top?.code === 0) {
-          // Writes nothing under .git (index lock, fsmonitor cookie): the folder watch would refresh again.
-          const status = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"], { cwd, on }).catch(() => null);
+          // --ignored: Orca draws ignored rows with CircleSlash (FileExplorerRow.tsx:258-267).
+          const status = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--ignored=matching"], { cwd, on }).catch(() => null);
           if (status?.code === 0) for (const entry of status.stdout.split("\0").filter(Boolean).slice(0, TOTAL)) {
             const xy = entry.slice(0, 2);
-            marks[`${top.stdout.trim()}/${entry.slice(3)}`] = xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M";
+            marks[`${top.stdout.trim()}/${entry.slice(3)}`] = xy === "!!" ? "!" : xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M";
           }
         }
         if (!this.current(context)) return;
@@ -185,19 +207,22 @@ export default class Files extends View {
 
   full(path) { return this.root ? `${this.root}/${path}` : path; }
 
-  act(name) {
-    const { path, dir } = props().target;
+  act(name, cx) {
+    const target = props()?.target;
+    if (!target) return;
+    const { path, dir } = target;
     const full = this.full(path);
-    const close = () => closeOverlay(props().overlay);
+    const overlay = props()?.overlay;
+    const close = () => { if (overlay) closeOverlay(overlay); };
     // Typed text cannot cross mods: run("<mod>.<cmd>") delivers only the command
     // string to nextCommand(). So New/Rename ask in this mod's own popup instead.
     // Stay in this popup: closing it first would take the prompt with it.
     const ask = (mode, title, value) => {
-      this.prompt = { mode, title, full, overlay: props().overlay, value: value ?? "" };
+      this.prompt = { mode, title, full, overlay, value: value ?? "" };
       if (value) this.input.set_value(value), this.input.set_selected_range({ start: 0, end: value.length });
       else this.input.set_value("");
       this.input.focus();
-      this.cx?.notify();
+      cx.notify();
     };
     switch (name) {
       case "new-file": return ask("touch", "New File");
@@ -216,27 +241,33 @@ export default class Files extends View {
   }
 
   // The pending New/Rename, applied here because typed text cannot cross mods.
-  async apply(name) {
+  // `cx` is a click or submit context, so the writes run in a task whose own
+  // `cx` is what `refresh` gets: the caller's would be stale after the awaits.
+  apply(name, cx) {
     const p = this.prompt;
     this.prompt = null;
     if (p?.overlay) closeOverlay(p.overlay);
     if (!p || !name) return;
     const parent = p.full.replace(/\/[^/]*$/, "");
-    if (p.mode === "touch") await writeTextFile(`${p.full}/${name}`, "", null);
-    if (p.mode === "mkdir") await exec("mkdir", ["-p", `${p.full}/${name}`]);
-    if (p.mode === "mv") await exec("mv", [p.full, `${parent}/${name}`]);
-    this.refresh(this.cx);
+    cx.spawn(async (cx) => {
+      if (p.mode === "touch") await writeTextFile(`${p.full}/${name}`, "", null);
+      if (p.mode === "mkdir") await exec("mkdir", ["-p", `${p.full}/${name}`]);
+      if (p.mode === "mv") await exec("mv", [p.full, `${parent}/${name}`]);
+      this.refresh(cx);
+    });
   }
 
   // Delete needs no typed text, so the shipped confirm mod can drive it.
-  async remove() {
+  // `cx` is the `nextCommand` loop's AsyncContext (see `command`), which stays
+  // valid across awaits.
+  async remove(cx) {
     const full = shared("orca-files.target");
     setShared("orca-files.target", null);
     if (full) await exec("rm", ["-rf", full]);
-    this.refresh(this.cx);
+    this.refresh(cx);
   }
 
-  command(c) { if (c === "remove") return this.remove(); }
+  command(c, cx) { if (c === "remove") return this.remove(cx); }
 
   // Bounded: exec caps at 8 MiB / 30s, so cap hits rather than fail.
   async search(query) {
@@ -254,59 +285,68 @@ export default class Files extends View {
     for (const entry of this.entries.get(prefix) ?? []) {
       if (out.length >= TOTAL) break;
       const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[`${this.root}/${path}`];
-      // FileExplorerRow.tsx:152,147 — indent depth*16 + 8, gap 4, rounded-sm, text-xs, py 4.
-      out.push(h_flex().id(`file-${path}`).w_full().h(22).flex_none().pl(8 + depth * 16).pr(8).gap(4).items_center().rounded(2).text_size(12).cursor_pointer().hover(s => s.bg(t.hover))
+      // FileExplorerRow.tsx:147-152 — px-2 py-1 text-xs gap-1, indent depth*16 + 8; 26px is
+      // Orca's own row constant (virtualizer estimateSize, inline-input row, drag ghost).
+      // Colours: git-path-decoration.ts:5-12 -> main.css:489-496. Selected row: main.css:1453.
+      // Divergence: rounded(2), not rounded-sm (6px): the hover fill is only 26px tall.
+      out.push(h_flex().id(`file-${path}`).w_full().h(26).flex_none().pl(8 + depth * 16).pr(8).gap(4).items_center().rounded(2).text_size(12).cursor_pointer()
+        .when(this.file === path, el => el.bg(t.selected)).when(this.file !== path, el => el.hover(s => s.bg(t.hover)))
         .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : this.show(path, cx))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.menu(path, entry); })
         .child(entry.dir ? svg(`mods/orca-files/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
-        .child(svg(`mods/orca-files/${entry.dir ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted))
-        .child(div().flex_1().min_w(0).truncate().child(entry.name))
-        .when(Boolean(mark), el => el.child(div().text_size(11).text_color(mark === "A" ? t.ansi2 : mark === "D" || mark === "U" ? t.ansi1 : t.blocked).child(mark))));
+        .child(svg(`mods/orca-files/${entry.dir ? (open ? "folder-open" : "folder") : "file"}.svg`).size(12).flex_none().text_color(t.muted))
+        .child(div().flex_1().min_w(0).truncate().when(Boolean(mark), el => el.text_color(gitTone(mark, t))).child(entry.name))
+        // FileExplorerRow.tsx:251-267 — status `text-[10px] font-semibold tracking-wide mr-2`;
+        // ignored rows swap the label for CircleSlash size-3.
+        .when(mark === "!", el => el.child(div().mr(8).flex_none().child(svg("mods/orca-files/circle-slash.svg").size(12).flex_none().text_color(gitTone(mark, t)))))
+        .when(Boolean(mark) && mark !== "!", el => el.child(div().mr(8).flex_none().text_size(10).font_semibold().text_color(gitTone(mark, t)).child(mark))));
       if (entry.dir && open) this.rows(path, depth + 1, out, t);
     }
     return out;
   }
 
   promptView(t) {
-    const close = () => { this.prompt = null; this.cx.notify(); };
+    const close = (cx) => { this.prompt = null; cx.notify(); };
     return v_flex().id("orca-files-prompt").w_full().min_h(0).p(14).gap(10).bg(t.popover).text_size(12.8).text_color(t.foreground)
       .child(h_flex().items_center()
         .child(div().flex_1().text_size(14).font_semibold().child(this.prompt.title))
         .child(div().text_size(11).text_color(t.dim).child("Esc")).on_key_down((e, cx) => {
-          if (e.key === "escape") { close(); cx.stop_propagation(); }
-        }).track_focus(this.inputHandle ?? (this.inputHandle = this.cx.focus_handle())))
+          if (e.key === "escape") { close(cx); cx.stop_propagation(); }
+        }).track_focus(this.inputHandle))
       .child(div().text_size(11).text_color(t.dim).child(this.prompt.full))
-      .child(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_size(12.8).text_color(t.foreground)
-        .on_key_down((e, cx) => { if (e.key === "enter") { void this.apply(this.input.value().trim()); cx.stop_propagation(); } }))
+      .child(Input.new(this.input).h(34).px(10).rounded(8).border_1().border_color(t.input).bg(t.surface).text_size(12.8).text_color(t.foreground)
+        .on_key_down((e, cx) => { if (e.key === "enter") { void this.apply(this.input.value().trim(), cx); cx.stop_propagation(); } }))
       .child(h_flex().gap(8).justify_end()
-        .child(h_flex().id("fx-cancel").h(30).px(12).items_center().rounded(7).border_1().border_color(t.input).text_size(12).cursor_pointer().hover(s => s.opacity(0.88)).on_click(close).child("Cancel"))
+        .child(h_flex().id("fx-cancel").h(30).px(12).items_center().rounded(7).border_1().border_color(t.input).text_size(12).cursor_pointer().hover(s => s.opacity(0.88)).on_click((_e, cx) => close(cx)).child("Cancel"))
         .child(h_flex().id("fx-save").h(30).px(12).items_center().rounded(7).bg(t.solid).text_color(t.solid_foreground).text_size(12).font_medium().cursor_pointer()
-          .hover(s => s.opacity(0.88)).on_click((_e, cx) => { void this.apply(this.input.value().trim()); cx.notify(); }).child("Save")));
+          .hover(s => s.opacity(0.88)).on_click((_e, cx) => { void this.apply(this.input.value().trim(), cx); cx.notify(); }).child("Save")));
   }
 
   menuView(t) {
-    const item = (i, label, icon, act) => h_flex().id(`fx-${i}`).h(30).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer()
-      .hover(s => s.bg(t.hover)).on_click(act)
+    const item = (i, label, icon, name) => h_flex().id(`fx-${i}`).h(30).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer()
+      .hover(s => s.bg(t.hover)).on_click((_e, cx) => this.act(name, cx))
       .child(svg(`mods/orca-files/${icon}.svg`).size(14).flex_none().text_color(t.muted))
       .child(div().child(label));
     return v_flex().id("orca-files-menu").w_full().min_h(0).p(5).bg(t.popover).text_size(12.8).text_color(t.foreground)
-      .child(div().px(8).py(4).text_size(11).text_color(t.dim).child(props().target.path))
-      .child(item(0, "New File", "plus", () => this.act("new-file")))
-      .child(item(1, "New Folder", "folder", () => this.act("new-folder")))
-      .child(item(2, "Copy Path", "copy", () => this.act("copy-path")))
-      .child(item(3, "Copy Relative Path", "copy", () => this.act("copy-rel")))
-      .child(item(4, "Open in Terminal", "terminal", () => this.act("terminal")))
-      .child(item(5, "Reveal", "file", () => this.act("reveal")))
-      .child(item(6, "Rename", "square-pen", () => this.act("rename")))
-      .child(item(7, "Delete", "x", () => this.act("delete")));
+      .child(div().px(8).py(4).text_size(11).text_color(t.dim).child(props()?.target?.path ?? ""))
+      .child(item(0, "New File", "plus", "new-file"))
+      .child(item(1, "New Folder", "folder", "new-folder"))
+      .child(item(2, "Copy Path", "copy", "copy-path"))
+      .child(item(3, "Copy Relative Path", "copy", "copy-rel"))
+      .child(item(4, "Open in Terminal", "terminal", "terminal"))
+      .child(item(5, "Reveal", "file", "reveal"))
+      .child(item(6, "Rename", "square-pen", "rename"))
+      .child(item(7, "Delete", "x", "delete"));
   }
 
   render(cx) {
-    if (key() !== this.context?.key) this.refresh(cx);
+    // A task's error is reported, not thrown into the paint: a failed refresh
+    // must never replace the pane with the shell's "could not be re-rendered" bar.
+    if (key() !== this.context?.key) cx.spawn((cx) => this.refresh(cx));
     const t = theme();
     if (this.prompt) return this.promptView(t);
     if (props()?.tab === "file") return this.menuView(t);
-    return v_flex().id("files").size_full().min_h(0).overflow_hidden().bg(t.canvas).text_color(t.foreground).text_size(13)
+    return v_flex().id("files").size_full().min_h(0).overflow_hidden().text_color(t.foreground).text_size(13)
       .when(Boolean(this.file), el => el.child(h_flex().h(30).flex_none().px(10).gap(6).items_center().border_b(1).border_color(t.border)
         .child(div().id("files-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => { this.show(null); cx.notify(); }).child("←"))
         .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.dim).child(this.file ?? ""))))

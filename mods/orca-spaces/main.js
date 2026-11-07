@@ -44,11 +44,19 @@ const base = (path) => path.replace(/\/+$/, "").split("/").pop();
 // Changes made outside Herdr (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
 const FALLBACK = 60000;
+// Safely read a stored JSON value of the expected shape; a mangled key never throws.
+function stored(key, fallback) {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? "null");
+    return Array.isArray(fallback) === Array.isArray(v) && v !== null && typeof v === "object" ? v : fallback;
+  } catch { return fallback; }
+}
 
+// A `[machine, path|repo]` pair this file wrote itself: anything else reads as [].
+const readPair = (s) => { try { const v = JSON.parse(s); return Array.isArray(v) ? v : []; } catch { return []; } };
 export default class Spaces extends View {
   init(_props, cx) {
     stopsInit(this, cx, "entry");
-    this.cx = cx;
     // pane.go onto this list (mod.json's "focusable"): the keyboard starts at the heading's button.
     cx.spawn(async (cx) => {
       for (;;) {
@@ -75,7 +83,7 @@ export default class Spaces extends View {
     // `prCache[key] = { data: { number, state } | null, at }`, keyed `<common-dir>::<branch>`.
     // v2: v1 answered `--head <branch>` with no owner check, so a fork's `main` sat in the
     // `stablyai/orca::main` slot. Bumping the key retires those entries instead of trusting them.
-    this.prCache = JSON.parse(localStorage.getItem("pr.cache.v2") ?? "{}");
+    this.prCache = stored("pr.cache.v2", {});
     this.prAsking = new Set(); // keys with a hydrating `gh` in flight
     this.prChecked = {}; // key -> when the cache last answered
     this.checked = {}; // where() -> when it was last looked at
@@ -92,11 +100,13 @@ export default class Spaces extends View {
     this.pressed = null;
     this.over = null;
     this.machines = [];
-    this.reconnecting = JSON.parse(localStorage.getItem("machines.reconnecting") ?? "{}");
-    for (const state of Object.values(this.reconnecting)) state.busy = false;
-    this.folded = new Set(JSON.parse(localStorage.getItem("machines.folded") ?? "[]"));
-    this.foldedRepos = new Set(JSON.parse(localStorage.getItem("repos.folded") ?? "[]"));
-    this.foldedAgents = new Set(JSON.parse(localStorage.getItem("agents.folded") ?? "[]"));
+    this.reconnecting = stored("machines.reconnecting", {});
+    for (const state of Object.values(this.reconnecting)) if (state && typeof state === "object") state.busy = false;
+    this.folded = new Set(stored("machines.folded", []));
+    this.foldedRepos = new Set(stored("repos.folded", []));
+    // `worktree-card-agents-expansion-state.ts:12-16`: a card's compact agent list starts
+    // collapsed (`compactRootListExpanded: false`), so the stored set is the expanded ones.
+    this.expandedAgents = new Set(stored("agents.expanded", []));
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     // `git status` walks the whole tree, on another machine a process there:
@@ -131,7 +141,7 @@ export default class Spaces extends View {
     // Moved there: what it knew of that place may be old.
     const at = {};
     for (const s of sp) at[s.id] = where(s, ps);
-    const keys = new Set(Object.values(at).filter((k) => JSON.parse(k)[1]));
+    const keys = new Set(Object.values(at).filter((k) => readPair(k)[1]));
     const due = new Set([...keys].filter((k) => !(k in this.git)));
     for (const [id, k] of Object.entries(at)) if (this.at[id] && this.at[id] !== k && keys.has(k)) due.add(k);
     this.at = at;
@@ -146,13 +156,13 @@ export default class Spaces extends View {
     this.busy = busy;
     for (const m of machines()) {
       const ready = m.layout === "ready";
-      if (ready && this.ready[m.name] === false) for (const k of keys) if (JSON.parse(k)[0] === m.name) due.add(k);
+      if (ready && this.ready[m.name] === false) for (const k of keys) if (readPair(k)[0] === m.name) due.add(k);
       this.ready[m.name] = ready;
     }
-    if (window().active) {
+    if (window()?.active) {
       for (const k of keys) {
         const asks = this.git[k] || this.unsure.has(k);
-        if (asks && !this.folded.has(JSON.parse(k)[0]) && now - (this.checked[k] ?? 0) > FALLBACK) due.add(k);
+        if (asks && !this.folded.has(readPair(k)[0]) && now - (this.checked[k] ?? 0) > FALLBACK) due.add(k);
       }
     }
     return due;
@@ -176,6 +186,8 @@ export default class Spaces extends View {
   }
 
   reconnect(machine, cx) {
+    // A stored entry can name no machine (older shape, hand edit): nothing to reconnect to.
+    if (!machine) return;
     const name = machine.name;
     if (this.reconnecting[name]?.busy) return;
     const state = this.reconnecting[name] ??= { machine, removed: false };
@@ -229,7 +241,7 @@ export default class Spaces extends View {
         this.pending.clear();
         for (const key of keys) await this.check(key, cx);
       }
-      const used = new Set(Object.values(this.git).filter(Boolean).map((g) => JSON.parse(g.repo)).filter(([on]) => !on).map(([, repo]) => repo));
+      const used = new Set(Object.values(this.git).filter(Boolean).map((g) => readPair(g.repo)).filter(([on]) => !on).map(([, repo]) => repo));
       for (const repo of this.watching) if (!used.has(repo)) this.watching.delete(repo);
       this.refreshing = false;
       cx.notify();
@@ -238,7 +250,7 @@ export default class Spaces extends View {
 
   // One place's git: branch, its repo, and the review on that branch.
   async check(key, cx) {
-    const [on, cwd] = JSON.parse(key);
+    const [on, cwd] = readPair(key);
     this.checked[key] = Date.now();
     this.unsure.delete(key);
     try {
@@ -339,8 +351,9 @@ export default class Spaces extends View {
   // and there is no PR — Orca's `{ data: null }` — so a miss and a known-empty differ.
   reviewOf(info) {
     if (!info?.branch || !info.repo) return null;
-    const entry = this.prCache[`${JSON.parse(info.repo)[1]}::${info.branch}`];
-    return entry === undefined ? null : entry.data;
+    const entry = this.prCache[`${readPair(info.repo)[1]}::${info.branch}`];
+    // `entry` is whatever storage holds (a hand edit, an older shape): read, never trust it.
+    return entry?.data ?? null;
   }
 
   // The writer half of Orca's pipeline, named for what it does. `lookupPRByBranchName`
@@ -463,7 +476,7 @@ export default class Spaces extends View {
       if (cx && !r.w.machine) {
         for (const k of kids) {
           if (!k.unopened || !k.g.branch) continue;
-          this.lookupPRByBranch(`${JSON.parse(k.g.repo)[1]}::${k.g.branch}`, k.g.base, k.g.head, k.g.branch, k.g.top, cx);
+          this.lookupPRByBranch(`${readPair(k.g.repo)[1]}::${k.g.branch}`, k.g.base, k.g.head, k.g.branch, k.g.top, cx);
         }
       }
       // Not filtered here: `row()` hides a folded repo's cards so its header stays, which is
@@ -491,13 +504,19 @@ export default class Spaces extends View {
       }
       this.ordering.machines = [...moved];
     }
-    return out.filter(r => r.unopened || this.shown.has(r.w.id));
+    const visible = out.filter(r => r.unopened || this.shown.has(r.w.id));
+    // The drag indicator needs both cards' row positions. `i` is the space index, not the
+    // row index (folded groups, merged spaces and unopened worktrees all shift it), so the
+    // dragging card's position is looked up here, by its row id.
+    this.rowIndex = new Map(visible.map((r, i) => [r.w.id, i]));
+    return visible;
   }
 
-  // Orca keeps each card's agent list open or folded on its own, remembered across runs.
+  // `worktree-card-agents-expansion-state.ts`: each card's disclosure is its own state,
+  // remembered across remounts. Here it survives restarts, in localStorage.
   toggleAgents(id, cx) {
-    this.foldedAgents.has(id) ? this.foldedAgents.delete(id) : this.foldedAgents.add(id);
-    localStorage.setItem("agents.folded", JSON.stringify([...this.foldedAgents]));
+    this.expandedAgents.has(id) ? this.expandedAgents.delete(id) : this.expandedAgents.add(id);
+    localStorage.setItem("agents.expanded", JSON.stringify([...this.expandedAgents]));
     cx.notify();
   }
 
@@ -517,19 +536,25 @@ export default class Spaces extends View {
     };
   }
 
-  grouped(t, cx) {
-    const rows = this.ordered(cx), ps = panes();
-    const draw = (r) => this.row(r, t, ps);
+  grouped(t, cx, rows = this.ordered(cx)) {
+    const ps = panes();
+    // `SectionHeader.tsx:190-192`: a header draws its collapse chevron only when its group
+    // has rows (`row.count > 0`). The count is every card of the group, folded or not.
+    const counts = new Map();
+    for (const r of rows) { const k = this.foldKey(r); counts.set(k, (counts.get(k) ?? 0) + 1); }
+    const draw = (r) => this.row({ ...r, count: counts.get(this.foldKey(r)) ?? 0 }, t, ps);
     const flat = (r) => draw(r);
-    const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name), ...Object.keys(this.reconnecting)])].sort();
-    const loading = m => {
-      const layout = machines().find(k => k.name === m)?.layout;
-      return layout === "loading" || (!layout && this.machines.some(k => k.name === m && k.state === "connected"))
-        || spaces().some(s => (s.machine ?? null) === m && !this.shown.has(s.id));
-    };
-    const loadingRow = m => div().id(`machine-loading-${m ?? "local"}`).h(30).flex_none().px(8).text_size(13).text_color(t.dim).child("Loading…");
-    if (!remote.length) return loading(null) && !rows.length ? [loadingRow(null)] : rows.flatMap(flat);
-    const machineNames = [null, ...remote];
+    // `host-section-rows.ts:236-246`: a host header exists only for a host that has rows.
+    // With one such host Orca draws no headers at all (`:135-136`); an empty registered host
+    // stays in the host picker, never in the list. A machine being repaired keeps its header
+    // even with no rows: its Connect button is Herdr's only recovery path in this mod.
+    const repairing = new Set([...Object.keys(this.reconnecting), ...this.machines.filter(m => this.rebuilt(m)).map(m => m.name)]);
+    const hasRows = (m) => rows.some((r) => (r.w.machine ?? null) === m);
+    const machineNames = [null, ...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...repairing])]
+      .filter((m) => hasRows(m) || repairing.has(m));
+    if (machineNames.filter(hasRows).length <= 1 && !machineNames.some((m) => repairing.has(m))) {
+      return rows.flatMap(flat);
+    }
     return machineNames.flatMap((m, i) => {
       const mine = rows.filter((r) => (r.w.machine ?? null) === m);
       const repair = this.reconnecting[m];
@@ -555,11 +580,14 @@ export default class Spaces extends View {
           cx.notify();
         })
         // -1: the glyph's own inset, so its edge meets the heading and the spaces' marks.
-        .child(svg(`mods/t3-inbox/${m ? "server" : "monitor"}.svg`).size(14).ml(-1).flex_none())
+        .child(svg(`mods/orca-spaces/${m ? "server" : "monitor"}.svg`).size(14).ml(-1).flex_none())
         // The dot describes the machine, so it follows its name, however short.
         .child(h_flex().flex_1().min_w(0).gap(6).items_center()
           .child(div().min_w(0).truncate().child(m ?? "This computer"))
           .child(tipMark(this, t, `machine-state-${m ?? "local"}`, connected ? "Connected" : (machine?.state ?? "asleep").replace(/_/g, " ").replace(/^./, c => c.toUpperCase()), div().size(6).rounded_full().flex_none().bg(connected ? t.ansi2 : t.dim))))
+        // `HostSectionHeader.tsx:11-35,119`: the count badge is always drawn beside the label
+        // (its `count` is the host's workspace rows, folded groups included).
+        .child(div().flex_none().h(16).px(6).flex().items_center().justify_center().rounded_full().border_1().border_color(t.border).bg(t.hover).text_size(9).line_height("9px").text_color(t.muted).child(String(mine.length)))
         .when(!connected && !rebuilt, el => el.child(div().flex_none().child((machine?.state ?? "asleep").replace(/_/g, " "))))
         .when(rebuilt, el => el.child(h_flex().flex_none().gap(3).items_center()
           .child(div().max_w(140).truncate().child(repair?.error || "rebuilt ·"))
@@ -576,18 +604,18 @@ export default class Spaces extends View {
             // The key makes a space on the current space's machine: it names this + only on that one.
             { action: (spaces().find(s => s.active)?.machine ?? null) === m ? "space.new" : null })))
           // An indicator, not a button: the whole row folds, so it lights with the row and has no label of its own.
-          .child(div().id(`machine-fold-${m ?? "local"}`).w(26).flex_none().flex().items_center().justify_center()
-            .text_color(this.overMachine === `machine-${m ?? "local"}` ? t.foreground : t.dim)
-            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none())));
-      const empty = stop(this, t, `machine-new-${m ?? "local"}`, h_flex().id(`machine-new-${m ?? "local"}`).h(30).flex_none().px(8).gap(8).items_center().rounded(8)
-        .text_size(13).text_color(this.hot === `machine-new-${m ?? "local"}` ? t.foreground : t.dim).hover(s => s.bg(t.hover)).on_hover(this.glow(`machine-new-${m ?? "local"}`))
-        .role("button").accessibility_label("New space here")
-        .on_click(() => run("space.new", { machine: m ?? "" }))
-        // Laid out as a space's row: the + in the mark's 18px, the words where a name starts.
-        .child(div().size(18).flex_none().flex().items_center().justify_center().child(svg("mods/orca-spaces/plus.svg").size(12))).child("New space here"), 8);
+          // `HostSectionHeader.tsx:121-125`: the chevron is `can-hover:opacity-0` until the
+          // header is hovered (`group-hover/host-header:opacity-100`), keeping its slot; and
+          // `SectionHeader.tsx:190-192` draws a collapse affordance only when there is something
+          // to collapse (`row.count > 0`).
+          .when(mine.length > 0, el => el.child(div().id(`machine-fold-${m ?? "local"}`).w(26).flex_none().flex().items_center().justify_center()
+            .opacity(this.overMachine === `machine-${m ?? "local"}` ? 1 : 0)
+            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none()))))
+      // `host-section-rows.ts:236-246`: a host header exists only for a host with rows, and a
+      // host with no rows draws no section — and no placeholder beneath it.
       const heading = stop(this, t, `machine-${m ?? "local"}`, head, 8);
       if (rebuilt) return [heading];
-      return [heading, ...(folded ? [] : mine.length ? mine.flatMap(flat) : [loading(m) ? loadingRow(m) : empty])];
+      return [heading, ...(folded ? [] : mine.flatMap(flat))];
     });
   }
 
@@ -639,7 +667,7 @@ export default class Spaces extends View {
     return [...keys];
   }
 
-  header({ w, g }, t, ps) {
+  header({ w, g, count }, t, ps) {
     const key = this.foldKey({ w, g });
     const folded = this.foldedRepos.has(key);
     const id = `space-head-${w.id}`;
@@ -668,17 +696,19 @@ export default class Spaces extends View {
       // list. `self.hoveredRepo` lives on the instance; at a few dozen headers it is not
       // worth a registry.
       .when(this.hoveredRepo === key, el => el
-        // The two slots side by side with Orca's `gap-0.5` (2px), not the row's 6px.
+        // The slots side by side with Orca's `gap-0.5` (2px), not the row's 6px.
         .child(h_flex().flex_none().items_center().gap(2)
           // ORDER, from SectionHeader.tsx:355-414 — the collapse chevron comes FIRST in
           // `ProjectHeaderActions`, then `RepoHeaderProjectActionsMenu` (the ellipsis, size-3.5,
           // repo-header-project-actions.tsx:113), then `RepoHeaderCreateWorkspaceButton`
           // (the plus, size-3, :239-241). Left to right: chevron, ellipsis, plus.
+          // `SectionHeader.tsx:190-192`: the chevron is omitted entirely when the group has no
+          // rows (`row.count > 0`); the menus/plus are not gated on it.
           // SectionHeader.tsx:358: size-5 rounded-md text-muted-foreground,
           // hover:bg-accent/70 and hover:text-foreground — a 70% accent wash, not a 70% white one.
-          .child(div().id(`space-fold-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
+          .when(count > 0, el => el.child(div().id(`space-fold-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
             .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
-            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(14).flex_none()))
+            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(14).flex_none())))
           .child(div().id(`space-more-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
             .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
             .on_click((_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "orca-menu", kind: "popup", width: 220, height: 220, props: { tab: "group", target: { id: w.id, path: g?.top ?? w.folder } } }); })
@@ -692,7 +722,7 @@ export default class Spaces extends View {
 
   // Orca's worktree card (worktree-card-surface.tsx): ml-1, py-2 (36px single line), rounded-lg,
   // a status lane, a 13px/20px title, the primary pill on the main checkout.
-  card({ w, i, g, also, unopened }, t, ps) {
+  card({ w, g, also, unopened, pos }, t, ps) {
     // A merged card lights with any of its spaces and rolls all of their tabs up, as one
     // worktree with two open sessions is still one worktree.
     const group = [w, ...(also ?? []).map(a => a.w)];
@@ -723,12 +753,14 @@ export default class Spaces extends View {
     // Orca's parser sets `isMainWorktree: worktrees.length === 0`; ours marks `linked` when the
     // top differs from the common dir's owner, so the check is simply `!linked`.
     const isPrimary = Boolean(g && !g.linked);
-    const folded = this.foldedAgents.has(w.id);
+    const expanded = this.expandedAgents.has(w.id);
     const toggleId = `space-agents-${w.id}`;
     // An agent row shows the agent, not the folder it shares with the space.
     const agentTitle = (a) => {
-      const label = a.title || a.app || a.program?.agent || "agent";
-      return label === w.name || label === `π: ${w.name}` ? (a.app || a.program?.agent || "agent") : label;
+      // `program.agent` is a boolean ("is an agent"), never a name; the user-facing name is
+      // `program.name` ("Claude Code", "Neovim"). An empty title/app used to draw `true`.
+      const label = a.title || a.app || a.program?.name || "agent";
+      return label === w.name || label === `π: ${w.name}` ? (a.app || a.program?.name || "agent") : label;
     };
     // worktree-card-compact-agent-row.tsx:305 — `flex h-6 items-center gap-1` = 24px; `px-1` = 4px.
     const agentRow = (a) => h_flex().min_w(0).h(24).px(4).gap(4).items_center()
@@ -743,18 +775,25 @@ export default class Spaces extends View {
     // -90 when collapsed (a right-pointing chevron), not a different glyph.
     // The wrapper is `flex flex-col mt-1 gap-0.5` (WorktreeCardAgents.tsx:381), and a collapsed
     // pill carries `border border-worktree-sidebar-border/70 bg-worktree-sidebar-accent/35`.
-    const agentBlock = v_flex().min_w(0).mt(4).gap(2)
+    //
+    // `WorktreeCardAgents.tsx:371-416`: the summary button exists only in compact mode and only
+    // for MORE THAN ONE agent (`shouldUseSummaryRow = summaryAgents.length > 1`); a single agent
+    // is just its row, with no pill and no chevron. The list itself starts collapsed
+    // (`worktree-card-agents-expansion-state.ts:12-16`), so the pill is what you see first.
+    const agentList = v_flex().min_w(0).mt(4).gap(2).children(mine.map(agentRow));
+    const agentSummary = v_flex().min_w(0).mt(4).gap(2)
       .child(h_flex().id(toggleId).h(24).w_full().min_w(0).px(4).gap(4).items_center().rounded(2)
         .text_size(11).line_height("11px").text_color(t.dim).cursor_pointer()
         .role("button")
-        .accessibility_label(folded ? `Expand ${mine.length} agents` : `Collapse ${mine.length} agents`)
-        .when(folded, el => el.border_1().border_color("#f0f0f033").bg("#f0f0f009"))
+        .accessibility_label(expanded ? `Collapse ${mine.length} agents` : `Expand ${mine.length} agents`)
+        .when(!expanded, el => el.border_1().border_color("#f0f0f033").bg("#f0f0f009"))
         .hover(s => s.text_color(t.foreground))
         .on_click((_e, cx) => { cx.stop_propagation(); this.toggleAgents(w.id, cx); })
-        .child(div().min_w(0).truncate().px(4).font_medium().child(`${mine.length} agent${mine.length === 1 ? "" : "s"}`))
+        .child(div().min_w(0).truncate().px(4).font_medium().child(`${mine.length} agents`))
         .child(div().flex_1())
-        .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none()))
-      .when(!folded, el => el.child(v_flex().min_w(0).gap(2).pt(2).children(mine.map(agentRow))));
+        .child(svg(`mods/orca-spaces/chevron-${expanded ? "down" : "right"}.svg`).size(12).flex_none()))
+      .when(expanded, el => el.child(v_flex().min_w(0).gap(2).pt(2).children(mine.map(agentRow))));
+    const agentBlock = mine.length > 1 ? agentSummary : agentList;
     // Orca's frame geometry: every row here is lineage depth 0 (no tree indent, no wrapper).
     // `default-workspace-card.json:38`: statusLane = vars.newStyle && options.show.status.
     // `experimentalNewWorktreeCardStyle` is false, so the lane is the LEGACY one and the
@@ -794,15 +833,23 @@ export default class Spaces extends View {
       // so a 2px line with a 6px dot at each end, inset 12px left and 8px right, in the
       // sidebar's ring colour (#737373 in dark, main.css:391). We drew a full-width 2px bar in
       // the theme ACCENT, which was blue — that is the flash the user saw.
-      .when(this.pressed !== null && this.over === w.id && this.pressed !== w.id, (el) => el.child(
-        div().absolute().left(12).right(8).h(3).items_center()
-          .when(fromIndex < i, line => line.bottom(-6))
-          .when(fromIndex > i, line => line.top(-6))
-          .child(h_flex().w_full().items_center()
-            .child(div().size(6).flex_none().rounded_full().bg("#737373"))
-            .child(div().h(2).flex_1().rounded_full().bg("#737373"))
-            .child(div().size(6).flex_none().rounded_full().bg("#737373"))),
-      ))
+      // `drop-indicators.tsx:29-32` renders `WorktreeSidebarDropIndicator`, whose row
+      // (`WorktreeSidebarDropIndicator.tsx:18`) is `absolute left-3 right-2 h-3` — the line is
+      // drawn only while a card is being dragged and the pointer is over a slot. Its edge follows
+      // the drag direction: below the hovered card when dragging down, above it when dragging up
+      // (unknown origin -> above).
+      .when(this.pressed !== null && this.over === w.id && this.pressed !== w.id, (el) => {
+        const fromIndex = this.rowIndex?.get(this.pressed) ?? -1;
+        return el.child(
+          div().absolute().left(12).right(8).h(12).items_center()
+            .when(fromIndex >= 0 && fromIndex < pos, line => line.bottom(-6))
+            .when(fromIndex < 0 || fromIndex > pos, line => line.top(-6))
+            .child(h_flex().w_full().items_center()
+              .child(div().size(6).flex_none().rounded_full().bg("#737373"))
+              .child(div().h(2).flex_1().rounded_full().bg("#737373"))
+              .child(div().size(6).flex_none().rounded_full().bg("#737373"))),
+        );
+      })
       .on_mouse_down("left", () => {
         if (unopened) return;
         this.pressed = w.id;
@@ -909,6 +956,9 @@ export default class Spaces extends View {
   render(cx) {
     const t = theme();
     const sp = spaces();
+    // `WorktreeList.tsx:285-287`: the empty state is the row plan's emptiness, not the raw
+    // collection's — an unopened worktree or a group with no rows still counts as a row.
+    const rows = this.ordered(cx);
     // The shipped mods (the Terminals picker) still color spaces from "space.colors": the same color, from the name.
     const colors = Object.fromEntries(sp.filter(p => p.name !== "~").map(p => [p.id, tint(p.name, false)]));
     if (JSON.stringify(colors) !== JSON.stringify(shared("space.colors") ?? {})) setShared("space.colors", colors);
@@ -943,13 +993,14 @@ export default class Spaces extends View {
           cx.notify();
         })
         .child(v_flex().id("space-content").w_full().flex_none().px(0).pb(8)
-          // EmptyState.tsx:22 — with no filters in Herdr only the first branch applies:
-          // `flex flex-col items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground`
-          // holding "No workspaces found". Orca gates it on `startupWorktreeRefreshCompleted`;
-          // Herdr reports no equivalent, and a zero-space list is already settled.
-          .when(sp.length === 0, el => el.child(div().flex().flex_col().items_center().gap(8).px(16).py(24).w_full()
+          // `EmptyState.tsx:14-27` — Orca's only branch without filters, `flex flex-col
+          // items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground`,
+          // holding "No workspaces found". Orca also requires `startupWorktreeRefreshCompleted`;
+          // Herdr has no discovery flag to read, and a zero-row list is already settled.
+          // `WorktreeList.tsx:285-287`: the gate is the row plan (`rowModel.rows.length === 0`).
+          .when(rows.length === 0, el => el.child(div().flex().flex_col().items_center().gap(8).px(16).py(24).w_full()
             .text_size(11).text_center().text_color(t.muted)
             .child(div().child("No workspaces found"))))
-          .children(sp.length ? this.grouped(t, cx) : []))));
+          .children(rows.length ? this.grouped(t, cx, rows) : []))));
   }
 }

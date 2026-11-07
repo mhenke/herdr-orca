@@ -1,5 +1,5 @@
 {
-  "background": "#0e1116",
+  "background": "#282c34",
   "foreground": "#f0f0f0",
   "selection": "#5a7898",
   "cursor": "#ffffff",
@@ -24,7 +24,6 @@
   "colors": {
     "canvas": "#0a0a0a",
     "chrome": "#2a2a2a",
-    "background": "#0a0a0a",
     "surface": "#171717",
     "popover": "#171717",
     "raised": "#262626",
