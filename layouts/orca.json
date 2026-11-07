@@ -109,24 +109,38 @@
               "children": [
                 {
                   "id": "main",
-                  "type": "block",
-                  "content": {
-                    "tab": "active",
-                    "pane": {
-                      "gap": 0,
-                      "radius": 0,
-                      "background": "background",
-                      "lone": true,
-                      "header": {
-                        "content": {
-                          "mod": "orca-pane"
-                        },
-                        "height": 30,
-                        "position": "top",
-                        "reveal": "hover"
+                  "type": "stack",
+                  "active": "main-terminals",
+                  "children": [
+                    {
+                      "id": "main-terminals",
+                      "type": "block",
+                      "content": {
+                        "tab": "active",
+                        "pane": {
+                          "gap": 0,
+                          "radius": 0,
+                          "background": "background",
+                          "lone": true,
+                          "header": {
+                            "content": {
+                              "mod": "orca-pane"
+                            },
+                            "height": 30,
+                            "position": "top",
+                            "reveal": "hover"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "id": "main-landing",
+                      "type": "block",
+                      "content": {
+                        "mod": "orca-landing"
                       }
                     }
-                  }
+                  ]
                 },
                 {
                   "id": "panel",

@@ -40,6 +40,30 @@ export default class Tabs extends View {
 
   // The side panel is remembered per space: switching shows that space's choice
   // (closed if it never had one), and opening or closing it records it.
+  // `AppWorkspaceShell.tsx:106` decides when Orca's landing shows:
+  //   activeView === 'terminal' && !hasActiveWorktree && !creationLayoutActive
+  // In Herdr the equivalent of `!hasActiveWorktree` is "no space is active": with none open
+  // there is no tab surface to draw, which is exactly the blank canvas Orca puts the page on.
+  // The center is a stack (`main`) holding `main-terminals` and `main-landing`, so switching is
+  // `layout.select` — the same call this mod already makes for `panel-body`.
+  syncLanding(cx) {
+    // Orca's `hasActiveWorktree` is about the SELECTED worktree, not about whether any exists:
+    // a selected space with no tabs open is still "no active worktree", and that is the blank
+    // canvas Landing sits on. So the test is "the active space has at least one tab".
+    const active = (spaces() ?? []).find((s) => s.active);
+    const want = (active?.tabs?.length ?? 0) > 0 ? "main-terminals" : "main-landing";
+    // Seed from the layout rather than from `undefined`: on the first render there is nothing
+    // to compare against, so a `this.landing` of undefined would either skip the switch when
+    // it was needed or fire one that was not.
+    if (this.landing === undefined) {
+      const stack = find(layout(), "main");
+      this.landing = stack && "active" in stack ? stack.active : null;
+    }
+    if (this.landing === want) return;
+    this.landing = want;
+    run("layout.select", { stack: "main", child: want });
+  }
+
   syncPanel(space, panel, body, enabled) {
     if (!space || !panel) return;
     const now = panel.hidden ? null : body?.active ?? null;
@@ -89,16 +113,35 @@ export default class Tabs extends View {
         // `orca-menu` owns the tab menu (it already has the "tab" case); pointing at Herdr's
         // shipped `menu` made this mod depend on a mod outside the package.
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "orca-menu", kind: "popup", width: 200, props: { tab: "tab", target: { id: c.id, space: space.id } } }); })
-        .when(Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
+        // ORDER — SortableTab.tsx:249-351. Left to right inside a tab:
+        //   TerminalTabLeadingIcon (the agent/shell icon)  :249 — size={12} (TerminalTabLeadingIcon.tsx:42,100)
+        //   Pin (size-3 = 12px, mr-1)                      :258-259  [pinned only]
+        //   label (mr-1)                                   :289
+        //   colour dot (size-2, mr-1.5)                    :291-296  [only when the tab has a colour]
+        //   Minimize2 collapse (w-4 box, w-3 glyph)        :298-316  [expanded tabs]
+        //   X close (w-4 box, w-3 glyph)                   :317-349
+        // The status mark is NOT a separate leading element in Orca: it is part of
+        // TerminalTabLeadingIcon, so it goes BEFORE the label, not after. We had it after.
+        .when(Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(12).text_color(t.muted) : image(program.icon).size(12)))
+        // TerminalTabLeadingIcon -> AgentStateDot (`TerminalTabLeadingIcon.tsx:38`: the wrapper
+        // is `inline-flex` and is `opacity-70` while the tab is inactive). working = the
+        // agent-working spinner, done = CircleCheck in emerald-500, blocked — Herdr's word for
+        // a waiting agent — = AgentQuestionIcon, a MessageCircleQuestion in --agent-question.
+        // A bare dot is Orca's idle mark only.
+        .when(c.status === "working", el => el.child(svg("mods/orca-tabs/spinner.svg").size(12).flex_none().text_color("#eab308").spin(1000)).when(!c.active, w => w.opacity(0.7)))
+        .when(c.status === "done", el => el.child(svg("mods/orca-tabs/circle-check.svg").size(12).flex_none().text_color("#10b981")).when(!c.active, w => w.opacity(0.7)))
+        .when(c.status === "blocked", el => el.child(svg("mods/orca-tabs/message-circle-question.svg").size(12).flex_none().text_color("#ea580c")).when(!c.active, w => w.opacity(0.7)))
         .child(div().max_w(170).truncate().child(c.zoomed ? `${label} Z` : label))
-        // TerminalTabLeadingIcon -> AgentStateDot (AgentStateDot.tsx:120-175): working is the
-        // agent-working spinner, done is a CircleCheck in emerald-500, and blocked — Herdr's
-        // word for a waiting agent — is Orca's AgentQuestionIcon, a MessageCircleQuestion in
-        // --agent-question (orange). A bare dot is only Orca's idle mark, so it is not used here.
-        .when(c.status === "working", el => el.child(svg("mods/orca-tabs/spinner.svg").size(12).flex_none().text_color("#eab308").spin(900)))
-        .when(c.status === "done", el => el.child(svg("mods/orca-tabs/circle-check.svg").size(12).flex_none().text_color("#10b981")))
-        .when(c.status === "blocked", el => el.child(svg("mods/orca-tabs/message-circle-question.svg").size(12).flex_none().text_color("#ea580c")))
-        .when(c.active, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/orca-tabs/close.svg").size(12))));
+        // Close — SortableTab.tsx:317-349. It is ALWAYS rendered; it is `text-transparent` on an
+        // inactive tab and becomes `text-muted-foreground` on `group-hover`, which is why it
+        // looks hover-only. We hid it entirely unless the tab was active, so the active tab was
+        // the only one that could be closed. The box is `w-4 h-4` (16px), the glyph `w-3 h-3`.
+        .child(div().id(`close-${c.id}`).size(16).flex_none().flex().items_center().justify_center().rounded(2)
+          .text_color(c.active ? t.dim : "#00000000")
+          .hover(s => s.text_color(t.foreground).bg("#ffffff14"))
+          .on_mouse_down("left", stop)
+          .on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); })
+          .child(svg("mods/orca-tabs/close.svg").size(12)));
     };
     const root = layout(), sidebar = find(root, "sidebar"), w = window();
     // Old saved rails and a dragged-narrow sidebar can be smaller than the window buttons.
@@ -108,6 +151,7 @@ export default class Tabs extends View {
     const panel = find(root, "panel"), body = find(root, "panel-body");
     const enabled = shared("workspace.panels") ?? ["files", "changes"];
     this.syncPanel(space, panel, body, enabled);
+    this.syncLanding(cx);
     // Orca's right activity bar: 36px square buttons, 16px icons, one per activity.
     const cwd = panes().find(p => p.focused)?.cwd;
     const items = [{ id: "files", icon: "mods/orca-tabs/file.svg", title: "Explorer" }];

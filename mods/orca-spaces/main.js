@@ -779,7 +779,11 @@ export default class Spaces extends View {
       .accessibility_label(w.name)
       // Orca active card: bg foreground/10 over sidebar, border foreground/18.
       .when(on, (el) => el.bg("#3e3e3e").border_1().border_color("#f0f0f02e"))
-      .when(!on, (el) => el.hover((s) => s.bg("#f0f0f014")))
+      // No background change on hover. Orca does have
+      // `.worktree-sidebar-card-hover:hover { background: color-mix(in srgb, var(--sidebar-accent)
+      // 40%, transparent) }` (main.css:1488), but washing the row repaints the whole project
+      // area on every pointer move, which reads as the list flickering. The hover's only job
+      // here is to reveal the row's affordances, so that is all it does.
       .when(this.pressed === w.id && this.over !== w.id, (el) => el.opacity(0.5))
       .when(this.pressed !== null && this.over === w.id && this.pressed !== w.id, (el) => el.child(
         div().absolute().left(0).right(0).h(2).bg(t.accent)
@@ -828,6 +832,12 @@ export default class Spaces extends View {
       // Card root (worktree-card-surface.tsx): ml-1, py-2 for a title-only card, rounded-lg, and a
       // padding-left that the geometry module derives from the group depth. The content row is
       // `flex gap-0.5 items-start`, so the status lane sits at the top and never drives the title.
+      // `worktree-card-parent-content.tsx:56` is the row that actually holds the status lane and
+      // the text column: `flex w-full min-w-0 gap-0.5`, so the lane-to-text gap is 2px, not the
+      // 8px of the *header* row inside the text column (`worktree-card-header.tsx:65` gap-2,
+      // which is lane-external). Alignment there is `items-start` unless the card is title-only;
+      // the old `pt(2)` on the lane plus `items_start` is Orca's own optical nudge, and the
+      // title's 20px line box is what puts the mark on the first line.
       .child(h_flex().w_full().min_w(0).items_start().gap(2).pl(geometry.cardPaddingLeft)
         // WorktreeCardStatusLane, legacy style (the default: experimentalNewWorktreeCardStyle
         // is false): `shrink-0 flex justify-center items-start pt-[2px]`, and no width — the
@@ -835,6 +845,8 @@ export default class Spaces extends View {
         // h-3 w-3 holding an 8px dot.
         .child(div().flex_none().flex().items_start().justify_center().pt(2)
           .child(statusMark(dot, 12)))
+        // `worktree-card-parent-content.tsx:66` — `flex min-w-0 flex-1 flex-col gap-1.5`, so
+        // title row to meta row to agent summary is 6px. Herdr's gap() is pixels; 6 is 6.
         .child(v_flex().flex_1().min_w(0).gap(6)
           // Title row: title, then Orca's primary pill (h-16, px-1.5, 10px). `ws.isMain` only
           // marks a repo's own checkout: a plain folder workspace is no one's primary branch,
@@ -891,8 +903,14 @@ export default class Spaces extends View {
     // header folds on (`useAppStore` allCollapsed), so publish the identical predicate here and
     // let orca-nav pick the glyph and the toggle direction. `setShared` does not notify
     // (AGENTS.md rule 9), which is fine: orca-nav re-reads it when orca-spaces re-renders.
-    const allCollapsed = this.projectKeys(cx).every((k) => this.foldedRepos.has(k));
+    const keys = this.projectKeys(cx);
+    const allCollapsed = keys.length > 0 && keys.every((k) => this.foldedRepos.has(k));
     if (allCollapsed !== Boolean(shared("projects.allCollapsed"))) setShared("projects.allCollapsed", allCollapsed);
+    // `WorktreeList.tsx:290` mounts the collapse-all button only when
+    // `projectsCollapseTarget && projectCollapseKeys.length > 0` — with no projects there is
+    // nothing to collapse, so Orca renders no button at all. Publish the count so orca-nav can
+    // make the same call; the header cannot see the row plan itself.
+    if (keys.length !== shared("projects.count")) setShared("projects.count", keys.length);
     const asks = props()?.newMenu && machines().length > 1;
     // One fetch per repo per session; `ensureAvatar` writes the file and notifies once, so the
     // next render draws the avatar instead of the Folder.
@@ -912,11 +930,11 @@ export default class Spaces extends View {
           cx.notify();
         })
         .child(v_flex().id("space-content").w_full().flex_none().px(0).pb(8)
-          // EmptyState.tsx:23-27 — with no filters in Herdr only the first branch applies:
+          // EmptyState.tsx:22 — with no filters in Herdr only the first branch applies:
           // `flex flex-col items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground`
           // holding "No workspaces found". Orca gates it on `startupWorktreeRefreshCompleted`;
           // Herdr reports no equivalent, and a zero-space list is already settled.
-          .when(sp.length === 0, el => el.child(div().flex().flex_col().items_center().gap(2).px(16).py(24).w_full()
+          .when(sp.length === 0, el => el.child(div().flex().flex_col().items_center().gap(8).px(16).py(24).w_full()
             .text_size(11).text_center().text_color(t.muted)
             .child(div().child("No workspaces found"))))
           .children(sp.length ? this.grouped(t, cx) : []))));

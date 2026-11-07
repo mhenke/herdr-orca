@@ -116,9 +116,17 @@ worktree / project group / top branch mean exactly one thing each here.
 9. **`setShared` does not notify.** Async probe results cached via `shared()`
    only appear after an unrelated re-render. Prefer module-memory caches with
    `cx.notify()`, or accept the delay explicitly.
-10. **Wayland blocks pointer injection.** Hover/click states are code-verified
-    only (`xdotool` fails, `/dev/uinput` is root-only). Say so when reporting;
-    never claim a hover was seen.
+10. **Pointer verification is not blocked — do not claim it is.** An earlier
+    version of this rule said Wayland blocked pointer injection. That was wrong:
+    the session runs Hyprland (`HYPRLAND_INSTANCE_SIGNATURE` is set, `hyprctl`
+    is present) and `hyprctl clients` sees the window, so a pointer *can* be
+    driven. What actually failed was `xdotool` (X11) and an assumed
+    `/dev/uinput` path — the wrong tools, not a blocked system. Before writing
+    "cannot verify interaction", exhaust: `hyprctl` dispatch for this build
+    (0.56+ uses the Lua dispatch form, not `hyprctl dispatch movecursor X Y`),
+    `wlrctl`, `ydotool`, or a mod-side `.on_hover` probe that logs. **Never
+    report a capability as blocked without naming the exact commands tried.**
+    Unverified hover/click is fine to admit; calling it impossible is not.
 11. **Do not guess — open the file.** A name in this repo must denote a real
     Orca symbol or an honest Herdr equivalent, never a plausible invention.
     This project shipped three guesses that each looked right and were wrong:
@@ -142,6 +150,34 @@ worktree / project group / top branch mean exactly one thing each here.
     say so — with the Orca behavior it is standing in for. A comment that cites
     a path which does not exist is worse than no comment: it reads as verified.
     **When a claim in a comment has not been re-read this session, re-read it.**
+
+## Before a medium or large change: redesign from first principles
+
+**Run the `principle-redesign-from-first-principles` skill before starting any
+medium or large change.** Not after it goes wrong, and not optionally.
+
+The trigger is scope, not difficulty. Treat a change as medium-or-large when it
+touches more than one mod, changes a shape other code depends on, adds a new
+element or region, or has more than one plausible place to put the fix. A
+one-line value correction is small; "align the tab strip with Orca" is not.
+
+What the skill demands here, concretely:
+
+1. **Read every file the change reaches** — the mod, the layout node that sizes
+   it, any sibling that reads the same `shared()` key, and the Orca owner file.
+2. **Ask what you would build if the requirement had been there from the start.**
+   The answer is usually a constant or a table, not another special case.
+3. **Find the shape, not the instance.** The recurring failure in this repo is
+   fixing one visible symptom of a rule that applies everywhere: one chevron's
+   order, one gap's units, one icon's stroke. If a value is derived, derive it.
+4. **Propagate** — types, docs, comments, and every other caller of the thing
+   you just redefined. A rule that lives in one file and is violated in four is
+   not a rule.
+5. **Deliver incrementally**, but decide the whole design first.
+
+Redesigning is cheap here because the geometry module already exists
+(`mods/orca-spaces/indentation.js`): when a number is reused, it belongs there,
+not inline.
 
 ## Verification loop
 

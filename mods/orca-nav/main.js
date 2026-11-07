@@ -21,6 +21,11 @@ export default class Nav extends View {
     // orca-spaces owns the fold set, so it publishes whether every project is closed;
     // ProjectsCollapseAllButton takes `allCollapsed` as a prop.
     const allCollapsed = Boolean(shared("projects.allCollapsed"));
+    // `WorktreeList.tsx:290` — the collapse-all button is mounted only when there is at least
+    // one collapsible project (`projectCollapseKeys.length > 0`). orca-spaces publishes that
+    // count because the header has no view of the row plan. Zero projects means no button,
+    // not a disabled one.
+    const projectCount = Number(shared("projects.count") ?? 0);
     const noop = () => {}; // no destination in Herdr: inert, not hidden
     // SidebarNav.tsx:99-116 — container gap-0.5 px-2; Search is a button, not an input: full width, gap 8,
     // rounded 6, bg foreground/5, px 8, text 13 medium foreground/60, icon 16 at /30.
@@ -52,6 +57,12 @@ export default class Nav extends View {
       // Icons are plain Lucide at their default stroke-width 2 — there is no global override in
       // Orca's CSS (main.css:3090 is a feature-wall decoration, not icons).
       .child(h_flex().w_full().h(32).mt(8).px(8).gap(6).items_center().justify_between()
+        // `SidebarHeader.tsx:70` is `group/sidebar-header`; the collapse-all wrapper is
+        // `can-hover:w-0 can-hover:opacity-0` and only becomes `w-6 opacity-100` on
+        // `group-hover/sidebar-header` or `focus-within` (ProjectsCollapseAllButton.tsx:35-37).
+        // Herdr has no descendant-selector hover, so the row tracks the pointer and the button
+        // renders only then — same result, script instead of CSS.
+        .on_hover((on, cx) => { if (on !== this.headerHover) { this.headerHover = on; cx.notify(); } })
         .child(h_flex().min_w(0).items_center()
           .child(div().pl(8).pr(2).text_size(12).font_semibold().text_color("#969eaecc").child("Projects"))
           // ProjectsCollapseAllButton.tsx — ONE button, not two. `allCollapsed` decides both the
@@ -60,11 +71,15 @@ export default class Nav extends View {
           // header is hovered, then `w-6 opacity-100` (:35-37); Herdr has no header-hover group,
           // so the slot stays visible and only the reveal is dropped.
           // `allCollapsed` arrives over `setShared` from orca-spaces, which owns the fold state.
-          .child(div().id("proj-collapse-all").size(24).flex_none().flex().items_center().justify_center().rounded(6)
+          // Only with projects to collapse. The wrapper is `w-0 opacity-0` until the header is
+          // hovered (`ProjectsCollapseAllButton.tsx:35-37`); Herdr has no `group/sidebar-header`
+          // descendant rule, so `on_hover` on the row drives a `.when` — the same technique the
+          // project group headers use for their action cluster.
+          .when(projectCount > 0 && this.headerHover, el => el.child(div().id("proj-collapse-all").size(24).flex_none().flex().items_center().justify_center().rounded(6)
             .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
             .role("button").accessibility_label(allCollapsed ? "Expand all projects" : "Collapse all projects")
             .on_click(() => run(allCollapsed ? "orca-spaces.expand-all" : "orca-spaces.collapse-all"))
-            .child(svg(allCollapsed ? "mods/orca-nav/chevrons-up-down.svg" : "mods/orca-nav/chevrons-down-up.svg").size(14))))
+            .child(svg(allCollapsed ? "mods/orca-nav/chevrons-up-down.svg" : "mods/orca-nav/chevrons-down-up.svg").size(14)))))
         .child(h_flex().flex_none().items_center().gap(4)
           // ORDER, from SidebarHeader.tsx: bottom of the header is the bell popover (its own
           // Button, `w-8`, SidebarHeader.tsx:89-97), and only THEN `SidebarHeaderActions`
