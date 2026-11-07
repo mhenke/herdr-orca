@@ -36,10 +36,14 @@ evidence over inference, fix the fault not the surface.
    cannot work, and a behavior with no Herdr primitive gets the closest honest
    equivalent with the gap named in the comment. Two worked examples from this
    project:
-   - `ProjectsCollapseAllButton` is a Radix `Tooltip` + `Button` with a
-     `group-hover/sidebar-header` reveal. Ported as one 24px `div` whose glyph
-     and handler switch on `allCollapsed`; the hover reveal is **dropped
-     because Herdr has no header-hover group**, and the comment says so.
+   - `ProjectsCollapseAllButton` is a Radix `Tooltip` + `Button` whose wrapper
+     is `w-0 opacity-0` until `group-hover/sidebar-header` or `focus-within`
+     reveals it (`ProjectsCollapseAllButton.tsx:32-41`; `SidebarHeader.tsx:61`
+     is the `group/sidebar-header`). Herdr has no CSS descendant selector, but
+     an element-level `.on_hover` on the header row is an honest gate:
+     `orca-nav` tracks that row's pointer and mounts the one 24px button only
+     then, so the reveal is ported, not dropped. `focus-within` has no
+     counterpart because the button is not mounted while hidden.
    - Orca reads a persisted `prCache` written by `src/main` IPC. Herdr mods
      cannot share a process like that, so the cache lives in `localStorage`,
      the *reader* stays pure, and the *writer* runs in the refresh cycle —
