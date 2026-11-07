@@ -575,14 +575,20 @@ export default class Files extends View {
   command(c, cx) { if (c === "remove") return this.remove(cx); }
 
   // useFileSearchPanel.ts:276-300 — flipping a toggle or editing a filter reruns the
-  // current query immediately, rather than waiting for the next keystroke.
+  // current query; both paths share the input's 200 ms debounce, so a filter typed a
+  // character at a time does not spawn one rg per keystroke (Orca's executeSearch
+  // debounces all of them for the same reason).
   rerun(cx) {
     const v = this.q.value().trim();
-    if (!v) { this.hits = null; this.searching = false; cx.notify(); return; }
+    this.searchTimer?.cancel();
+    if (!v) { this.searchTimer = null; this.hits = null; this.searching = false; cx.notify(); return; }
     this.searching = true; cx.notify();
-    cx.spawn(async (cx) => {
-      const h = await this.search(v);
-      this.hits = h; this.searching = false; cx.notify();
+    this.searchTimer = cx.timer.after(200, (cx) => {
+      this.searchTimer = null;
+      cx.spawn(async (cx) => {
+        const h = await this.search(v);
+        this.hits = h; this.searching = false; cx.notify();
+      });
     });
   }
 
@@ -836,16 +842,16 @@ export default class Files extends View {
   // muted otherwise. Herdr announces the label but has no aria-pressed on a plain div, so
   // the fill is the pressed state. Each flip reruns via `rerun` (useFileSearchPanel.ts:276-288).
   searchToggles(t) {
-    const toggle = (id, value, set, label, icon) => div().id(id).flex_none().p(2).rounded(4).cursor_pointer()
+    const toggle = (id, active, flip, label, icon) => div().id(id).flex_none().p(2).rounded(4).cursor_pointer()
       .role("button").accessibility_label(label).tooltip(label)
-      .when(value, s => s.bg(t.accent).text_color(t.accent_foreground))
-      .when(!value, s => s.text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)))
-      .on_click((_e, cx) => { set(!value); this.rerun(cx); })
+      .when(active, s => s.bg(t.accent).text_color(t.accent_foreground))
+      .when(!active, s => s.text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)))
+      .on_click((_e, cx) => { flip(); this.rerun(cx); })
       .child(svg(`mods/orca-files/${icon}.svg`).size(14).flex_none());
     return [
-      toggle("files-case", this.caseSensitive, v => { this.caseSensitive = v; }, "Match Case", "case-sensitive"),
-      toggle("files-word", this.wholeWord, v => { this.wholeWord = v; }, "Match Whole Word", "whole-word"),
-      toggle("files-regex", this.useRegex, v => { this.useRegex = v; }, "Use Regular Expression", "regex"),
+      toggle("files-case", this.caseSensitive, () => { this.caseSensitive = !this.caseSensitive; }, "Match Case", "case-sensitive"),
+      toggle("files-word", this.wholeWord, () => { this.wholeWord = !this.wholeWord; }, "Match Whole Word", "whole-word"),
+      toggle("files-regex", this.useRegex, () => { this.useRegex = !this.useRegex; }, "Use Regular Expression", "regex"),
     ];
   }
 
