@@ -90,6 +90,10 @@ export default class FloatWorkspace extends View {
     // Empty content hides the float and its frame (window/floats.rs:187,198).
     if (!this.open) return div();
     const t = theme();
+    // The sessions this panel lists: Herdr's live agents (`agents()`, this file's header).
+    // The reference was dropped when the body was written; without it the panel threw on
+    // every render and never drew.
+    const list = agents();
     // Orca's clamp to the viewport (`floating-terminal-panel-bounds.ts:89-90`).
     const vp = window.viewport_size();
     const w = Math.min(DEFAULT_WIDTH, Math.max(MIN_WIDTH, vp.width - 48));

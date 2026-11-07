@@ -1,6 +1,6 @@
 # Herdr Orca
 
-An Orca-like workspace for Herdr App: Orca's distinctive three-column desktop layout with a 280px left sidebar, flat terminal work area, 350px right utility panel, and 24px bottom status bar. Projects organize into collapsible groups with worktree cards carrying branch identities, agent status indicators, and main checkout badges. Flat full-bleed tabs with active underline bars route into Ghostty-dark terminal panes or a welcoming landing page, while the right activity bar switches between a full file explorer tree and Git changes.
+An Orca-like workspace for Herdr App. It brings Orca's three-column layout straight into Herdr: a 280px left sidebar, a flat terminal work area, a 350px right utility panel, and a 24px status bar across the bottom. Projects organize into collapsible groups with worktree cards for your branches, live agent status marks, and primary checkout badges. Tabs sit flat with full-bleed active underline bars routing into Ghostty-dark terminal panes (or a clean landing view when you close your spaces), while the right activity bar switches between a full file explorer and your Git changes.
 
 ![Herdr Orca](preview.png)
 
@@ -122,7 +122,7 @@ A missing token paints **magenta** (`hsla(0.83, 1.0, 0.5, 1.0)` by design; `sett
 - **Right Utility Panel Interaction**:
   - Clicking any activity button in the 36px header switches the active stack child (`files`, `changes`, `vault`, etc.).
   - Clicking the active activity button or the panel-right close button toggles the entire 350px panel between visible and hidden.
-  - Files explorer: clicking a folder row toggles expansion; clicking a file opens it; typing in the filter input debounces and filters file tree rows in real time.
+  - Files explorer: clicking a folder row toggles expansion; clicking a file opens it; the Names filter debounces and narrows the tree; Contents searches file text with match-case, whole-word, regex and include/exclude globs; the tree renders through `v_virtual_list`, so only the visible rows are built each frame.
   - Changes explorer: clicking files stages or unstages them (`git add` / `git restore --staged`); typing into the composer and clicking commit runs `git commit -m`.
 
 - **Keyboard Navigation**:
@@ -155,7 +155,7 @@ A missing token paints **magenta** (`hsla(0.83, 1.0, 0.5, 1.0)` by design; `sett
   - `mods/orca-pane`: Minimal 24px hover terminal header with split controls.
   - `mods/orca-landing`: Clean landing page when no spaces/terminals are open.
   - `mods/orca-panel-head`: 36px activity bar header for switching right panel tools.
-  - `mods/orca-files`: File explorer tree with file-type icons, git badges, and name filter.
+  - `mods/orca-files`: File explorer tree with file-type icons, git badges, a name filter, and a contents search with its own search options.
   - `mods/orca-changes`: Git diff review, staging list, and commit message composer.
   - `mods/orca-agents`: Agent session history list.
   - `mods/orca-panel-gap`: Clean placeholder views for unopened secondary tabs.

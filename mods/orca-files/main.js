@@ -172,6 +172,9 @@ export default class Files extends View {
     this.ignored = new Set(); this.git = false; this.folderMarks = {}; this.folderErrors = {};
     this.inputHandle = cx.focus_handle();
     this.hits = null; this.searching = false; this.qFocused = false; this.view = "files";
+    // SearchResultsPane.tsx:22-23 — collapsedFiles is per-worktree search state; the
+    // collapsed file rows stay collapsed until the query or worktree changes.
+    this.collapsedSearch = new Set();
     // FileExplorerViewSwitch.tsx:21-41 — Names filters the tree by name, Contents searches
     // file text; both inputs stay mounted, as FileExplorer.tsx:294-309 keeps them.
     // Names matches a flat worktree listing (use-file-explorer-name-filter.ts:45-50), cached
@@ -208,7 +211,7 @@ export default class Files extends View {
       this.searching = Boolean(v); cx.notify();
       this.searchTimer = cx.timer.after(200, (cx) => {
         this.searchTimer = null;
-        if (!v) { this.hits = null; this.searching = false; cx.notify(); return; }
+        if (!v) { this.hits = null; this.searching = false; this.collapsedSearch = new Set(); cx.notify(); return; }
         cx.spawn(async (cx) => {
           const h = await this.search(v);
           this.hits = h; this.searching = false; cx.notify();
@@ -269,6 +272,7 @@ export default class Files extends View {
       // toggles and patterns start empty again for the worktree being entered.
       this.caseSensitive = false; this.wholeWord = false; this.useRegex = false;
       this.include.set_value(""); this.exclude.set_value(""); this.filtersOpen = false;
+      this.hits = null; this.searching = false; this.collapsedSearch = new Set();
       this.show(null); this.watched = null; this.error = null; this.limited = false;
       this.loading = false;
       if (saved?.file) this.show(saved.file, cx);
@@ -581,7 +585,7 @@ export default class Files extends View {
   rerun(cx) {
     const v = this.q.value().trim();
     this.searchTimer?.cancel();
-    if (!v) { this.searchTimer = null; this.hits = null; this.searching = false; cx.notify(); return; }
+    if (!v) { this.searchTimer = null; this.hits = null; this.searching = false; this.collapsedSearch = new Set(); cx.notify(); return; }
     this.searching = true; cx.notify();
     this.searchTimer = cx.timer.after(200, (cx) => {
       this.searchTimer = null;
@@ -597,9 +601,13 @@ export default class Files extends View {
   // case-insensitive search gets `--ignore-case` (Orca has no smart-case), whole word
   // gets `--word-regexp`, a non-regex query `--fixed-strings`, each include glob
   // `--glob <pat>` and each exclude `--glob !<pat>`. `--vimgrep` keeps this mod's
-  // existing `file:line:column:text` parser instead of Orca's `--json` stream.
+  // `file:line:column:text` parser instead of Orca's `--json` stream.
+  // Returns the SearchResult shape SearchResultsPane.tsx reads (:88-92 totalMatches /
+  // files.length / truncated; :57-70 one file row per file, matches indented below).
+  // `files` keeps first-seen order and holds at most 200 matches for display; every line
+  // rg printed still counts toward `totalMatches`, so the summary and `truncated` are true.
   async search(query) {
-    if (!query) return [];
+    if (!query) return { totalMatches: 0, fileCount: 0, files: [], truncated: false };
     const args = ["--vimgrep"];
     if (!this.caseSensitive) args.push("--ignore-case");      // text-search.ts:56-58
     if (this.wholeWord) args.push("--word-regexp");            // text-search.ts:59-61
@@ -610,11 +618,20 @@ export default class Files extends View {
     const r = await exec("rg", args, { cwd: this.root, on: this.on }).catch(() => null);
     // Same as the listing: rg exits 2 after an unreadable directory and still printed
     // the hits; only a run that produced nothing is a failure.
-    if (!r?.stdout) return [];
-    return (r.stdout || "").split("\n").slice(0, 200).filter(Boolean).map(l => {
-      const [file, line, , ...rest] = l.split(":");
-      return { file, line: Number(line), text: rest.join(":").trim() };
-    });
+    if (!r?.stdout) return { totalMatches: 0, fileCount: 0, files: [], truncated: false };
+    const groups = new Map();
+    let totalMatches = 0;
+    for (const l of (r.stdout || "").split("\n")) {
+      const [file, lineS, colS, ...rest] = l.split(":");
+      if (!file || !lineS) continue;
+      totalMatches += 1;
+      if (totalMatches > 200) continue; // count all hits, keep 200 for display
+      let group = groups.get(file);
+      if (!group) { group = { path: file, matches: [] }; groups.set(file, group); }
+      group.matches.push({ line: Number(lineS), column: Number(colS) || 1, text: rest.join(":").trim() });
+    }
+    const files = [...groups.values()];
+    return { totalMatches, fileCount: files.length, files, truncated: totalMatches > 200 };
   }
 
   // `source === "name"` walks `nfMap`, the projection nameMatches built from the worktree
@@ -829,7 +846,7 @@ export default class Files extends View {
       .when(Boolean(state.value().trim()), el => el.child(div().id(`files-clear-${id}`).p(2).flex_none().rounded(6).cursor_pointer().text_color(t.muted).hover(s => s.text_color(t.foreground))
         .on_click((_e, cx) => {
           state.set_value("");
-          if (state === this.q) { this.hits = null; this.searching = false; }
+          if (state === this.q) { this.hits = null; this.searching = false; this.collapsedSearch = new Set(); }
           else { this.nfMap = null; this.nfCollapsed = new Set(); this.nfLoading = false; }
           cx.notify();
         })
@@ -881,6 +898,66 @@ export default class Files extends View {
         .child(field("files-exclude", "files to exclude", this.exclude))));
   }
 
+  // SearchResultsPane.tsx:26-44,88-94 — the summary is a fixed header above the rows:
+  // `N results in M files`, plus `(results truncated)` when search() capped the display.
+  searchSummary(t) {
+    const hits = this.hits;
+    const results = `${hits.totalMatches} ${hits.totalMatches === 1 ? "result" : "results"}`;
+    const files = `${hits.fileCount} ${hits.fileCount === 1 ? "file" : "files"}`;
+    return h_flex().id("files-search-summary").flex_none().px(8).py(4).border_b(1).border_color(t.border)
+      .text_size(10).text_color(t.muted)
+      .child(`${results} in ${files}${hits.truncated ? " (results truncated)" : ""}`);
+  }
+
+  // SearchResultsPane.tsx:57-70 — file rows (28px, 6px inter-group spacing) with their match
+  // rows (20px) indented beneath; buildSearchRows (search-rows.ts:20-51) drops a collapsed
+  // file's matches from the list entirely.
+  searchResults(t) {
+    const hits = this.hits;
+    if (!hits || !hits.files.length) return [];
+    return hits.files.flatMap((file) => this.searchGroup(file, t));
+  }
+
+  // SearchResultItems.tsx:59-132 FileResultRow — pt-1.5 above each group, ChevronRight
+  // rotated 90deg when open (:87-93), FileTypeIcon (:94-97), truncated name plus an 11px
+  // muted parent directory (:98-105), and a 10px count badge (:106-108); the whole row is
+  // the collapse toggle (:84-85) and the full path rides its tooltip (:124-127).
+  // SearchResultsPane.tsx:60-69 sizes a file row 28px.
+  searchGroup(file, t) {
+    const collapsed = this.collapsedSearch.has(file.path);
+    const slash = file.path.lastIndexOf("/");
+    const name = slash === -1 ? file.path : file.path.slice(slash + 1);
+    const dir = slash === -1 ? "" : file.path.slice(0, slash);
+    const row = h_flex().id(`files-hit-file-${file.path}`).w_full().h(28).flex_none().pt(6).pr(8).pl(8).gap(4)
+      .items_center().rounded(2).cursor_pointer().hover(s => s.bg(t.hover)).tooltip(file.path)
+      .on_click((_e, cx) => {
+        if (collapsed) this.collapsedSearch.delete(file.path);
+        else this.collapsedSearch.add(file.path);
+        cx.notify();
+      })
+      .child(svg(`mods/orca-files/chevron-${collapsed ? "right" : "down"}.svg`).size(12).flex_none().text_color(t.muted))
+      .child(svg(`mods/orca-files/${fileIcon(name)}.svg`).size(14).flex_none().text_color(t.muted))
+      .child(h_flex().flex_1().min_w(0).items_center().gap(6)
+        .child(div().min_w(0).truncate().text_size(12).text_color(t.foreground).child(name))
+        .when(Boolean(dir), el => el.child(div().min_w(0).truncate().text_size(11).text_color(t.muted).child(dir))))
+      .child(div().flex_none().text_size(10).text_color(t.muted).rounded(999).px(6).bg(fade(t.raised, 0.8)).child(String(file.matches.length)));
+    return collapsed ? [row] : [row, ...file.matches.map((m, i) => this.searchMatch(file.path, m, i, t))];
+  }
+
+  // SearchResultItems.tsx:134-199 MatchResultRow — pl-7 (28px) indent, py-px, a 10px
+  // tabular line number (:187-189), then the 12px line; search-rows.ts:40-47 renders one
+  // per match under its file and SearchResultsPane.tsx:126-131 opens it. rg --vimgrep
+  // carries `column` but no match length, so the exact submatch span Orca highlights from
+  // its --json submatches (:143-170) cannot be split out here.
+  // SearchResultsPane.tsx:68-69 sizes a match row 20px.
+  searchMatch(path, match, i, t) {
+    return h_flex().id(`files-hit-${path}-${i}`).w_full().h(20).flex_none().pl(28).pr(8).gap(6).items_center()
+      .cursor_pointer().hover(s => s.bg(t.hover))
+      .on_click((_e, cx) => this.show(path, cx))
+      .child(div().flex_none().text_size(10).text_color(t.muted).child(String(match.line)))
+      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(match.text));
+  }
+
   render(cx) {
     // A task's error is reported, not thrown into the paint: a failed refresh
     // must never replace the pane with the shell's "could not be re-rendered" bar.
@@ -902,16 +979,16 @@ export default class Files extends View {
       // FileExplorerQueryStrip.tsx:35-52 (switch + active query input) then the tree.
       .when(!this.file, el => el.child(this.toolbar(t)))
       .when(!this.file, el => el.child(this.queryStrip(t)))
+      // SearchResultsPane.tsx:88-94 — the summary is a fixed header above the scrolled rows.
+      .when(!this.file && this.view === "search" && this.hits && (this.hits.files.length > 0 || this.hits.truncated),
+        el => el.child(this.searchSummary(t)))
       .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).relative().py(4)
         // The virtual list scrolls itself; only the contents hits still ride a scroll container.
         .when(this.view === "search", s => s.overflow_y_scrollbar().mode("always"))
-        // FileExplorerVirtualRows.tsx — the tree is drawn through the virtualizer (see treeList).
-        .when(this.view === "search", el => el.children(this.hits?.length
-          ? this.hits.map((h, i) => h_flex().id(`hit-${i}`).h(26).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer().hover(s => s.bg(t.hover))
-              .on_click((_e, cx) => this.show(h.file, cx))
-              .child(div().flex_1().min_w(0).truncate().text_size(12).child(h.text))
-              .child(div().flex_none().text_size(11).text_color(t.dim).child(`${h.file}:${h.line}`)))
-          : []))
+        // SearchResultsPane.tsx:57-70 — its virtualizer mixes 28px file rows with 20px match
+        // rows; this Herdr `v_virtual_list` takes one height for the whole list, so the
+        // grouped rows are a plain column, cheap because search() keeps at most 200 matches.
+        .when(this.view === "search", el => el.children(this.searchResults(t)))
         .when(this.view !== "search", el => el.child(this.treeList(t)))
         .when(this.view !== "search", el => el.child(Scrollbar.vertical("files-rows").viewport_from_layout().absolute().inset_0()))
         // FileExplorerFilesTreePane.tsx:116-136 — with a name filter the empty state is a
@@ -921,7 +998,7 @@ export default class Files extends View {
         // FileExplorerTreeStatus.tsx:38-95, FileExplorerFilesTreePane.tsx:131-135 — every empty
         // state is a centred 11px muted line; loading is a bare 16px Loader2. The contents-search
         // no-results copy is SearchResultsPane.tsx:153-158.
-        .when(this.view === "search" && this.hits && !this.hits.length && !this.searching, el => el.child(div().flex_1().flex().items_center().justify_center().px(16).text_center().text_size(11).text_color(t.muted).child("No results. Try another search or adjust your filters.")))
+        .when(this.view === "search" && this.hits && this.hits.totalMatches === 0 && !this.searching, el => el.child(div().flex_1().flex().items_center().justify_center().px(16).text_center().text_size(11).text_color(t.muted).child("No results. Try another search or adjust your filters.")))
         .when(this.view === "files" && !this.name.value().trim() && (this.error || !this.entries.get("")?.length), el => el.child(this.error
           ? div().flex_1().flex().items_center().justify_center().px(16).text_center().text_size(11).text_color(t.muted).child(`Could not load files for this workspace: ${this.error}`)
           : this.loading ? div().flex_1().flex().items_center().justify_center().child(svg("mods/orca-files/loader-circle.svg").size(16).flex_none().text_color(t.muted).spin(1000))

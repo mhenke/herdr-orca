@@ -1,98 +1,67 @@
 # Herdr Orca
 
-An [Orca](https://github.com/stablyai/orca)-like workspace layout for [Herdr App](https://herdr.dev): Orca's distinctive three columns, collapsible project worktree hierarchy, activity rail, flat tabs, file explorer, Git changes inspector, and full-span status bar.
+An Orca-like workspace for Herdr App. It brings Orca's three-column layout straight into Herdr: a 280px left sidebar, a flat terminal work area, a 350px right utility panel, and a 24px status bar across the bottom. Projects organize into collapsible groups with worktree cards for your branches, live agent status marks, and primary checkout badges. Tabs sit flat with full-bleed active underline bars routing into Ghostty-dark terminal panes (or a clean landing view when you close your spaces), while the right activity bar switches between a full file explorer and your Git changes.
 
 ![Herdr Orca](preview.png)
 
-## Philosophy
+## Keep the workspace where your hand expects it
 
-**Keep the workspace where your hand expects it.**
+I wanted Orca's layout in Herdr without running a separate app or maintaining a hard fork. Orca's layout just makes sense: projects on the left, your work in the center, repository tools on the right, and a clean status bar along the bottom. 
 
-Orca's shape is one cohesive window: a project list on the left, the work in the middle, the repository on the right, and a unified status bar along the bottom. Herdr draws that entire shape natively without forking it, combining the layout definition with focused mods for each panel.
+Herdr can draw that entire workspace natively. We built it using a layout definition and focused mods for each panel. Every number, pixel offset, and color here was pulled straight from Orca's renderer source code rather than guessing from screenshots. If you want to see the exact file and line citations behind every measurement, check out [RECIPE.md](RECIPE.md).
 
-Every figure and measurement was read directly from Orca's renderer source code, not estimated from screenshots. Full specifications and source citations are detailed in [RECIPE.md](RECIPE.md).
+## What's in the box
 
-## Features & Component Architecture
+The layout brings together 16 self-contained mods under `mods/`:
 
-The layout coordinates 16 self-contained mods under `mods/`:
+- **Three columns at Orca's geometry**: 280px left sidebar (resizes from 220px to 500px), flexible center work area, and 350px right panel (resizes from 220px to 900px), separated by 1px borders with square pane corners (radius 0).
+- **Project cards in the sidebar (`orca-spaces`)**: Repositories group into collapsible folders. Worktrees show up as cards titled by branch, with a `primary` badge on the main checkout. Even if you only open a linked worktree, Herdr discovers the main checkout and keeps it at the top of the group. Linked worktrees indent 18px underneath, and the scrollbar sits in Orca's dedicated gutter so card alignment stays steady.
+- **Live agent status rollup**: Herdr tracks four core agent states (working, blocked, done, idle). You'll see turning spinners when an agent is busy, red alert marks when it needs approval or input, and green checkmarks when a run finishes.
+- **Activity rail and right panel (`orca-panel-head`)**: A 36px activity bar switches between a full-bleed Files explorer (`orca-files`) with 30+ language icons plus a Names/Contents search filter, and a Changes panel (`orca-changes`) with Git staging, diff views, and an inline commit composer.
+- **Flat tab strip (`orca-tabs`)**: Tabs sit flat with a full-width 2px bottom underline on the active tab, program icons, close buttons, and tab color dots that stay in sync with the menu store. We also put the sidebar toggle button right in the tab bar so you can always bring the sidebar back.
+- **Hover pane headers (`orca-pane`)**: Hovering over a terminal reveals a slim 24px header with custom tab names, split buttons, zoom toggle, and close.
+- **Full-span status bar (`orca-status`)**: A 24px bar running across the full window bottom showing your Git branch, dirty file counter, ahead/behind sync stats, and overall agent status.
+- **Quick create dropdown (`new-menu`)**: A 288px dropdown for quickly launching agents (OpenCode, Antigravity, Claude Code, Codex), opening folders, or creating new Git worktrees.
+- **Context menus (`orca-menu`)**: Right-click menus for worktrees, project headers, and tabs with full mouse and keyboard navigation (arrow keys, Enter, Space, Home, End, Esc).
+- **Palettes that match Orca**: `orca-dark` (Ghostty Default Style Dark) and `orca-light` (Tango Light), plus Orca's grey panel tones.
 
-- **Three columns at Orca's widths**: left sidebar 280px (min 220, max 500), right panel 350px (min 220, max 900), 1px dividers, square pane corners (radius 0). The center reads flat, as Orca's does.
-- **Sidebar header (`orca-nav`)**: history arrows for the middle column, Orca's Search row, and the Tasks / Automations / Orca Mobile rows. Each opens a page in the workspace column, where Orca opens it; choosing a workspace or tab returns to the terminals.
-- **Project cards in the sidebar (`orca-spaces`)**:
-  - Repositories organize into collapsible groups with folder glyphs.
-  - Worktrees render as cards carrying branch identities, with `primary` badges on main checkouts.
-  - Linked worktrees nest under their checkout with Orca-accurate 18px indentation.
-  - Main checkout auto-discovery: even when a repository is opened only on linked worktrees, the main checkout is discovered and shown as the canonical header.
-  - Sidebar scrollbar sits in Orca's dedicated gutter to preserve card pitch.
-  - Concurrent Git discovery (`Promise.allSettled`) with an authentic "Loading workspaces…" indicator.
-  - Saved custom project folders persist across restarts in `localStorage`.
-- **Live agent status rollup**:
-  - Real-time rollup across cards, tabs, and the status bar using Herdr's 4 priority states (`working`, `blocked`, `done`, `idle`).
-  - Displays turning spinners (`working`), red alert glyphs (`blocked`), or green checkmarks (`done`).
-- **Activity rail & right utility panel (`orca-panel-head`)**:
-  - 36px activity bar header with 16px icons.
-  - **Files Explorer (`orca-files`)**: full-bleed tree with 30+ language file icons, Names/Contents search switch, and debounced "Find files" filter input.
-  - **Changes Inspector (`orca-changes`)**: partitioned staged/unstaged file lists, per-file diff inspection, section collapse, and inline commit message composer.
-  - Secondary tool views (`orca-agents`, `orca-panel-gap`) for session vault and secondary tabs.
-- **Flat tab strip (`orca-tabs`)**:
-  - Full-bleed flat tabs with active 2px bottom underline indicator bars.
-  - Program icons, close buttons (`×`), and tab color dots synchronized with the menu store.
-  - Integrated sidebar collapse/expand toggle (`panel-left`) at the far left.
-- **Terminal pane header (`orca-pane`)**:
-  - Minimal 24px header revealing on hover with custom tab pane titles, split buttons (`pane.split:right`, `pane.split:down`), zoom toggle, and close.
-- **Full-width status bar (`orca-status`)**:
-  - 24px bar spanning the window bottom outside the body column.
-  - Left: Git branch badge, dirty file counter, ahead/behind sync indicators.
-  - Center: Aggregated agent turn execution status.
-  - Right: Host machine count, update status indicator, and workspace connection state.
-- **Create dropdown (`new-menu`)**:
-  - 288px popover menu for launching agents (OpenCode, Antigravity, Claude Code, Codex), opening folders, or creating Git worktrees.
-- **Context menus (`orca-menu`)**:
-  - 208px / 176px context menus for worktrees, project headers, and tabs with full mouse and keyboard navigation (arrows, Enter, Space, Home, End, Esc), clipboard integration, and external file reveal.
-- **Floating overlay (`orca-float` / `orca-pane-status`)**:
-  - Bottom-right overlay supporting Orca's "New Terminal" and "Minimize" actions, plus running agent pills.
-- **Honest gaps (`orca-panel-gap`)**: a surface Herdr has no backend for (PR Checks, Ports, Attached worktrees, Tasks, Automations, Orca Mobile) still renders where Orca puts it, with one sentence naming what is missing. No dead controls, no invented data — see `docs/adr/0004-match-orca-layout-and-render-gaps.md`.
-- **Orca's palettes**:
-  - `orca-dark` (Ghostty Default Style Dark, Orca's default) and `orca-light` (Builtin Tango Light), plus Orca's greys for the chrome and panels.
+## How to install
 
-## Installation & Distribution
+### From Herdr Community
+This layout is published directly to Herdr Community:
+- **Layout**: Grab it from [herdr.dev/layouts](https://herdr.dev/layouts) (tagged with `herdr-layout`).
+- **Standalone Mods**: If you only want specific pieces (like the file explorer or Git staging panel in your own layout), grab them from [mhenke/herdr-orca-mods](https://github.com/mhenke/herdr-orca-mods) on [herdr.dev/mods](https://herdr.dev/mods).
 
-### 1. Community Distribution
-- **Full Layout**: Distributed via GitHub topic `herdr-layout` and indexed on [herdr.dev/layouts](https://herdr.dev/layouts).
-- **Standalone Mods**: Individual mods from this package are also distributed as modular units at [mhenke/herdr-orca-mods](https://github.com/mhenke/herdr-orca-mods) and indexed on [herdr.dev/mods](https://herdr.dev/mods).
+### Manual install or local sync
+If you're cloning this repo locally, you can copy the files right into your Herdr directory (`~/.config/herdr-app`):
+- `layouts/orca.json` and `layouts/orca.svg` go into `~/.config/herdr-app/layouts/`
+- Every folder in `mods/` goes into `~/.config/herdr-app/mods/`
+- Theme files in `extras/themes/*.json` go into `~/.config/herdr-app/themes/`
+- Merge `keys.json` into your `~/.config/herdr-app/keys.json`
 
-### 2. Manual Installation
-Copy the package files into your Herdr configuration directory (`~/.config/herdr-app`):
-- `layouts/orca.json` and `layouts/orca.svg` into `~/.config/herdr-app/layouts/`
-- Every folder in `mods/` into `~/.config/herdr-app/mods/`
-- Every theme in `extras/themes/*.json` into `~/.config/herdr-app/themes/`
-- Merge `keys.json` into `~/.config/herdr-app/keys.json`
-
-Or run the included sync script:
+Or run the sync script to handle all of it:
 
 ```sh
 sh scripts/sync.sh
 herdr-app do layout.switch '{"name":"orca"}'
 ```
 
-Nothing requires an app restart: `layout.switch` live-swaps the layout in the running window, edited layout files auto-reload, and mods hot-reload on save.
+You don't need to restart Herdr. `layout.switch` swaps the layout live in your running window, layout edits reload automatically, and mods hot-reload when you save changes. Pretty sweet :-).
 
-How it looks, behaves, and every number's source: [RECIPE.md](RECIPE.md).
+## Keyboard shortcuts
 
-## Keys
+These are defined in the `layout:orca` section of `keys.json` and activate whenever the Orca layout is active:
 
-Defined in the `layout:orca` section of `keys.json` — active whenever `layouts/orca.json` is displayed. `sync.sh` merges them into your existing key bindings:
-
-| Key | Command | Does |
+| Key | Command | Action |
 | --- | --- | --- |
-| `ctrl-shift-b` | `layout.toggle:sidebar` | Shows or hides the left sidebar |
-| `ctrl-shift-e` | `layout.toggle:panel` | Shows or hides the right utility panel |
+| `ctrl-shift-b` | `layout.toggle:sidebar` | Toggle the left sidebar on or off |
+| `ctrl-shift-e` | `layout.toggle:panel` | Toggle the right utility panel on or off |
 
-Tabs, spaces, and panes retain Herdr's standard navigation shortcuts (`alt-1`…`alt-9` for spaces, `ctrl-1`…`ctrl-9` for tabs, `alt-h/j/k/l` to move focus between panes).
+All of Herdr's default shortcuts still work as expected (`alt-1` through `alt-9` for spaces, `ctrl-1` through `ctrl-9` for tabs, and `alt-h/j/k/l` to move between panes).
 
 ## Settings
 
-Theme fonts and sounds belong to your environment; configure them in `~/.config/herdr-app/settings.json`:
+Fonts and sounds are up to you. Set them in `~/.config/herdr-app/settings.json`:
 
 ```json
 {
@@ -107,65 +76,57 @@ Theme fonts and sounds belong to your environment; configure them in `~/.config/
 }
 ```
 
-The notification sounds correspond to Orca's `resources/notification-sounds/` in [stablyai/orca](https://github.com/stablyai/orca); place `ding.mp3` and `two-tone.mp3` into `~/.config/herdr-app/data/sounds/`. Geist ships embedded with Herdr.
+If you want Orca's notification sounds, grab `ding.mp3` and `two-tone.mp3` from `resources/notification-sounds/` in [stablyai/orca](https://github.com/stablyai/orca) and drop them into `~/.config/herdr-app/data/sounds/`. Geist comes bundled with Herdr, so no font install is needed.
 
-## Updating
+## What it runs under the hood
 
-Pull updates and re-sync:
+We keep things lightweight and local:
 
-```sh
-git pull && sh scripts/sync.sh
-```
+- `orca-spaces`: Runs read-only `git status`, `git rev-parse`, and `git worktree list --porcelain` to discover worktrees concurrently. It probes `gh` for pull request review numbers and caches what it finds in `localStorage`.
+- `orca-files`: Watches folders with `watchFolder` and handles basic file actions (create, rename, delete, reveal). Runs `rg --vimgrep` for content searches.
+- `orca-changes`: Handles Git status, diff views, staging, and commits (`git status`, `git diff`, `git add`, `git restore`, `git commit`).
+- `orca-status`: Periodically checks branch name and dirty status.
+- `orca-menu`: Clipboard support (`wl-copy`, `xclip`, `pbcopy`) and system file reveals (`xdg-open`, `open`, `explorer.exe`).
 
-`sync.sh` updates the layout, themes, and shipped mod folders while preserving your custom settings and personal key bindings outside `layout:orca`.
+Every Git command passes `--no-optional-locks -c core.fsmonitor=false` so we never lock your repository index or trigger file watcher feedback loops.
 
-## What It Runs
+## Releases and the release skill
 
-- `orca-spaces`: runs read-only `git status`, `git rev-parse`, and `git worktree list --porcelain` to discover worktrees concurrently. Probes `gh` for pull request review numbers and caches results in `localStorage`.
-- `orca-files`: watches workspace directories via `watchFolder` and provides file operations (create, rename, delete, reveal). Runs `rg --vimgrep` for file searches.
-- `orca-changes`: runs Git status, diff, staging, and commit operations (`git status`, `git diff`, `git add`, `git restore`, `git commit`).
-- `orca-status`: periodically checks local git branch and dirty status.
-- `orca-menu`: clipboard integration (`wl-copy` / `xclip` / `pbcopy`) and system file reveals (`xdg-open` / `open` / `explorer.exe`).
+We follow Semantic Versioning and Keep a Changelog format. Everything is tracked in [CHANGELOG.md](CHANGELOG.md) using `git-cliff` with Conventional Commits.
 
-All Git executions pass `--no-optional-locks -c core.fsmonitor=false` so locks are never held and file watches are not triggered in loops.
+### Releasing with the `herdr-orca-release` skill
+If you're pairing with an AI coding agent (Antigravity, Claude Code, or OpenCode), we have a dedicated release skill bundled in [`.agents/skills/herdr-orca-release/SKILL.md`](.agents/skills/herdr-orca-release/SKILL.md). It walks through verification checks, SemVer versioning, changelog generation, and GitHub release creation.
 
-## Releases & Agent Release Skill
-
-Releases adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Release notes and version history are maintained in [CHANGELOG.md](CHANGELOG.md) via [git-cliff](https://git-cliff.org) from Conventional Commits.
-
-### Releasing via the `herdr-orca-release` Skill
-When working with coding agents (such as Antigravity, Claude Code, or OpenCode), release workflows are governed by the specialized [`herdr-orca-release`](.agents/skills/herdr-orca-release/SKILL.md) skill. The skill guides pre-flight verification gates, SemVer determination, changelog previews, tag creation, and GitHub release publication.
-
-### Releasing via CLI Script
-You can also run the release automation directly:
+### Releasing from the command line
+You can also run the release script directly:
 
 ```sh
 # 1. Preview changes and changelog in dry-run mode
 ./scripts/release.sh --dry-run <version>
 
-# 2. Run checks (node --check, herdr-app check), update CHANGELOG.md, commit and tag
+# 2. Run checks, update CHANGELOG.md, commit, and tag
 ./scripts/release.sh <version>
 
-# 3. Cut release, push tag, and create GitHub Release with release assets (.tar.gz and .zip)
+# 3. Push and create a GitHub Release with tarball archives
 ./scripts/release.sh <version> --push --github-release
 ```
 
-Automated GitHub Actions (`.github/workflows/release.yml`) package distribution tarballs (`.tar.gz` and `.zip`) and attach them to the GitHub release upon tag push.
+GitHub Actions (`.github/workflows/release.yml`) builds `.tar.gz` and `.zip` distribution bundles automatically whenever a tag is pushed.
 
-## Verification & Parity Testing
+## Verification tests
 
-To ensure complete parity and guard against regressions:
+We built tests to catch regressions and verify that citations match the real Orca codebase:
 
 ```sh
-# Run citation checks (validating citations against ~/Projects/orca), syntax, and mod checks
+# Validate citations against ~/Projects/orca, test syntax, and check all mods
 python3 scripts/verify.py
 
-# Run with optional smoke test (restarts app and scans for runtime exceptions)
+# Optional smoke test (restarts the app and checks for runtime errors in the log)
 python3 scripts/verify.py --smoke
 ```
 
-## Credits and License
+## Credits and license
 
-- Architecture and styling ported from [stablyai/orca](https://github.com/stablyai/orca) (MIT License, Copyright Orca).
-- Space models and avatars informed by [herdr-t3](https://github.com/JinJieBeWater/herdr-t3) (Apache-2.0).
-- Shipped under the Apache-2.0 License, matching Herdr App.
+Huge thanks to the team at [stablyai/orca](https://github.com/stablyai/orca) for creating Orca (MIT License, Copyright Orca). Space models and avatars were inspired by [herdr-t3](https://github.com/JinJieBeWater/herdr-t3) (Apache-2.0).
+
+This package is licensed under Apache-2.0, matching Herdr App.

@@ -140,7 +140,9 @@ function items(p, git) {
         // the same choices as rows, the current one marked. Herdr has no tab colour field, so
         // orca-tabs draws the dot from the store this writes.
         ...TAB_COLORS.map(([label, value]) => [
-          `${(stored("tab.colors.v1", {})[tg.id] ?? null) === value ? "●" : "○"} Tab Color: ${label}`,
+          // `||` not `??`: clearing a colour stores "", which `??` passes through, so the
+          // None row stayed unmarked after a colour was removed (`value` is null for None).
+          `${(stored("tab.colors.v1", {})[tg.id] || null) === value ? "●" : "○"} Tab Color: ${label}`,
           "orca-menu.tab-color",
           { id: tg.id, color: value ?? "" },
         ]),
