@@ -422,16 +422,24 @@ export default class Spaces extends View {
   card({ w, i, g, tree }, t, ps) {
     const fromIndex = this.pressed === null ? -1 : spaces().findIndex(s => s.id === this.pressed);
     const on = w.active;
-    const busy = (w.tabs ?? []).some(tab => (ps ?? []).some(p => p.tab === tab.id && this.busy[p.pane]));
-    // Orca titles a card by its worktree, the header already carrying the project: a main
-    // checkout whose name is the repo's shows its branch instead of saying the name twice.
-    const title = g && !g.linked && g.branch && w.name === g.name ? g.branch : w.name;
-    return stop(this, t, `space-${w.id}`, h_flex()
+    // Orca titles a card by its worktree and puts the branch under it, as its meta row
+    // (`default-workspace-card.json` -> IdentityBlock -> Branch, 11px muted).
+    const title = w.name;
+    // Panes in this worktree, for the agent lines.
+    const tabs = new Set((w.tabs ?? []).map(c => c.id));
+    const mine = (ps ?? []).filter(p => tabs.has(p.tab));
+    // Orca's StatusIndicator states, from Herdr's most urgent status (blocked > done > working > idle).
+    // A space with no reporting agent draws the quiet dot, never a fake active one.
+    const status = w.status ?? null;
+    const dot = status === "blocked" ? "#ef4444" : status === "working" ? t.ansi2 : status === "done" ? t.ansi2 : "#f0f0f04d";
+    // The meta row is the branch, as Orca's `vars.branch` (card template), 11px muted.
+    const meta = g?.branch ?? w.branch ?? null;
+    return stop(this, t, `space-${w.id}`, v_flex()
       .relative()
       .id(`space-${w.id}`)
-      .ml(4).pr(6).h(36)
+      // A nested card steps in with its surface, as Orca's lineage wrapper (14 = 18 indent - 4 ml - 2 + 2).
+      .ml(4 + (tree ? 14 : 0)).pr(6).py(8)
       .flex_none()
-      .items_center()
       .rounded(8)
       .role("button")
       .accessibility_label(w.name)
@@ -468,15 +476,24 @@ export default class Spaces extends View {
         cx.notify();
       })
       .on_mouse_down("right", () => this.menu(w))
-      // Content 2 in from the surface; the lane is w-5 mr-1 as Orca's, and a worktree card adds
-      // SIDEBAR_TREE_INDENT (18) so its title sits under its repo's label, not the header icon.
-      .child(h_flex().w_full().min_w(0).pl(2 + (tree ? 18 : 0)).gap(0).items_center()
+      // Card root: Row gap xs (2), status lane then a Stack gap md (6) — Orca's default template.
+      .child(h_flex().w_full().min_w(0).pl(2 + (tree ? 18 : 0)).gap(2).items_center()
         .child(div().w(20).mr(4).flex_none().flex().items_center().justify_center()
-          .child(div().size(6).rounded_full().flex_none().bg(busy || on ? t.ansi2 : "#f0f0f04d")))
-        .child(div().min_w(0).max_w(150).truncate().text_size(13).line_height("20px").text_color(t.foreground).child(title))
-        .when(g && !g.linked, el => el.child(div().flex_none().ml(6).h(16).px(6).rounded(4).border_1().border_color("#f0f0f033").bg("#f0f0f00f")
-          .text_size(10).font_medium().line_height("14px").text_color("#f0f0f0b3").child("primary")))
-        .child(g ? this.gitTail(g, tree, title, t, w.id) : div().flex_1())),
+          .child(div().size(6).rounded_full().flex_none().bg(dot)))
+        .child(v_flex().flex_1().min_w(0).gap(6)
+          // Title row: title, then the primary pill (h-16, px-1.5, 10px).
+          .child(h_flex().w_full().min_w(0).gap(6).items_center()
+            .child(div().min_w(0).max_w(150).truncate().text_size(13).line_height("20px").text_color(t.foreground).child(title))
+            .when(g && !g.linked, el => el.child(div().flex_none().h(16).px(6).rounded(4).border_1().border_color("#f0f0f033").bg("#f0f0f00f")
+              .text_size(10).font_medium().line_height("14px").text_color("#f0f0f0b3").child("primary")))
+            .child(g ? this.gitTail(g, tree, title, t, w.id) : div().flex_1()))
+          // Meta row: the branch, 11px muted, as Orca's Branch part.
+          .when(Boolean(meta), el => el.child(div().min_w(0).truncate().text_size(11).line_height("11px").text_color(t.dim).child(meta)))
+          // Agent rows sit inside the card and light when it is active, as Orca's inlineAgents.
+          .when(mine.length > 0 && mine.some(p => p.program?.agent), el => el.child(h_flex().gap(6).items_center()
+            .text_size(11).line_height("14px").text_color(t.dim)
+            .child(div().min_w(0).truncate().child(`${mine.filter(p => p.program?.agent).length} agent${mine.filter(p => p.program?.agent).length === 1 ? "" : "s"}`))))),
+      ),
       // A space goes by its mouse-up, which a key isn't.
       8, { enter: () => run("space.select", { id: w.id }) });
   }
