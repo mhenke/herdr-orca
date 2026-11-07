@@ -1,6 +1,6 @@
 // A lazy file browser for the focused pane's folder, with bounded read-only previews.
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, Input, InputState, Editor, EditorState } from "gpui-base";
+import { v_flex, h_flex, v_virtual_list, Scrollbar, Input, InputState, Editor, EditorState } from "gpui-base";
 import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, openOverlay, closeOverlay, shared, setShared, nextCommand } from "herdr";
 import { copyText, reveal } from "./clip.js";
 
@@ -372,7 +372,10 @@ export default class Files extends View {
     }
     if (!paths.length) {
       const r = await exec("rg", ["--files", "--hidden", "--no-ignore", "--null"], { cwd: root, on: this.on }).catch(() => null);
-      if (r?.code === 0) paths = r.stdout.split("\0").map(p => p.replace(/^\.\//, ""));
+      // rg exits 2 when one directory is unreadable and still prints every other path;
+      // a non-zero code is not an empty listing. Orca keeps the partial listing and only
+      // marks the host scan failed (quick-open-file-list.ts:263-265 `hostFilterFailed`).
+      if (r?.stdout) paths = r.stdout.split("\0").map(p => p.replace(/^\.\//, ""));
     }
     // `.git` never enters the tree (directory() skips it).
     paths = paths.filter(p => p && p !== "." && p !== ".git" && !p.startsWith(".git/")).slice(0, 20001);
@@ -535,7 +538,9 @@ export default class Files extends View {
   async search(query) {
     if (!query) return [];
     const r = await exec("rg", ["--vimgrep", "--smart-case", "--max-count", "20", query], { cwd: this.root, on: this.on }).catch(() => null);
-    if (!r || r.code > 1) return [];
+    // Same as the listing: rg exits 2 after an unreadable directory and still printed
+    // the hits; only a run that produced nothing is a failure.
+    if (!r?.stdout) return [];
     return (r.stdout || "").split("\n").slice(0, 200).filter(Boolean).map(l => {
       const [file, line, , ...rest] = l.split(":");
       return { file, line: Number(line), text: rest.join(":").trim() };
@@ -543,8 +548,11 @@ export default class Files extends View {
   }
 
   // `source === "name"` walks `nfMap`, the projection nameMatches built from the worktree
-  // listing; the plain tree walks the loaded folder cache.
-  rows(prefix, depth, out, t, source) {
+  // listing; the plain tree walks the loaded folder cache. Returns descriptors, not elements:
+  // FileExplorerVirtualRows.tsx renders the tree through a virtualizer, and a broad name
+  // filter matches thousands of rows — building them all in one frame overruns the engine's
+  // 50 ms render budget (`sandbox.rs` Budgets::render) and paints the stale-frame banner.
+  flat(prefix, depth, out, source) {
     if (out.length >= TOTAL || depth > 40) return out;
     const named = source === "name", f = filters(this.root);
     for (const entry of (named ? this.nfMap?.get(prefix) : this.entries.get(prefix)) ?? []) {
@@ -558,43 +566,69 @@ export default class Files extends View {
       // The filtered tree opens every ancestor of a match unless the branch was collapsed
       // (nameFilterCollapsedPaths, file-explorer-name-filter-projection.ts:206-208).
       const open = named ? !this.nfCollapsed.has(path) : this.folders.has(path);
-      const kids = entry.dir && open ? this.rows(path, depth + 1, [], t, source) : [];
-      // A folder row shows its descendants' dominant status when it has no mark of its own
-      // (buildFolderStatusMap, git-path-decoration.ts:53-88; FileExplorerVirtualRows.tsx:170-176).
-      const mark = this.marks[path] ?? (entry.dir ? this.folderMarks[path] : undefined);
-      // FileExplorerRow.tsx:204-226,242-248 — Loader2 while the folder loads, CircleAlert on a
-      // read error, Link for a symlink, FileTypeIcon per extension.
-      const loading = entry.dir && this.pending.has(path), failed = entry.dir ? this.folderErrors[path] : null;
-      const icon = entry.dir
-        ? loading ? svg("mods/orca-files/loader-circle.svg").size(12).flex_none().text_color(t.muted).spin(1000)
-          : failed ? svg("mods/orca-files/circle-alert.svg").size(12).flex_none().text_color(t.blocked)
-          : svg(`mods/orca-files/${open ? "folder-open" : "folder"}.svg`).size(12).flex_none().text_color(t.muted)
-        : entry.link ? svg("mods/orca-files/link.svg").size(12).flex_none().text_color(t.muted)
-        : svg(`mods/orca-files/${fileIcon(entry.name)}.svg`).size(12).flex_none().text_color(t.muted);
-      // FileExplorerRow.tsx:147-152 — px-2 py-1 text-xs gap-1, indent depth*16 + 8; 26px is
-      // Orca's own row constant (virtualizer estimateSize, inline-input row, drag ghost).
-      // Colours: git-path-decoration.ts:5-12 -> main.css:489-496.
-      // Selected row: main.css:1453-1471 — accent at 70% (80% hovered), inset 1px border,
-      // accent-foreground text; hover is `bg-accent` (FileExplorerRow.tsx:148).
-      // Divergence: rounded(2), not rounded-sm (6px): the hover fill is only 26px tall.
-      out.push(h_flex().id(`file-${path}`).w_full().h(26).flex_none().pl(8 + depth * 16).pr(8).gap(4).items_center().rounded(2).text_size(12).cursor_pointer()
-        .when(this.file === path, el => el.bg(fade(t.accent, 0.7)).border_1().border_color(t.border).text_color(t.accent_foreground).hover(s => s.bg(fade(t.accent, 0.8))))
-        .when(this.file !== path, el => el.hover(s => s.bg(t.accent)))
-        .on_click((_e, cx) => entry.dir ? (named ? this.nameToggle(path, cx) : this.toggle(path, cx)) : this.show(path, cx))
-        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.menu(path, entry); })
-        .child(entry.dir ? svg(`mods/orca-files/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
-        .child(icon)
-        .child(div().flex_1().min_w(0).truncate().when(Boolean(mark), el => el.text_color(gitTone(mark, t))).child(entry.name))
-        // FileExplorerRow.tsx:242-248 — the read error rides the row as a destructive truncation.
-        .when(Boolean(failed), el => el.child(div().w(0).flex_1().truncate().text_color(t.blocked).tooltip(failed).child(failed)))
-        // FileExplorerRow.tsx:251-267 — status `text-[10px] font-semibold tracking-wide mr-2`;
-        // ignored rows swap the label for CircleSlash size-3. `tracking-wide` has no gpui-kit
-        // method, so only the size and weight are ported.
-        .when(mark === "!", el => el.child(div().mr(8).flex_none().child(svg("mods/orca-files/circle-slash.svg").size(12).flex_none().text_color(gitTone(mark, t)))))
-        .when(Boolean(mark) && mark !== "!", el => el.child(div().mr(8).flex_none().text_size(10).font_semibold().text_color(gitTone(mark, t)).child(mark))));
-      if (entry.dir && open) out.push(...kids);
+      out.push({ path, name: entry.name, entry, dir: entry.dir, link: entry.link, depth, open });
+      if (entry.dir && open) this.flat(path, depth + 1, out, source);
     }
     return out;
+  }
+
+  // v_virtual_list hands its renderer a {start,end} range, not an index (defaults/mods/changes
+  // uses the same contract), and rows cannot register their own handlers — the renderer runs
+  // every frame, so the list takes one `on_item_click` keyed by `get_key` instead.
+  treeList(t) {
+    const list = this.flat("", 0, [], this.name.value().trim() ? "name" : undefined);
+    const named = Boolean(this.name.value().trim());
+    const find = (key) => list.find((r) => r.path === key);
+    return v_virtual_list("files-rows", list.length, 26, i => list[i]?.path ?? String(i),
+      (range) => list.slice(range.start, range.end).map(r => this.row(r, t)))
+      .on_item_click((key, cx) => {
+        const r = find(key);
+        if (!r) return;
+        if (r.dir) named ? this.nameToggle(r.path, cx) : this.toggle(r.path, cx);
+        else this.show(r.path, cx);
+      })
+      .on_item_secondary_click((key, _event, cx) => {
+        const r = find(key);
+        if (!r) return;
+        cx.stop_propagation();
+        this.menu(r.path, r.entry);
+      })
+      .size_full();
+  }
+
+  // FileExplorerRow.tsx:147-152 — px-2 py-1 text-xs gap-1, indent depth*16 + 8; 26px is
+  // Orca's own row constant (virtualizer estimateSize, inline-input row, drag ghost).
+  // Colours: git-path-decoration.ts:5-12 -> main.css:489-496.
+  // Selected row: main.css:1453-1471 — accent at 70% (80% hovered), inset 1px border,
+  // accent-foreground text; hover is `bg-accent` (FileExplorerRow.tsx:148).
+  // Divergence: rounded(2), not rounded-sm (6px): the hover fill is only 26px tall.
+  row(r, t) {
+    const { path, name, dir, link, depth, open } = r;
+    // A folder row shows its descendants' dominant status when it has no mark of its own
+    // (buildFolderStatusMap, git-path-decoration.ts:53-88; FileExplorerVirtualRows.tsx:170-176).
+    const mark = this.marks[path] ?? (dir ? this.folderMarks[path] : undefined);
+    // FileExplorerRow.tsx:204-226,242-248 — Loader2 while the folder loads, CircleAlert on a
+    // read error, Link for a symlink, FileTypeIcon per extension.
+    const loading = dir && this.pending.has(path), failed = dir ? this.folderErrors[path] : null;
+    const icon = dir
+      ? loading ? svg("mods/orca-files/loader-circle.svg").size(12).flex_none().text_color(t.muted).spin(1000)
+        : failed ? svg("mods/orca-files/circle-alert.svg").size(12).flex_none().text_color(t.blocked)
+        : svg(`mods/orca-files/${open ? "folder-open" : "folder"}.svg`).size(12).flex_none().text_color(t.muted)
+      : link ? svg("mods/orca-files/link.svg").size(12).flex_none().text_color(t.muted)
+      : svg(`mods/orca-files/${fileIcon(name)}.svg`).size(12).flex_none().text_color(t.muted);
+    return h_flex().id(`file-${path}`).w_full().h(26).flex_none().pl(8 + depth * 16).pr(8).gap(4).items_center().rounded(2).text_size(12).cursor_pointer()
+      .when(this.file === path, el => el.bg(fade(t.accent, 0.7)).border_1().border_color(t.border).text_color(t.accent_foreground).hover(s => s.bg(fade(t.accent, 0.8))))
+      .when(this.file !== path, el => el.hover(s => s.bg(t.accent)))
+      .child(dir ? svg(`mods/orca-files/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
+      .child(icon)
+      .child(div().flex_1().min_w(0).truncate().when(Boolean(mark), el => el.text_color(gitTone(mark, t))).child(name))
+      // FileExplorerRow.tsx:242-248 — the read error rides the row as a destructive truncation.
+      .when(Boolean(failed), el => el.child(div().w(0).flex_1().truncate().text_color(t.blocked).tooltip(failed).child(failed)))
+      // FileExplorerRow.tsx:251-267 — status `text-[10px] font-semibold tracking-wide mr-2`;
+      // ignored rows swap the label for CircleSlash size-3. `tracking-wide` has no gpui-kit
+      // method, so only the size and weight are ported.
+      .when(mark === "!", el => el.child(div().mr(8).flex_none().child(svg("mods/orca-files/circle-slash.svg").size(12).flex_none().text_color(gitTone(mark, t)))))
+      .when(Boolean(mark) && mark !== "!", el => el.child(div().mr(8).flex_none().text_size(10).font_semibold().text_color(gitTone(mark, t)).child(mark)));
   }
 
   promptView(t) {
@@ -691,31 +725,41 @@ export default class Files extends View {
     // FileExplorerViewSwitch.tsx:44-73 — `rounded-md bg-muted p-0.5`, group `h-6 w-full`,
     // items sized `xs` (h-6, text-xs, flex-1); selected `bg-card text-card-foreground`.
     const seg = (id, label, view) => div().id(id).flex_1().h(24).flex().items_center().justify_center().rounded(6).text_size(12)
-      .cursor_pointer().role("button").accessibility_label(label)
+      .cursor_pointer().role("button").accessibility_label(label).tooltip(label)
       .when(this.view === view, s => s.bg(t.raised).text_color(t.foreground))
       .when(this.view !== view, s => s.text_color(t.muted).hover(x => x.text_color(t.foreground)))
       .on_click((_e, cx) => { this.view = view; cx.notify(); })
       .child(label);
-    const input = search ? this.q : this.name;
+    // FileExplorer.tsx:294-309 — both query rows stay mounted and one is hidden
+    // (`<div hidden={explorerView !== 'files'}>`), so switching mode keeps its text.
+    // One shared `Input` element kept whichever state it bound first, so keystrokes
+    // in one mode landed in the other's state and neither search ever ran.
     return v_flex().id("files-query").flex_none().p(8).gap(8).border_b(1).border_color(t.border)
       .child(h_flex().w_full().h(28).p(2).gap(4).rounded(6).bg(t.hover)
         .child(seg("files-names", "Names", "files"))
         .child(seg("files-contents", "Contents", "search")))
-      // FileExplorerNameFilter.tsx:23 and SearchQueryRow.tsx:47 share the `h-8 rounded-md`
-      // input chrome; `focus-within:border-ring ring-1` paints the border in ring colour.
-      .child(h_flex().w_full().h(32).px(8).gap(4).items_center().rounded(8).overflow_hidden().border_1().border_color(this.qFocused ? t.ring : t.border).bg(fade(t.input, 0.5))
-        .child(svg("mods/orca-files/list-filter.svg").size(14).flex_none().text_color(t.muted))
-        .child(Input.new(input).flex_1().min_w(0).text_size(12).text_color(t.foreground).bg("#00000000"))
-        // FileExplorerNameFilter.tsx:47-62 / SearchQueryRow.tsx:50-51 — Loader2 while the
-        // listing or the search runs; X clears the active input and its projection.
-        .when((search && this.searching) || (!search && this.nfLoading), el => el.child(svg("mods/orca-files/loader-circle.svg").size(12).flex_none().text_color(t.muted).spin(1000)))
-        .when(Boolean(input.value().trim()), el => el.child(div().id("files-clear").p(2).flex_none().rounded(6).cursor_pointer().text_color(t.muted).hover(s => s.text_color(t.foreground))
-          .on_click((_e, cx) => {
-            input.set_value(""); this.hits = null; this.searching = false;
-            this.nfMap = null; this.nfCollapsed = new Set(); this.nfLoading = false;
-            cx.notify();
-          })
-          .child(svg("mods/orca-files/x.svg").size(12)))));
+      .child(this.queryRow(this.name, "names", !search, !search && this.nfLoading, t))
+      .child(this.queryRow(this.q, "contents", search, search && this.searching, t));
+  }
+
+  // FileExplorerNameFilter.tsx:23 / SearchQueryRow.tsx:47 — shared `h-8 rounded-md`
+  // chrome; `focus-within:border-ring ring-1` paints the border in ring colour.
+  // FileExplorerNameFilter.tsx:47-62 / SearchQueryRow.tsx:50-51 — Loader2 while the
+  // listing or the search runs; X clears that input and its projection.
+  queryRow(state, id, active, busy, t) {
+    return h_flex().w_full().h(32).min_h(0).px(8).gap(4).items_center().rounded(8).overflow_hidden().border_1().border_color(this.qFocused ? t.ring : t.border).bg(fade(t.input, 0.5))
+      .when(!active, el => el.hidden())
+      .child(svg("mods/orca-files/list-filter.svg").size(14).flex_none().text_color(t.muted))
+      .child(Input.new(state).flex_1().min_w(0).text_size(12).text_color(t.foreground).bg("#00000000"))
+      .when(busy, el => el.child(svg("mods/orca-files/loader-circle.svg").size(12).flex_none().text_color(t.muted).spin(1000)))
+      .when(Boolean(state.value().trim()), el => el.child(div().id(`files-clear-${id}`).p(2).flex_none().rounded(6).cursor_pointer().text_color(t.muted).hover(s => s.text_color(t.foreground))
+        .on_click((_e, cx) => {
+          state.set_value("");
+          if (state === this.q) { this.hits = null; this.searching = false; }
+          else { this.nfMap = null; this.nfCollapsed = new Set(); this.nfLoading = false; }
+          cx.notify();
+        })
+        .child(svg("mods/orca-files/x.svg").size(12))));
   }
 
   render(cx) {
@@ -739,17 +783,18 @@ export default class Files extends View {
       // FileExplorerQueryStrip.tsx:35-52 (switch + active query input) then the tree.
       .when(!this.file, el => el.child(this.toolbar(t)))
       .when(!this.file, el => el.child(this.queryStrip(t)))
-      .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().mode("always").py(4)
-        .children(this.view === "search"
-          ? this.hits?.length
-            ? this.hits.map((h, i) => h_flex().id(`hit-${i}`).h(26).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer().hover(s => s.bg(t.hover))
-                .on_click((_e, cx) => this.show(h.file, cx))
-                .child(div().flex_1().min_w(0).truncate().text_size(12).child(h.text))
-                .child(div().flex_none().text_size(11).text_color(t.dim).child(`${h.file}:${h.line}`)))
-            : []
-          : this.name.value().trim()
-            ? this.rows("", 0, [], t, "name")
-            : this.rows("", 0, [], t))
+      .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).relative().py(4)
+        // The virtual list scrolls itself; only the contents hits still ride a scroll container.
+        .when(this.view === "search", s => s.overflow_y_scrollbar().mode("always"))
+        // FileExplorerVirtualRows.tsx — the tree is drawn through the virtualizer (see treeList).
+        .when(this.view === "search", el => el.children(this.hits?.length
+          ? this.hits.map((h, i) => h_flex().id(`hit-${i}`).h(26).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer().hover(s => s.bg(t.hover))
+              .on_click((_e, cx) => this.show(h.file, cx))
+              .child(div().flex_1().min_w(0).truncate().text_size(12).child(h.text))
+              .child(div().flex_none().text_size(11).text_color(t.dim).child(`${h.file}:${h.line}`)))
+          : []))
+        .when(this.view !== "search", el => el.child(this.treeList(t)))
+        .when(this.view !== "search", el => el.child(Scrollbar.vertical("files-rows").viewport_from_layout().absolute().inset_0()))
         // FileExplorerFilesTreePane.tsx:116-136 — with a name filter the empty state is a
         // Loader2 while the listing is pending, then "No files match this filter".
         .when(this.view === "files" && Boolean(this.name.value().trim()) && !this.nfMap && this.nfLoading, el => el.child(div().flex_1().flex().items_center().justify_center().child(svg("mods/orca-files/loader-circle.svg").size(16).flex_none().text_color(t.muted).spin(1000))))
