@@ -78,6 +78,10 @@ export default class Spaces extends View {
     // Orca startupWorktreeRefreshCompleted (startup-worktree-refresh.ts:80).
     // When cached git state exists, rows paint immediately without a loading flash.
     this.loaded = Object.keys(this.git).length > 0;
+    // Saved folders (`projects.saved.v1`) are probed once each: a path that is gone is
+    // marked, never silently dropped (the row stays, with "missing").
+    this.missingFolders = new Set();
+    this.savedChecked = new Set();
     this.pressed = null;
     // The group whose menu overlay is open: its header cluster stays visible while the
     // pointer is over the overlay instead of the header.
@@ -96,9 +100,30 @@ export default class Spaces extends View {
     this.expandedAgents = new Set(stored("agents.expanded", []));
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
+    cx.timer.every(15000, cx => { void this.checkSaved(cx); });
     // `git status` walks the whole tree, on another machine a process there:
     // only when its answer could have changed (see `due`).
     cx.timer.every(250, (cx) => this.checkNew(cx));
+  }
+
+  // A saved folder can be moved or deleted between runs. Orca keeps a project whose
+  // worktree list is gone until the person removes it, so the row says "missing" and
+  // the remove control is the only way it disappears.
+  async checkSaved(cx) {
+    const saved = stored("projects.saved.v1", []);
+    const unseen = saved.filter(folder => !this.savedChecked.has(folder));
+    if (!unseen.length) return;
+    let changed = false;
+    for (const folder of unseen) {
+      this.savedChecked.add(folder);
+      const r = await exec("test", ["-d", folder]).catch(() => null);
+      const missing = r ? r.code !== 0 : false;
+      if (missing !== this.missingFolders.has(folder)) {
+        if (missing) this.missingFolders.add(folder); else this.missingFolders.delete(folder);
+        changed = true;
+      }
+    }
+    if (changed) cx.notify();
   }
 
   checkNew(cx) {
@@ -1007,6 +1032,64 @@ export default class Spaces extends View {
     // One fetch per repo per session; `ensureAvatar` writes the file and notifies once, so the
     // next render draws the avatar instead of the Folder.
     for (const g of Object.values(this.git)) if (g?.owner) ensureAvatar(g.owner, cx);
+    // Fold saved-project rows: folders persisted in localStorage["projects.saved.v1"]
+    // that no open space's folder covers. The folder glyph + basename row opens a space
+    // in that folder; hover reveals a remove button (Orca's RepositoryRemoveProjectButton).
+    // Missing folders are marked but never deleted silently.
+    const saved = stored("projects.saved.v1", []);
+    const savedRows = saved
+      .filter(folder => !sp.some(s => s.folder && s.folder === folder || s.folder.startsWith(folder + "/")))
+      .map(folder => {
+        const basename = folder.split("/").pop() || folder;
+        const missing = this.missingFolders.has(folder);
+        // Orca project row geometry (SectionHeader.tsx:355-399; folder-row.tsx): 24px row,
+        // folder glyph + 13px name, muted hover. This is the saved-project entry.
+        return div()
+          .id(`saved-${folder}`)
+          .h(24)
+          .w_full()
+          .flex()
+          .items_center()
+          .gap(6)
+          .px(8)
+          .rounded(4)
+          .text_color(missing ? t.dim : t.muted)
+          .hover(s => s.bg(t.hover).text_color(missing ? t.dim : t.foreground))
+          .cursor_pointer()
+          .role("button")
+          .accessibility_label(missing ? `Saved project ${basename} (folder missing)` : `Open saved project ${basename}`)
+          
+          .on_click((_e, cx) => {
+            cx.spawn(async () => {
+              run("space.new", { folder });
+            });
+          })
+          .child(svg("mods/orca-spaces/folder.svg").size(14).flex_none())
+          .child(div().flex_1().truncate().text_size(13).child(basename))
+          .when(missing, el => el.child(div().flex_none().text_size(11).text_color(t.dim).child("missing")))
+          .child(div()
+            .id(`saved-remove-${folder}`)
+            .size(20)
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(4)
+            .text_color(t.dim)
+            .hover(s => s.bg("#404040b3").text_color(t.foreground))
+            .cursor_pointer()
+            .role("button")
+            .accessibility_label(`Remove saved project ${basename}`)
+            .on_click((_e, cx) => {
+              cx.stop_propagation();
+              const existing = stored("projects.saved.v1", []);
+              const filtered = existing.filter(f => f !== folder);
+              localStorage.setItem("projects.saved.v1", JSON.stringify(filtered));
+              cx.notify();
+            })
+            .child(svg("mods/orca-spaces/trash.svg").size(10)));
+      });
+
     const tool = (id, label, icon, fn, more) => tip(this.hot, t, id, label, stop(this, t, id, div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(this.hot === id ? t.foreground : t.dim).on_hover(this.glow(id)).role("button").accessibility_label(label).hover(s => s.bg(t.hover))
       .on_click(fn).child(svg(`mods/orca-spaces/${icon}.svg`).size(14))), more);
     return focusRoot(this, v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
@@ -1037,7 +1120,13 @@ export default class Spaces extends View {
             .when(this.loaded && rows.length === 0, el => el.child(div().flex().flex_col().items_center().gap(8).px(16).py(24).w_full()
               .text_size(11).text_center().text_color(t.muted)
               .child(div().child("No workspaces found"))))
-            .children(rows.length ? this.grouped(t, cx, rows) : [])))
+            .children(rows.length ? this.grouped(t, cx, rows) : [])
+            // Saved projects: folders stored in localStorage["projects.saved.v1"] that no
+            // open space's folder covers. Click → run("space.new", { folder }).
+            // Hover reveals a remove control that drops the folder from the store and notifies.
+            .when(savedRows.length > 0, el => el.child(v_flex().flex_none().w_full().mt(8).gap(4)
+              .child(div().text_size(11).text_color("#6a6a6a").child("Saved Projects"))
+              .children(savedRows)))))
         // Orca's thumb is transparent until the sidebar is hovered (`main.css:781-800`); the
         // list's `.on_hover` flips the bar to `always`, so the reveal is the same.
         .child(div().w(12).flex_none().relative()
