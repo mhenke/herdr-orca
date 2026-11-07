@@ -6,7 +6,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
-import { repoMark, tint, githubAvatarUrl, ensureAvatar } from "./project.js";
+import { repoMark, tint, parseRemote, avatarUrlFor, ensureAvatar } from "./project.js";
 import { statusMark } from "./status.js";
 import { getWorktreeCardContentIndent, getFlushWorktreeCardPaddingLeft, getWorktreeCardSurfaceInset, getFolderWorkspaceCardContentIndent, getFolderWorkspaceCardSurfaceInset, getProjectGroupHeaderPaddingLeft, WORKTREE_CARD_SURFACE_MARGIN } from "./indentation.js";
 import { tip, tipMark } from "./tip.js";
@@ -218,12 +218,33 @@ export default class Spaces extends View {
       const common = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, on });
       const repo = common.stdout.trim();
       const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
-      // Orca's RepoIconGlyph falls back to a GitHub owner avatar only when the repo has one;
-      // the origin remote is what tells us. `git remote get-url` is local and reads no config lock.
+      // Orca's RepoIconGlyph shows the fork's PARENT avatar, not the fork's own
+      // (`repo-slug-upstream.ts` getRepoUpstream, then `githubAvatarSlug` keeps origin only for
+      // a renamed fork). Both reads are local/no-op-safe: `git remote get-url` reads no lock,
+      // and `gh` is skipped entirely when the repo has no upstream and isn't a fork.
       let owner = null;
       try {
-        const url = await exec("git", ["remote", "get-url", "origin"], { cwd, on });
-        if (url.code === 0) owner = githubAvatarUrl(url.stdout.trim());
+        const origin = await exec("git", ["remote", "get-url", "origin"], { cwd, on });
+        const o = origin.code === 0 ? parseRemote(origin.stdout) : null;
+        if (o) {
+          const up = await exec("git", ["remote", "get-url", "upstream"], { cwd, on }).catch(() => null);
+          const u = up?.code === 0 ? parseRemote(up.stdout) : null;
+          let slug = u && !(u.owner === o.owner && u.repo === o.repo) ? u : null;
+          // No `upstream` remote: ask GitHub whether origin is a fork. `exec` has its own 30s
+          // cap (`gpui-kit.d.ts:22202`), so there is no per-call timeout to pass; off-machine
+          // reads are skipped because `gh` there may not be authenticated.
+          if (!slug && !on) {
+            const q = await exec("gh", ["repo", "view", `${o.owner}/${o.repo}`, "--json", "isFork,parent"], { cwd }).catch(() => null);
+            if (q?.code === 0) {
+              const d = JSON.parse(q.stdout);
+              const po = d?.parent?.owner?.login;
+              const pr = d?.parent?.name;
+              if (d?.isFork && po && pr) slug = { host: o.host, owner: po, repo: pr };
+            }
+          }
+          // A renamed fork keeps its own identity; a same-name fork shows the parent's.
+          owner = avatarUrlFor(slug && slug.repo !== o.repo ? o : (slug ?? o));
+        }
       } catch {}
       const info = { name, top: topDir, branch: null, ahead: 0, behind: 0, owner, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
       for (const line of r.stdout.split("\n")) {
@@ -592,8 +613,21 @@ export default class Spaces extends View {
           cx.notify();
         }
       })
-      .on_mouse_up("left", (_e, cx) => {
+      .on_mouse_up("left", (e, cx) => {
         if (unopened) { run("space.new", { folder: g.top, machine: w.machine ?? undefined }); cx.notify(); return; }
+        // Orca's card double-click opens the rename editor: `worktree-card-surface.tsx:98`
+        // `onDoubleClick={...handleDoubleClick}` -> `use-worktree-card-activation-actions.ts`
+        // `openModal('edit-meta', ...)` with `currentDisplayName`. Herdr's equivalent is
+        // `space.rename`, and `MouseButtonEvent.click_count` is `2` on a double-click
+        // (`gpui-kit.d.ts`, "How many presses in the current sequence") — the same field the
+        // tab strip uses. Rename replaces select, as Orca's double-click replaces its click.
+        if (e.click_count === 2) {
+          this.pressed = null;
+          this.over = null;
+          run("space.rename", { id: w.id });
+          cx.notify();
+          return;
+        }
         const from = this.pressed;
         const over = this.over;
         this.pressed = null;

@@ -32,12 +32,21 @@ const REPO_BADGE_COLOR = "#737373";
 
 // `shared/repo-icon.ts` `githubAvatarIcon`: `https://<host>/<owner>.png?size=64`, host
 // `github.com` unless a GHES host is configured, and `isSupportedImageSrc` accepts only an
-// owner-avatar path (`/^\/[^/?#]+\.png$/i`). The owner comes from the origin remote — the same
-// identity Orca resolves through `gh repoUpstream`. No remote (or no owner) means no image.
-export function githubAvatarUrl(remoteUrl) {
-  const m = String(remoteUrl ?? "").trim().match(/^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^/:]+)[/:]([^/]+)\/[^/]+?(?:\.git)?\/?$/i);
-  if (!m || !/^[A-Za-z0-9-]+$/.test(m[2])) return null;
-  return `https://${m[1].toLowerCase()}/${m[2]}.png?size=64`;
+// owner-avatar path (`/^\/[^/?#]+\.png$/i`).
+//
+// Which owner is `getRepoUpstream` in `main/github/client/fetch/repo-slug-upstream.ts`: an
+// `upstream` remote wins when it differs from origin, else `gh repo view --json isFork,parent`
+// names the fork's parent. `githubAvatarSlug` (shared/repo-icon.ts) then keeps origin only when
+// the fork was RENAMED (`origin.repo !== upstream.repo`), because a same-name fork shows the
+// parent's avatar while a renamed one keeps its own identity.
+export function parseRemote(remoteUrl) {
+  const m = String(remoteUrl ?? "").trim().match(/^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^/:]+)[/:]([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+  if (!m || !/^[A-Za-z0-9-]+$/.test(m[2]) || !m[3]) return null;
+  return { host: m[1].toLowerCase(), owner: m[2], repo: m[3] };
+}
+
+export function avatarUrlFor({ host, owner }) {
+  return /^[A-Za-z0-9-]+$/.test(owner) ? `https://${host}/${owner}.png?size=64` : null;
 }
 
 const avatarPath = (url) => `avatars/${url.replace(/[^A-Za-z0-9.-]+/g, "_")}.png`;

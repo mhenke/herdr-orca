@@ -42,6 +42,17 @@ export default class Nav extends View {
         .child(h_flex().min_w(0).items_center()
           .child(div().pl(8).pr(2).text_size(12).font_semibold().text_color("#969eaecc").child("Projects")))
         .child(h_flex().flex_none().items_center().gap(4)
+          // sidebar-header-actions.tsx:89-91 — the first of three slots is
+          // `flex size-6 shrink-0 items-center` (24x24), holding a `Button variant="ghost"
+          // size="icon-xs"` which is `size-6 rounded-md` (button.tsx:41) with a `size-3.5`
+          // SlidersHorizontal (SidebarWorkspaceOptionsMenu.tsx:66). The bell is the Agents-view
+          // toggle in SidebarHeader.tsx and is `w-8`; this slot is not.
+          // Drawn inert: Orca's menu filters/groups the worktree list, and Herdr has no filter
+          // model to drive — same convention as Tasks/Automations/Orca Mobile (RECIPE.md:50).
+          .child(div().id("proj-workspace-options").size(24).flex().items_center().justify_center().rounded(6).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
+            .role("button").accessibility_label("Workspace options")
+            .on_click(noop)
+            .child(svg("mods/orca-nav/sliders-horizontal.svg").size(14)))
           // Bell = activity view toggle, w-8 in Orca; no Herdr equivalent, so inert and honest.
           .child(div().id("proj-activity").w(32).h(24).flex().items_center().justify_center().rounded(6).text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
             .role("button").accessibility_label("View activity")
