@@ -461,6 +461,26 @@ export default class Spaces extends View {
     const now = Date.now();
     const sp = spaces(), ps = panes();
     const rows = sp.map((w, i) => ({ w, i, g: this.git[where(w, ps)] ?? null, ok: this.discoverable(w, ps) }));
+    // Orca's rows come from the repo's worktrees (`listRepoWorktrees`), not from open sessions:
+    // a repo with no space open still lists, and each of its worktrees still draws a card. We
+    // only had `spaces()` here, so a repo was invisible until you opened something in it — the
+    // panel showed one repo out of many for exactly that reason. `git.cache.v1` is already that
+    // catalog (it holds every repo we have probed, with its worktrees), and Orca hydrates its
+    // store the same way (`hydrated-worktree-purge.ts:19-31`), so seed the plan from it and let
+    // the `unopened` path below draw the cards. Keyed by the same `where()` pair the cache uses.
+    const open = new Set(sp.map((w) => where(w, ps)));
+    for (const key of Object.keys(this.git)) {
+      const g = this.git[key];
+      if (!g || open.has(key) || g.linked) continue;
+      const [on, cwd] = readPair(key);
+      rows.push({
+        w: { id: `repo:${key}`, name: g.name, named: false, tabs: [], active: false, status: null, machine: on ?? null, folder: cwd },
+        // `unopened` is what makes a card's click open a space in its folder instead of
+        // selecting one (`:1064`), and it is the flag the visibility filter keeps. A repo row
+        // has no space, so it is exactly that case.
+        i: -1, g, ok: true, unopened: true,
+      });
+    }
     // A repo worktree is one card: `linked` worktrees and second same-checkout spaces fold
     // into the first space on that top-level folder. Folder spaces merge only with themselves.
     const seen = new Set(), list = [];
