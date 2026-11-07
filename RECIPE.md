@@ -1,115 +1,201 @@
-# Recipe — Orca, by hand
+# Herdr Orca
 
-What this package builds, left to right, and why each number is what it is. Every figure below was read from Orca's renderer source, not estimated from a screenshot; the file that fixes it is named beside it.
+An Orca-like workspace for Herdr App: Orca's distinctive three-column desktop layout with a 280px left sidebar, flat terminal work area, 350px right utility panel, and 24px bottom status bar. Projects organize into collapsible groups with worktree cards carrying branch identities, agent status indicators, and main checkout badges. Flat full-bleed tabs with active underline bars route into Ghostty-dark terminal panes or a welcoming landing page, while the right activity bar switches between a full file explorer tree and Git changes.
 
-## The window
+![Herdr Orca](preview.png)
 
-```
-root (column)
-  body (row)
-    sidebar (column) 280
-      brand (block) 36
-      nav (column)
-        nav-top (block) 168     ← orca-nav
-        spaces (block) weight 1 ← orca-spaces
-      sidebar-footer (block) 32
-    work (column)
-      tabs (block) 36           ← orca-tabs
-      work-body (row)
-        main (block)            ← terminal
-        panel (column) 350
-          panel-head (block) 36 ← orca-panel-head
-          panel-body (stack) weight 1
-            files               ← orca-files
-            changes             ← orca-changes
-  status (block) 24             ← orca-status
-```
+## What you see
 
-`status` sits **outside** `body`, so the bar spans the whole window. Orca does the same: `StatusBar` is rendered by `AppRootSurfaces`, not inside a column (`AppRootSurfaces.tsx:183`).
+Left to right, divider 1px `border` (`#2e2e2e`):
 
-| Figure | Value | Source |
+- **Sidebar** (280px wide, min 220, max 500; `chrome` `#2a2a2a` background; `ui-slice-agent-actions.ts:48`, `sidebar/index.tsx:47-48`), top to bottom:
+  - **Brand bar** (36px tall, drags the window; `main.css:1086-1088` `titlebar-left`): Orca logo (16px at 75% opacity, margin `0 4px 0 10px`), followed by window drag region and 14px icon buttons (`p-4 rounded-4`; `TitlebarLeftControls.tsx`).
+  - **Nav header** (168px tall; `SidebarNav.tsx:99-130+`):
+    - Search: 28px tall button (`h-28 px-8 gap-8 rounded-6 bg-foreground/5`), 13px medium text at 60%, 16px search icon at 30% (`SidebarNav.tsx:99-116`).
+    - Navigation rows: full-width inside `px-2 pt-2 pb-1` container, `rounded-md px-2 py-1.5 text-[13px]`, inactive `foreground/60`, hover `foreground/8`. Rows: Search, Tasks, Automations, Orca Mobile with their respective 16px icons.
+    - Projects header band (32px tall, `mt-2 h-8 px-2 gap-1.5`; `SidebarHeader.tsx:61-66`): section label `Projects` (`pl-2 pr-0.5 text-xs semibold muted/80`), followed by 24px action buttons with 14px icons at stroke 2.25: Activity bell toggle (`w-8`), Add Project (`folder-plus`), Collapse All toggle (`chevrons-up-down` / `chevrons-down-up`), and New Workspace (`plus`).
+  - **Spaces & Project Groups** (flexible block, `weight: 1`):
+    - Project group headers (28px tall, `h-7 w-full gap-1.5 pr-2`; `worktree-list/rows/SectionHeader.tsx:227-340`): 16px icon slot with folder glyph (`size-4 rounded-[4px]`, glyph `size-3.5`), `text-[13px] font-semibold leading-4` repository name, and a 20px collapse chevron (`size-3.5`, `-rotate-90` when collapsed) flush right.
+    - Worktree cards (`workspace-card/surface/worktree-card-surface.tsx:56-70`): single-line 36px (`py-2`), `rounded-lg`, active wash `foreground/10` over the sidebar plus `foreground/18` border (`main.css:1514-1527`).
+      - Status lane: legacy card style (`shrink-0 flex justify-center items-start pt-[2px]`, `experimentalNewWorktreeCardStyle: false`), holding `StatusIndicator`'s 12px box around an 8px dot or spinner.
+      - Card title: 13px line with worktree or branch name. Single-line cards take 8px padding; multi-line cards with meta or agent rows take 5px/6px (`worktree-card-surface.tsx:67`).
+      - Primary badge (`identity/worktree-card-header-items.tsx:193`): `h-[16px] px-1.5 text-[10px] font-medium rounded`, `text-foreground/70 border-foreground/20 bg-foreground/[0.06]`, positioned on the repo's main checkout.
+      - Card meta: 11px line showing branch and ahead/behind counters. Nested cards add `SIDEBAR_TREE_INDENT` (18px) so the title aligns under the header label (`worktree-list/rows/indentation.ts`).
+      - Review badge: PR number mark (`#<number>`) at the right end of the meta line.
+      - Agent rows: sub-rows for each agent run under that worktree with 12px status mark and agent task label.
+  - **Sidebar footer** (32px tall; `sidebar-footer`): Settings button and machine actions, 24px icon buttons with dim icons brightening on hover.
+
+- **Work Column** (flexible area, `canvas` `#0a0a0a` background):
+  - **Tabs strip** (36px tall, drags the window; `main.css:1072-1074` `titlebar`):
+    - Sidebar toggle button: 24px icon button (`panel-left`) at the far left to collapse/expand the 280px sidebar.
+    - Tabs (`SortableTab.tsx:214`): flat tabs, `h-full px-1.5 text-xs`, active `bg-tab-active` = `--card` `#171717`, inactive = `foreground` at 4% over the card (`drop-indicator.ts:15-22`).
+    - Active indicator: full-width 2px underline at the bottom edge (`inset-x-0 bottom-0 h-[2px] bg-foreground`).
+    - Tab content: 12px icon (terminal or running agent program), tab name, and a 16px hover close button (`close.svg`).
+    - New tab button: 24px `+` button at the right end of the tab list.
+  - **Work body** (flexible row):
+    - **Main pane** (stack, active `main-terminals`):
+      - Live terminal view (`#282c34`, Ghostty Default Style Dark; `terminal-themes/defaults.ts:6-12`), 14px horizontal and 12px vertical padding, square corners (radius 0).
+      - Pane header: minimal 24px header revealing on hover (`reveal: "hover"`) with pane title, split right (`pane.split:right`), split down (`pane.split:down`), and close button.
+      - Landing view (`orca-landing`): welcome screen rendered when all tabs/spaces are closed.
+    - **Right utility panel** (350px wide, min 220, max 900; `surface` `#171717` background, 1px `border`; `startup-ui-hydration.ts:45`, `right-sidebar-width.ts:1`):
+      - Activity bar header (36px tall; `right-sidebar-top-activity-bar.tsx:40`):
+        - Activity buttons (`activity-bar-buttons.tsx:145-177`): `h-[36px] w-9` flat buttons, 16px icons. Inactive `muted-foreground/60` brightening on hover with no fill; active `foreground` plus `bottom-0 left-[25%] right-[25%] h-[2px] bg-foreground`.
+        - Buttons: Files (`folder`), Vault (`agent-session-history`), Workspaces (`workflow`), PR Checks (`list-checks`), Changes (`git-diff`, visible only in Git worktrees via Orca's `gitOnly` rule), Checks (`plug`), Ports (`plug`).
+        - Panel hide button at far right (`panel-right`).
+      - Panel body stack:
+        - Files explorer (`orca-files`): 32px filter input (`FileExplorerNameFilter.tsx:23`: `h-8 rounded-md border border-border bg-input/50 px-2`, 14px filter icon, placeholder "Find files", `text-xs`), followed by full-bleed directory tree rows (`FileExplorerRow.tsx:147-152`: `w-full gap-1 rounded-sm px-2 py-1 text-xs`, indent `depth * 16 + 8` px, per-extension file icons, git status rollup badges).
+        - Changes panel (`orca-changes`): staged/unstaged file list, diff viewer rows, commit message composer, and commit button.
+        - Vault panel (`orca-agents`): agent session history list.
+        - Stubbed panels (`orca-panel-gap`): clean empty states for secondary tabs.
+
+- **Status bar** (24px tall, `status` block outside `body`, spans the entire window width; `StatusBarSurface.tsx:121`):
+  - Height 24px, `px-3 gap-4`, top border `border`, `text-xs`.
+  - Left: Git branch badge, dirty file count, ahead/behind sync indicator.
+  - Center: Agent rollup status indicator.
+  - Right: Host machine count, update status indicator, and workspace connection state.
+
+- **Floating overlay** (`float-workspace`, anchored to bottom-end):
+  - Mod `orca-float` / `orca-pane-status`: contextual status pill or notifications overlay.
+
+### Colour and theme tokens
+
+Herdr serializes a resolved theme as one flat object mapping token names to `#rrggbb[aa]` hex strings (`settings.rs:301`). Tokens used across the layout and mods:
+
+| Token | Hex (Dark) | Orca Source & Role |
 | --- | --- | --- |
-| Sidebar width | 280 (min 220, max 500) | `ui-slice-agent-actions.ts:48`, `sidebar/index.tsx:47-48` |
-| Right panel width | 350 (min 220; this layout caps it at 900) | `startup-ui-hydration.ts:45`, `right-sidebar-width.ts:1` |
-| Top band height | 36 in all three columns | `main.css:1072-1074` (`titlebar`), `:1086-1088` (`titlebar-left`), `right-sidebar-top-activity-bar.tsx:40` |
-| Status bar | 24, `px-3 gap-4`, `border-t`, `text-xs` | `StatusBarSurface.tsx:121` |
-| App canvas | `#0a0a0a` | `main.css:336` (`--background`) |
-| Sidebar surface | `#2a2a2a` | `main.css:384` (`--worktree-sidebar`) |
-| Panel surface | `#171717` | `main.css:392` (`--sidebar`) |
-| Terminal background | `#282c34` | `terminal-themes/defaults.ts:6-12` (Ghostty Default Style Dark) |
+| `canvas` | `#0a0a0a` | `main.css:336` (`--background`), root window canvas |
+| `chrome` | `#2a2a2a` | `main.css:384` (`--worktree-sidebar`), left sidebar surface |
+| `surface` | `#171717` | `main.css:392` (`--sidebar`), right utility panel surface |
+| `background` | `#282c34` | `terminal-themes/defaults.ts:6-12` (Ghostty Default Style Dark), terminal background |
+| `border` | `#2e2e2e` | `main.css:346` (`--border`), column and divider borders |
+| `foreground` | `#ffffff` | Primary text and active icon stroke |
+| `muted` | `#8b8b8b` | Secondary text, inactive badges, file tree paths |
+| `dim` | `#5c6370` | Inactive icons, subtle indicators |
+| `selected` | `#333842` | Row active hover / selected fill |
+| `hover` | `#ffffff14` | 8% white hover fill on dark rows |
+| `working` | `#e5c07b` | Yellow/amber turning spinner for active agent turns |
+| `blocked` | `#e06c75` | Red alert glyph for agents awaiting user input/permission |
+| `done` | `#98c379` | Green checkmark for completed, unseen agent turns |
+| `idle` | `#5c6370` | Neutral grey dot for inactive agents |
 
-Sizes must be written as `"size": { "px": 36 }` (`layout.rs:81-84`, the field at `:324`). A bare `"px": 36` on the node is ignored silently — `Node` has no `px` field, so the node falls back to content size.
+A missing token paints **magenta** (`hsla(0.83, 1.0, 0.5, 1.0)` by design; `settings.rs:654-655`).
 
-## Colour
+## How it behaves
 
-A mod's `theme()` is the theme JSON `mods.rs:1049` serialises: the **resolved** theme, one flat object mapping colour names to `#rrggbb[aa]` strings (`Theme` at `settings.rs:301`). `t.canvas`, `t.muted`, `t.ansi4` — there is no nested `colors` object and no `ColorTokens` in it. (`apply_theme`, `mods.rs:1110-1131`, separately maps a fixed token list onto `gpui_base::ColorTokens` for `cx.theme()` inside native render code; that is a different view. The old note here claiming mods read it was wrong.)
+- **Agent Status Lifecycle**:
+  - Herdr rolls agent status up into four states: `working`, `blocked`, `done`, `idle` (`herdr-app/src/model.rs:528-536`).
+  - `working`: Card status lane shows an animated amber turning spinner (`spinner.svg`); tab icon shows a spinning mark; status bar displays active turn count.
+  - `blocked`: Card status lane and tab icon display an alert mark (`alert-circle.svg` / red), indicating the agent is paused for user permission or approval.
+  - `done`: Card status lane and tab icon show a green checkmark (`circle-check.svg`), indicating the agent finished its task and has not yet been reviewed.
+  - `idle`: Card status lane shows a muted grey dot.
+  - Rollup priority on worktree cards: `blocked` > `working` > `done` > `idle`. A card with three idle agents and one working agent shows `working`.
 
-`themes/<name>.json` is a palette plus overrides (`settings.rs:103-114`): top-level `background`, `foreground`, `selection`, `cursor` (optional) and exactly sixteen `ansi` entries, each `#rrggbb`; optional `colors` map, each value `#rrggbb` or `#rrggbbaa` (`settings.rs:190-215`). The struct denies unknown fields, so any other top-level key makes the theme fail to parse (`settings.rs:105`).
+- **Sidebar & Project Navigation**:
+  - Clicking a worktree card selects that workspace (`space.select`). If the worktree has no open Herdr space, clicking opens a space at that folder (`space.new {folder}`).
+  - Double-clicking a card initiates space rename.
+  - Right-clicking a card opens the 208px context menu (`mods/orca-menu/main.js`): Rename, Copy Path, Copy Worktree Name, Open in Terminal (`terminal.open {folder}`), New Worktree, Remove Worktree, Close Space.
+  - Right-clicking a project header opens the 176px project menu: New Workspace, Open Folder, Remove Project.
+  - Clicking the Collapse All button (`ProjectsCollapseAllButton.tsx:51`) toggles folding across all project groups: glyph alternates between `chevrons-up-down` and `chevrons-down-up`.
+  - Clicking an individual project header toggles fold state for that repository.
+  - Clicking Search opens Herdr's workspace command palette (`openOverlay` with `palette`).
+  - Clicking `+` in the projects header opens the 288px `new-menu` dropdown: New Terminal, New Agent Session, Open Folder, Create Worktree.
 
-`resolve` turns the palette into names (`settings.rs:306-363`): `background`, `terminal_foreground`, `foreground`, `surface`, `canvas`, `chrome`, `popover`, `raised`, `hover`, `selected`, `border`, `input`, `muted`, `dim`, `accent`, `accent_foreground`, `solid`, `solid_foreground`, `ring`, `selection`, `cursor`, `working`, `blocked`, `done`, `idle`, `unknown` (`settings.rs:326-352`), plus `ansi0`…`ansi15` (`:357-358`). The file's `colors` map is inserted last (`:360-362`), so it replaces any of those names and adds new ones — that is how `extras/themes/orca-dark.json` carries Orca's greys.
+- **Tabs Interaction**:
+  - Clicking a tab selects it (`tab.select`).
+  - Double-clicking a tab renames it.
+  - Clicking `×` on a tab closes it (`tab.close`). Middle-clicking a tab also closes it.
+  - Right-clicking a tab opens the 208px tab context menu (`SortableTabContextMenu.tsx:155`): Split Right (`pane.split:right`), Split Down (`pane.split:down`), Copy Tab ID, Close (`tab.close`), Close Others.
+  - Clicking the sidebar toggle button (`panel-left`) collapses or expands the 280px sidebar without resetting tab state.
+  - Clicking `+` at the end of the tabs strip opens a new terminal tab (`tab.new`).
 
-A name that does not exist paints **magenta** by design, `hsla(0.83, 1.0, 0.5, 1.0)` (`settings.rs:654-655`). Magenta on screen is a misspelt token, not a styling bug.
+- **Work Area & Panes**:
+  - Hovering a terminal reveals the 24px floating pane header (`mods/orca-pane/main.js`) with terminal title, split buttons (`pane.split`), zoom toggle (`pane.zoom`), and close button (`pane.close`).
+  - When all tabs and spaces are closed, the center area switches to `orca-landing` with quick start actions.
 
-The terminal's background is the resolved `background` name (`vt.rs:72`). The theme file's top-level `background` seeds it (`settings.rs:327`), so `extras/themes/orca-dark.json` paints the terminal `#282c34` (`terminal-themes/defaults.ts:6-12`, Ghostty Default Style Dark, Orca's default) — distinct from the chrome `#0a0a0a` (`main.css:336`). A `colors.background` entry overrides the name, because the `colors` map is inserted last (`:360-362`); neither theme in `extras/themes/` changes the terminal background.
+- **Right Utility Panel Interaction**:
+  - Clicking any activity button in the 36px header switches the active stack child (`files`, `changes`, `vault`, etc.).
+  - Clicking the active activity button or the panel-right close button toggles the entire 350px panel between visible and hidden.
+  - Files explorer: clicking a folder row toggles expansion; clicking a file opens it; typing in the filter input debounces and filters file tree rows in real time.
+  - Changes explorer: clicking files stages or unstages them (`git add` / `git restore --staged`); typing into the composer and clicking commit runs `git commit -m`.
 
-The layout names its theme as a string or a `{ "light": …, "dark": … }` pair (`layout.rs:176-183`); `layouts/orca.json` says `"theme": "orca-dark"`. The name resolves to `themes/<name>.json` (`settings.rs:180-188`).
+- **Keyboard Navigation**:
+  - Configured in `keys.json` under `layout:orca`.
+  - Context menus support keyboard navigation: Up/Down arrows to move selection, Enter or Space to invoke, Home/End for first/last row, Escape to dismiss.
 
-## Left column — `orca-nav`, `orca-spaces`, `orca-chrome`
+## Built from
 
-- **Search** (`SidebarNav.tsx:99-116`) is a *button*, not an input: `openModal('worktree-palette')`. It is drawn as `h-28 px-8 gap-8 rounded-6 bg-foreground/5`, text 13 medium at 60%, icon 16 at 30%. Here it opens Herdr's palette.
-- **Nav rows** (`SidebarNav.tsx:130+`) are full-width inside a `px-2 pt-2 pb-1` container, `rounded-md px-2 py-1.5 text-[13px]`, inactive `foreground/60`, hover `foreground/8`. Tasks, Automations and Orca Mobile have no Herdr backing, so they are drawn and inert — stated, not hidden.
-- **Projects header** (`SidebarHeader.tsx:61-66`) is `mt-2 h-8 px-2 gap-1.5`; the title is `pl-2 pr-0.5 text-xs semibold muted/80`; actions are `gap-1` of `icon-xs` (24px) buttons with 14px icons at stroke 2.25. Three exist in Orca: a Bell activity toggle (`w-8`), `folder-plus` Add project, `plus` New workspace.
-- **Project rows** are two tiers, as in Orca.
-  - **Header** (`worktree-list/rows/SectionHeader.tsx:227-340`): `h-7 w-full gap-1.5 pr-2`, a 16px icon slot (`size-4 rounded-[4px]`, glyph `size-3.5`), a `text-[13px] font-semibold leading-4` label, and a `size-5 rounded-md` collapse chevron (`size-3.5`, `-rotate-90` when collapsed) that appears whenever the group has rows. The whole header toggles collapse; only the chevron takes a hover fill (`hover:bg-accent/70`).
-  - **Card** (`workspace-card/surface/worktree-card-surface.tsx:56-70`): `ml-1`, single-line `py-2` (36px), `rounded-lg`, active wash `foreground/10` over the sidebar plus a `foreground/18` border (`main.css:1514-1527`). The leading element is a **status lane**, legacy card style (the shipped default: `experimentalNewWorktreeCardStyle: false`) — `shrink-0 flex justify-center items-start pt-[2px]`, no fixed width, holding `StatusIndicator`'s `h-3 w-3` box around an 8px dot. The color follows the host's rollup (`working | blocked | done | idle`), so read `space.status` / `agent.status` rather than re-deriving it.
-  - **Primary badge** (`identity/worktree-card-header-items.tsx:193`): `h-[16px] px-1.5 text-[10px] font-medium rounded`, `text-foreground/70 border-foreground/20 bg-foreground/[0.06]`, on the main checkout.
-  - Card titles carry the worktree/branch; the project name lives once in the header. Nested cards add `SIDEBAR_TREE_INDENT` (18) so the title lands under the header label (`worktree-list/rows/indentation.ts`).
-- **Brand bar** (`TitlebarLeftControls.tsx`) uses a 16px logo at `opacity .75` with `margin 0 4px 0 10px`, then 14px icon buttons at `p-4 rounded-4` (`.titlebar-logo`, `.titlebar-icon-button`).
+- `layouts/orca.json` node tree:
+  - Root `column`, `titlebar: "none"`, `traffic_lights: [12, 16]`, `background: "canvas"`, `theme: "orca-dark"`, `divider: { width: 1, color: "border" }`.
+  - `body` row with `floating: [{ id: "float-workspace", content: { mod: "orca-float" }, edge: "bottom", align: "end" }]`:
+    - `sidebar` column (`px: 280`, min 220, max 500, `background: "chrome"`):
+      - `brand` block (`px: 36`, `window_drag: true`, mod: `orca-chrome`).
+      - `nav` column: `nav-top` (`px: 168`, mod: `orca-nav`), `spaces` (`weight: 1`, mod: `orca-spaces`).
+      - `sidebar-footer` block (`px: 32`, mod: `orca-chrome`, props: `{ "footer": true }`).
+    - `work` column:
+      - `tabs` block (`px: 36`, `window_drag: true`, mod: `orca-tabs`).
+      - `work-body` row:
+        - `main` stack (`active: "main-terminals"`): `main-terminals` (`tab: "active"`, pane header: `orca-pane`), `main-landing` (`orca-landing`).
+        - `panel` column (`px: 350`, min 220, max 900, `background: "surface"`):
+          - `panel-head` (`px: 36`, mod: `orca-panel-head`).
+          - `panel-body` stack (`active: "files"`): `files` (`orca-files`), `vault` (`orca-agents`), `workspaces` (`orca-panel-gap`), `pr-checks` (`orca-panel-gap`), `changes` (`orca-changes`), `checks` (`orca-panel-gap`), `ports` (`orca-panel-gap`).
+  - `status` block (`px: 24`, mod: `orca-status`).
 
-## Middle column — `orca-tabs`
+- **Mods**:
+  - `mods/orca-chrome`: Window drag, Orca logo, and sidebar footer controls.
+  - `mods/orca-nav`: Search launcher button and top navigation items.
+  - `mods/orca-spaces`: Project section headers, worktree cards, primary badge, status rollups, collapse all.
+  - `mods/orca-tabs`: Flat tabs strip with 2px underline indicator and sidebar toggle.
+  - `mods/orca-pane`: Minimal 24px hover terminal header with split controls.
+  - `mods/orca-landing`: Clean landing page when no spaces/terminals are open.
+  - `mods/orca-panel-head`: 36px activity bar header for switching right panel tools.
+  - `mods/orca-files`: File explorer tree with file-type icons, git badges, and name filter.
+  - `mods/orca-changes`: Git diff review, staging list, and commit message composer.
+  - `mods/orca-agents`: Agent session history list.
+  - `mods/orca-panel-gap`: Clean placeholder views for unopened secondary tabs.
+  - `mods/orca-status`: 24px bottom status bar spanning the full window width.
+  - `mods/orca-menu`: 208px / 176px context menu overlay for cards, spaces, and tabs.
+  - `mods/new-menu`: 288px create dropdown overlay for creating terminals and worktrees.
+  - `mods/orca-float` & `mods/orca-pane-status`: Floating bottom-right status pill overlay.
 
-Tabs are flat, not pills: `h-full px-1.5 text-xs` (`SortableTab.tsx:214`), active `bg-tab-active` = `--card` `#171717`, inactive = `foreground` at 4% over the card (`drop-indicator.ts:15-22`), and the active indicator is `inset-x-0 bottom-0 h-[2px]`, full width, not an inset bar.
+- **Herdr commands & APIs**:
+  - Navigation & spaces: `layout.switch`, `layout.resize`, `space.select`, `space.new`, `space.rename`, `space.close`.
+  - Tabs & panes: `tab.select`, `tab.new`, `tab.close`, `pane.focus`, `pane.split`, `pane.close`, `pane.zoom`.
+  - Terminals & agents: `agent.focus`, `terminal.open`, `terminal.copy`, `terminal.paste`.
+  - Overlays & system: `openOverlay`, `closeOverlay`, `notify`, `exec`, `readTextFile`, `writeTextFile`, `watchFolder`.
 
-The sidebar toggle lives here, outside the sidebar, because Orca's sits in the titlebar (`TitlebarLeftControls.tsx`). Hiding the sidebar must never remove the only way to bring it back.
+- **External programs executed**:
+  - `git worktree list --porcelain`, `git status --porcelain=v1`, `git rev-parse --show-toplevel --git-common-dir`, `git branch --show-current`, `git diff`, `git add`, `git commit`. All git invocations pass `--no-optional-locks -c core.fsmonitor=false`.
+  - `gh pr view` / read-only cached GitHub REST checks via background worker.
 
-## Right column — `orca-panel-head`, `orca-files`, `orca-changes`
+- **Art & assets**:
+  - Lucide SVG icons in each mod folder (at stroke 2.25 and 1.75).
+  - Preview vector `layouts/orca.svg` and raster screenshot `preview.png`.
+  - Theme files: `extras/themes/orca-dark.json` and `extras/themes/orca-light.json`.
 
-- **Activity bar** (`activity-bar-buttons.tsx:145-177`): `h-[36px] w-9` flat buttons, icon 16, inactive `muted-foreground/60` brightening on hover with **no fill**, active `foreground` plus `bottom-0 left-[25%] right-[25%] h-[2px] bg-foreground`. Changes is hidden outside a git work tree, which is Orca's `gitOnly` rule.
-- **File filter** (`FileExplorerNameFilter.tsx:23`): `h-8 rounded-md border border-border bg-input/50 px-2`, `ListFilter` at 14px, placeholder **Find files**, `text-xs`. The inner input must be transparent and the row clipped, or it paints square corners over the container.
-- **Tree rows** (`FileExplorerRow.tsx:147-152`): `w-full gap-1 rounded-sm px-2 py-1 text-xs`, indent `depth * 16 + 8`. Rows are full-bleed — without `w_full()` the hover fill stops at the label instead of the column edge.
-- **Dropdown/menu rows** (`dropdown-menu.tsx:115`): `gap-2 rounded-md px-2.5 py-1 text-[13px] leading-4`, hover `white/14` in dark.
+## Watch out
 
-## Why the mods are clones
+- **Status bar layout**: The `status` block must sit *outside* `body` as a direct child of `root`. Placing it inside `body` cuts it off at the sidebar edge; Orca renders the status bar in `AppRootSurfaces`, spanning the whole screen width (`AppRootSurfaces.tsx:183`).
+- **Node size schema**: Sizes must be specified as `"size": { "px": 36 }` or `"size": { "weight": 1 }` (`layout.rs:81-84`). A bare `"px": 36` on a layout node is silently ignored and causes the block to collapse to content size.
+- **Context lifetime (`cx`)**: GPUI-kit contexts live only during the callback that delivered them (`scope.rs:419-422`). Never store `this.cx = cx` or capture `cx` across `setTimeout` / `setInterval`. Use `cx.timer.after`, `cx.timer.every`, or `cx.spawn`, taking `cx` directly from the callback arguments. Captured contexts trigger a render failure that paints an orange bar across the pane.
+- **Mod isolation**: Herdr mods cannot resolve assets outside their own directory. `svg()` and `image()` resolve relative to `appHome/mods/<mod>/`. Every mod must carry its own local copies of required SVGs.
+- **Worktree identity**: `isMainWorktree` is positional, not nominal (`!linked`, determined by checking whether the worktree directory matches the git common dir; `parseWorktreeList`). Exactly one primary badge exists per repository. Cards must be keyed by worktree path (`JSON.stringify([machine, worktreePath])`), not by Herdr space ID, because multiple spaces can target the same worktree.
+- **Git locking & file watch**: Always pass `--no-optional-locks -c core.fsmonitor=false` on every Git command. Touching `.git/index` wakes Herdr's folder watcher in an infinite loop.
+- **Async caching**: `setShared` updates shared storage but does not trigger reactive notifications; prefer module-scoped memory caches paired with `cx.notify()`.
+- **PR review lookups**: Never query `gh` synchronously during render. The reader reads from `localStorage` cached data; a background worker updates the cache periodically.
+- **Deliberate omissions**:
+  - Checks panel: omitted pending dedicated GitHub workflow mod.
+  - Dialog frames: Herdr draws overlay frames natively; mods suppress with `frame: "none"` but cannot restyle the window borders.
+  - Worktree pin/unpin: Herdr's `terminal.pin` pins a terminal, not a worktree.
+  - Mobile remote sync and cloud VMs: Orca-specific cloud infrastructure has no counterpart in Herdr.
 
-Herdr replaces shipped mods on every start, so a clone is a snapshot. Every mod here is prefixed `orca-` and the layout references **only** `orca-*` names: Herdr filters a layout out of the layout list if it names a mod folder that isn't installed (`missing_mods`, `window.rs:172,212`). `orca-pane` exists for that reason — it is the shipped `pane` header, copied, so the center column has no external dependency.
+## Done when
 
-Icons are copied into each mod that uses them. A mod cannot read outside its own folder, so a shared `mods/workspace-chrome/search.svg` path would break on a clean install.
-
-## After a Herdr upgrade
-
-Re-clone the shipped mods these folders started from — `pane`, `tabs`, `files`, `menu` and `spaces` (`orca-spaces` from herdr-t3's `t3-spaces`) — and re-apply the diffs described above. Do not hand-merge: the point of the clone is that the diff stays small enough to redo.
-
-## What is deliberately not ported
-
-| Orca | Why not |
-| --- | --- |
-| Checks panel | Needs a new mod over `gh`; a separate decision |
-| Dialogs' frame | Herdr draws overlay frames itself; a mod can suppress (`frame: "none"`) but not restyle them |
-| Project → branch → agent nesting | Herdr's model is space → tab → pane |
-| Worktree pin/unpin | `terminal.pin` pins a terminal, not a worktree |
-| Orca Mobile, remote servers, cloud VMs, Sleep | Different product, no equivalent |
-
-## Applying it
-
-```sh
-sh scripts/sync.sh
-herdr-app do layout.switch '{"name":"orca"}'
-```
-
-`sync.sh` copies `layouts/orca.json` and `layouts/orca.svg`, every `extras/themes/*.json`, and every `mods/orca-*/` folder into `$HERDR_APP_HOME` (`~/.config/herdr-app` by default), deleting each destination mod folder first. It merges `keys.json` by section: a binding in this package's sections replaces the same keystroke in the person's file, and every other key and section is left alone (`scripts/sync.sh`). It never writes `settings.json`.
-
-A key section is named `layout:<layout name>`: the window's key context is `Herdr layout = <name>` (`window.rs:4859`) and `keys.rs:118-125` builds `layout == <name>` from the suffix. This package therefore needs `layout:orca` for `layouts/orca.json`.
-
-Nothing needs a restart. `layout.switch` replaces the chrome in the running window (`window.rs:964-1000`); the shown layout file is re-read when it changes (`window.rs:1002-1034`); an edited mod hot-reloads (`window.rs:3872-3884`); and a new mod folder is found by the recursive watch of `mods/` (`window.rs:3891-3920`, `files.rs:15-33`). If the app is not running, start it after the sync; it opens the layout that `layout.switch` saved.
-
-Settings that belong to the person — fonts, sounds — are documented, never written.
+- `herdr-app check` passes on all `mods/orca-*` and `mods/new-menu`.
+- `python3 scripts/verify.py` passes with 0 citation errors, syntax ok, and 0 missing assets.
+- `layout.switch {"name": "orca"}` loads cleanly in Herdr App with no error banner or blank panes.
+- Three columns render at 280px (sidebar), flexible center (work), and 350px (panel), with 24px status bar spanning the full window bottom.
+- Project groups render folder headers, collapse/expand all toggles worktree lists, and main checkouts display the `primary` badge.
+- Worktree cards show rolled-up agent status marks (`working`, `blocked`, `done`, `idle`).
+- Tabs render flat with full-bleed 2px active bottom underline indicator and working sidebar toggle button.
+- Right utility panel activity bar switches between Files tree and Changes git staging.
+- Space and tab right-click context menus open at proper widths with working keyboard and mouse actions.

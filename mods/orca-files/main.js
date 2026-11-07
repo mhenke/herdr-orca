@@ -565,7 +565,12 @@ export default class Files extends View {
   render(cx) {
     // A task's error is reported, not thrown into the paint: a failed refresh
     // must never replace the pane with the shell's "could not be re-rendered" bar.
-    if (key() !== this.context?.key) cx.spawn((cx) => this.refresh(cx));
+    //
+    // `cx.spawn` runs its body immediately up to the first `await` (scheduler.rs:582 `body.call`),
+    // and `refresh()` calls `cx.notify()` before it awaits anything — so spawning it here ran a
+    // notify inside the render phase, which the engine refuses. A timer runs after the frame, so
+    // the refresh lands in the task phase where notify is allowed.
+    if (key() !== this.context?.key) cx.timer.after(0, (cx) => this.refresh(cx));
     const t = theme();
     if (this.prompt) return this.promptView(t);
     if (props()?.tab === "file") return this.menuView(t);

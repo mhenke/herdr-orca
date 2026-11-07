@@ -270,7 +270,9 @@ export default class Changes extends View {
   render(cx) {
     // A task's error is reported, not thrown into the paint: a failed refresh
     // must never replace the pane with the shell's "could not be re-rendered" bar.
-    if (key() !== this.context) cx.spawn((cx) => this.refresh(cx));
+    // Deferred off the frame for the same reason as `orca-files`: a spawn body runs immediately
+    // up to its first `await`, and calling into a view from render invites the same refusal.
+    if (key() !== this.context) cx.timer.after(0, (cx) => this.refresh(cx));
     const t = theme(), action = this.primaryAction();
     // Orca pins conflicts first, then applies the group order (default changes-first):
     // listing/source-control-section-order.ts:121-142, source-control-group-order.ts:3-5. A fourth
