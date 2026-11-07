@@ -96,9 +96,11 @@ export default class FloatWorkspace extends View {
     const h = Math.min(DEFAULT_HEIGHT, Math.max(MIN_HEIGHT, vp.height - 96));
     // Orca's first empty-state row, New Terminal (`FloatingTerminalEmptyState.tsx:44-59`),
     // creates float content, which a mod cannot instantiate. The closest working action is
-    // `tab.new` (commands.rs:37-39), so the row opens a terminal tab in the workspace instead.
-    // New Markdown / New Browser are not offered: Herdr has neither content type.
-    const chord = (keys() ?? []).find((k) => k.action === "tab.new")?.keys ?? "";
+    // `tab.new` (commands.rs:37-39), so the row opens a terminal tab in the workspace and
+    // hides the float, which would otherwise cover it. New Markdown / New Browser are not
+    // offered: Herdr has neither content type.
+    const chordOf = (action) => (keys() ?? []).find((k) => k.action === action)?.keys ?? "";
+    const newTabChord = chordOf("tab.new"), toggleChord = chordOf("orca-float.toggle");
     // Its fifth row, Minimize (`:120-129`, `onClose`), is the header ×'s hide, so it is kept.
     // The first row is the empty message: Orca has no such row, but a list with nothing in it
     // has to say so.
@@ -107,6 +109,13 @@ export default class FloatWorkspace extends View {
         .child(h_flex().h(32).w_full().px(12).gap(10).rounded(6).items_center()
           .child(div().flex_none().opacity(0.9).text_color(t.foreground).child(svg("mods/orca-float/terminal-square.svg").size(14)))
           .child(div().min_w(0).truncate().text_size(14).line_height("14px").text_color(t.foreground).child("No live agent sessions")))
+        .child(h_flex().id("orca-float-new").h(32).w_full().px(12).gap(10).rounded(6).items_center()
+          .cursor_pointer().hover((s) => s.bg(t.hover))
+          .role("button").accessibility_label("New terminal")
+          .on_click((_e, cx) => { run("tab.new"); this.open = false; cx.notify(); })
+          .child(div().flex_none().opacity(0.9).text_color(t.foreground).child(svg("mods/orca-float/terminal-square.svg").size(14)))
+          .child(div().flex_1().min_w(0).truncate().text_size(14).line_height("14px").text_color(t.foreground).child("New Terminal"))
+          .when(Boolean(newTabChord), (el) => el.child(div().flex_none().text_size(10).line_height("12px").opacity(0.9).text_color(t.foreground).child(newTabChord))))
         // `ShortcutKeyCombo` (`:135-152`) draws the chord as keycaps; the chord text alone
         // carries the same hint without a second chrome component.
         .child(h_flex().id("orca-float-minimize").h(32).w_full().px(12).gap(10).rounded(6).items_center()
@@ -115,7 +124,7 @@ export default class FloatWorkspace extends View {
           .on_click((_e, cx) => { this.open = false; cx.notify(); })
           .child(div().flex_none().opacity(0.9).text_color(t.foreground).child(svg("mods/orca-float/minus.svg").size(14)))
           .child(div().flex_1().min_w(0).truncate().text_size(14).line_height("14px").text_color(t.foreground).child("Minimize"))
-          .when(Boolean(chord), (el) => el.child(div().flex_none().text_size(10).line_height("12px").opacity(0.9).text_color(t.foreground).child(chord)))));
+          .when(Boolean(toggleChord), (el) => el.child(div().flex_none().text_size(10).line_height("12px").opacity(0.9).text_color(t.foreground).child(toggleChord)))));
     return v_flex().id("orca-float").w(w).h(h).min_h(0).overflow_hidden().text_color(t.foreground)
       // Orca's floating title bar (`FloatingTerminalPanelSurface.tsx:116-117`): `h-9`
       // (36px), `border-b border-border`, over the float frame's card colour. Of its
