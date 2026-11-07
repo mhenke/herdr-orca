@@ -2,6 +2,16 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { spaces, panes, exec, run, openOverlay, theme, window, shared, layout, settings, setShared } from "herdr";
 
+// `src/shared/agent-status/title/agent-title-decoration.ts`: the tab already shows the
+// provider icon, so a known agent's own leading status glyph is dropped. Glyph-only titles
+// keep the original rather than rendering a blank label.
+const LEADING_AGENT_TITLE_DECORATION_RE =
+  /^(?:[\u2733\u2726\u23F2\u25C7\u270B\u25B2\u2800-\u28FF\u25D0-\u25D3]+|[.*]\s)\s*/;
+function stripLeadingAgentTitleDecoration(title) {
+  const stripped = String(title ?? "").replace(LEADING_AGENT_TITLE_DECORATION_RE, "").trimStart();
+  return stripped.length > 0 ? stripped : title;
+}
+
 function find(node, id) {
   if (node?.id === id) return node;
   for (const child of node?.children ?? []) {
@@ -60,6 +70,8 @@ export default class Tabs extends View {
     const item = (c, i) => {
       const program = panes().find(p => p.tab === c.id && p.program?.agent)?.program ?? panes().find(p => p.tab === c.id)?.program;
       const name = /^tb\d+$/.test(c.name) ? program?.name ?? "Terminal" : c.name;
+      // SortableTab.tsx:130 — displayTitle = customTitle ?? (tabAgent ? strip(title) : title).
+      const label = program?.agent ? stripLeadingAgentTitleDecoration(name) : name;
       // Orca's tab: flat, full height, no pill. Active = card bg + a 2px bar under it.
       // SortableTab.tsx:214 + drop-indicator.ts:15 — h-full px-1.5 text-xs; active bg-tab-active
       // (--card #171717), inactive = foreground 4% over card, 2px full-width active indicator.
@@ -76,7 +88,7 @@ export default class Tabs extends View {
         })
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: { id: c.id, space: space.id } } }); })
         .when(Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
-        .child(div().max_w(170).truncate().child(c.zoomed ? `${name} Z` : name))
+        .child(div().max_w(170).truncate().child(c.zoomed ? `${label} Z` : label))
         .when(c.status === "working", el => el.child(svg("mods/orca-tabs/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
         .when(c.status === "blocked" || c.status === "done", el => el.child(div().size(6).rounded(3).bg(t[c.status])))
         .when(c.active, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/orca-tabs/close.svg").size(12))));
