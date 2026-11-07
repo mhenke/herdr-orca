@@ -259,8 +259,9 @@ export default class Spaces extends View {
       placed.add(r.g.repo);
       const kids = list.filter((k) => nested(k) && k.g.repo === r.g.repo);
       top.kids = kids.length;
-      const folded = this.foldedRepos.has(r.g.repo);
-      kids.forEach((k, n) => out.push({ ...k, folded, tree: n === kids.length - 1 ? "└─" : "├─" }));
+      // Not filtered here: `row()` hides a folded repo's cards so its header stays, which is
+      // what a fold means. Filtering here too made the whole group disappear.
+      kids.forEach((k, n) => out.push({ ...k, tree: n === kids.length - 1 ? "└─" : "├─" }));
     }
     // space.next/prev and ctrl-N follow the model, so it keeps the rows' order, folded rows included: folding moves nothing.
     // Simulate the batch so later indexes include earlier moves. An attempted write can lose a sync conflict: let its echo settle before retrying.
@@ -281,7 +282,7 @@ export default class Spaces extends View {
       }
       this.ordering.machines = [...moved];
     }
-    return out.filter(r => this.shown.has(r.w.id) && !r.folded);
+    return out.filter(r => this.shown.has(r.w.id));
   }
 
   toggleRepo(repo, cx) {
@@ -377,13 +378,10 @@ export default class Spaces extends View {
   // Only what's unusual, after the name: "herdr \u00b7 spike \u21912 \u21931". The repo or
   // branch goes when the name already says it (a worktree is named after its branch),
   // and master/main go: nearly every space is on one.
-  gitTail(g, tree, name, t, id) {
+  // Only the counts that can't be seen elsewhere, after the title: ahead/behind. The branch
+  // and repo are the meta row and the header now, so repeating them here drew them twice.
+  gitTail(g, t, id) {
     const n = (count, what) => `${count} commit${count === 1 ? "" : "s"} to ${what}`;
-    const raw = g.branch ?? "detached";
-    const same = (a) => a.toLowerCase() === name.toLowerCase();
-    const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
-    const repo = tree || same(g.name) ? "" : g.name;
-    const where = [repo, branch].filter(Boolean).join(" \u00b7 ");
     return h_flex()
       .flex_1()
       .min_w(0)
@@ -392,29 +390,30 @@ export default class Spaces extends View {
       .items_center()
       .text_size(11)
       .text_color(t.dim)
-      .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
       .when(g.ahead > 0, (el) => el.child(tipMark(this, t, `ahead-${id}`, n(g.ahead, "push"), div().text_color(t.ansi2).child(`\u2191${g.ahead}`))))
       .when(g.behind > 0, (el) => el.child(tipMark(this, t, `behind-${id}`, n(g.behind, "pull"), div().text_color(t.ansi1).child(`\u2193${g.behind}`))));
   }
 
   // Orca's project header (SectionHeader.tsx): h-7, gap-1.5, pr-2, a 16px icon slot, a 13px
   // semibold label, and a 20px collapse button. The header owns the fold; its cards hide under it.
-  header({ w, g, kids }, t, ps) {
-    const folded = kids > 0 && this.foldedRepos.has(g.repo);
+  header({ w, g }, t, ps) {
+    // A folder workspace folds by its own id: there is no repo to key it on.
+    const key = g?.repo ?? `space:${w.id}`;
+    const folded = this.foldedRepos.has(key);
     const id = `space-head-${w.id}`;
     return stop(this, t, id, h_flex()
       .id(id)
       .h(28).flex_none().w_full().pl(10).pr(8).gap(6).items_center().mt(4)
-      .role("button").accessibility_label(g.name)
+      .role("button").accessibility_label(g?.name ?? w.name)
       .on_mouse_down("right", () => this.menu(w))
-      .on_click((_e, cx) => this.toggleRepo(g.repo, cx))
+      .on_click((_e, cx) => this.toggleRepo(key, cx))
       .child(projectMark(w, 16, t, ps))
-      .child(div().min_w(0).flex_1().truncate().text_size(13).font_semibold().line_height("16px").text_color(t.foreground).child(g.name))
+      .child(div().min_w(0).flex_1().truncate().text_size(13).font_semibold().line_height("16px").text_color(t.foreground).child(g?.name ?? w.name))
       // As Orca's: aria-hidden, the whole header folds, so it lights with the header and has no label.
       .child(div().id(`space-fold-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
         .text_color(t.dim).hover((s) => s.bg("#f0f0f0b3"))
         .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(14).flex_none())), 6,
-      { enter: () => this.toggleRepo(g.repo) });
+      { enter: () => this.toggleRepo(key) });
   }
 
   // Orca's worktree card (worktree-card-surface.tsx): ml-1, py-2 (36px single line), rounded-lg,
@@ -486,7 +485,7 @@ export default class Spaces extends View {
             .child(div().min_w(0).max_w(150).truncate().text_size(13).line_height("20px").text_color(t.foreground).child(title))
             .when(g && !g.linked, el => el.child(div().flex_none().h(16).px(6).rounded(4).border_1().border_color("#f0f0f033").bg("#f0f0f00f")
               .text_size(10).font_medium().line_height("14px").text_color("#f0f0f0b3").child("primary")))
-            .child(g ? this.gitTail(g, tree, title, t, w.id) : div().flex_1()))
+            .child(g ? this.gitTail(g, t, w.id) : div().flex_1()))
           // Meta row: the branch, 11px muted, as Orca's Branch part.
           .when(Boolean(meta), el => el.child(div().min_w(0).truncate().text_size(11).line_height("11px").text_color(t.dim).child(meta)))
           // Agent rows sit inside the card and light when it is active, as Orca's inlineAgents.
@@ -498,16 +497,14 @@ export default class Spaces extends View {
       8, { enter: () => run("space.select", { id: w.id }) });
   }
 
-  // A repo draws its header, then its cards; a folder space is one card on its own.
+  // Every top-level space is a project: a header, then its cards. A linked worktree hangs
+  // under the card its main checkout leads, so it draws no second header.
   row(r, t, ps) {
-    const out = [];
-    if (r.g && !r.g.linked) {
-      out.push(this.header(r, t, ps));
-      if (!(r.kids > 0 && this.foldedRepos.has(r.g.repo))) out.push(this.card(r, t, ps));
-    } else {
-      out.push(this.card(r, t, ps));
-    }
-    return out;
+    if (r.g?.linked) return [this.card(r, t, ps)];
+    // Orca folds a whole repo (SectionHeader's toggle hides every row of the group),
+    // so the header hides its own card too and the chevron is never a dead control.
+    const folded = this.foldedRepos.has(r.g?.repo ?? `space:${r.w.id}`);
+    return [this.header(r, t, ps), ...(folded ? [] : [this.card(r, t, ps)])];
   }
 
   render() {
