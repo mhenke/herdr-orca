@@ -80,14 +80,8 @@ export default class Spaces extends View {
       }
     });
     // where() -> { name, branch, owner, repo, linked }, null: not a repo.
-    //
-    // Seeded from the last session, like Orca's persisted worktree store: its sidebar paints
-    // from hydrated state and lets the refresh purge what is stale
-    // (`hydrated-worktree-purge.ts:19-31`, purge log at `:92`). Starting from `{}` is why a
-    // launch here showed "Loading workspaces…" and then rebuilt every card; with the last
-    // answer in hand the first paint is the finished list, and the refresh only corrects it.
-    // A recorded repo path is re-checked by key on the first pass, so a stale entry shows for
-    // one tick at most; `null` (not a repo) is kept too, so plain folders never re-ask.
+    // Seeded from the last session, matching Orca's persisted worktree store
+    // (hydrated-worktree-purge.ts:19-31). Rows paint from cached state while refresh runs.
     this.git = stored("git.cache.v1", {});
     // Orca keeps reviews out of the worktree row: `buildWorkspaceReviewFacts` reads a
     // persisted cache keyed `repo::branch` (`getGitHubPRCacheKeyCandidates`) and the card
@@ -105,10 +99,8 @@ export default class Spaces extends View {
     this.ready = {}; // machine -> its layout was readable at the last look
     this.at = {}; // space -> its where() at the last look
     this.watching = new Set(); // local repos' git folders
-    // Orca's `startupWorktreeRefreshCompleted` (`startup-worktree-refresh.ts:80`). With hydrated
-    // rows the list is already correct at first paint, exactly as Orca's is — it draws from the
-    // persisted store and never shows an empty panel while refreshing. The gate only has to
-    // suppress rows when there is nothing to draw, so a cold cache is the only "loading" case.
+    // Orca startupWorktreeRefreshCompleted (startup-worktree-refresh.ts:80).
+    // When cached git state exists, rows paint immediately without a loading flash.
     this.loaded = Object.keys(this.git).length > 0;
     this.pressed = null;
     // The group whose menu overlay is open: its header cluster stays visible while the
@@ -461,13 +453,9 @@ export default class Spaces extends View {
     const now = Date.now();
     const sp = spaces(), ps = panes();
     const rows = sp.map((w, i) => ({ w, i, g: this.git[where(w, ps)] ?? null, ok: this.discoverable(w, ps) }));
-    // Orca's rows come from the repo's worktrees (`listRepoWorktrees`), not from open sessions:
-    // a repo with no space open still lists, and each of its worktrees still draws a card. We
-    // only had `spaces()` here, so a repo was invisible until you opened something in it — the
-    // panel showed one repo out of many for exactly that reason. `git.cache.v1` is already that
-    // catalog (it holds every repo we have probed, with its worktrees), and Orca hydrates its
-    // store the same way (`hydrated-worktree-purge.ts:19-31`), so seed the plan from it and let
-    // the `unopened` path below draw the cards. Keyed by the same `where()` pair the cache uses.
+    // Orca rows represent repository worktrees (listRepoWorktrees), not only active sessions.
+    // git.cache.v1 hydrates known repositories on launch (hydrated-worktree-purge.ts:19-31);
+    // unopened repositories and worktrees render cards that open a space on click.
     const open = new Set(sp.map((w) => where(w, ps)));
     for (const key of Object.keys(this.git)) {
       const g = this.git[key];
@@ -475,9 +463,6 @@ export default class Spaces extends View {
       const [on, cwd] = readPair(key);
       rows.push({
         w: { id: `repo:${key}`, name: g.name, named: false, tabs: [], active: false, status: null, machine: on ?? null, folder: cwd },
-        // `unopened` is what makes a card's click open a space in its folder instead of
-        // selecting one (`:1064`), and it is the flag the visibility filter keeps. A repo row
-        // has no space, so it is exactly that case.
         i: -1, g, ok: true, unopened: true,
       });
     }
