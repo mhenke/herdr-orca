@@ -5,7 +5,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { panes, props, run, openOverlay } from "herdr";
+import { panes, props, run, openOverlay, spaces } from "herdr";
 
 export default class Pane extends View {
   init() { this.hovered = false; }
@@ -36,6 +36,14 @@ export default class Pane extends View {
     const p = this.me();
     if (!p) return div();
     const pane = p.pane;
+    // TerminalPaneHeaderOverlay.tsx:263-276 draws the pane's title from `.pane-title-text`;
+    // Orca's pane title is the tab's custom title (`ClaudeAccountSwitchSessionTree.tsx:276`
+    // renders `tab?.customTitle || tab?.title`). Herdr has no per-pane title, so the closest
+    // mechanism is `tab.rename` (`commands.rs:40`), and TabInfo.named tells us whether the
+    // person named it. When named, show the tab's name; otherwise the terminal's own title
+    // (`PaneInfo.title`, herdr.d.ts:193 — "what the program set, or the mod's name").
+    const tab = spaces().flatMap((s) => s.tabs).find((t) => t.id === p.tab);
+    const tabTitle = tab && tab.named ? tab.name : p.title;
     return h_flex()
       .id(`pane-head-${pane}`)
       .size_full()
@@ -66,9 +74,7 @@ export default class Pane extends View {
       // (`font: inherit` → the bar's 13px mono, `color: inherit` → /0.52 white, flex 1,
       // truncated; terminal.css:330-347). No program icon, folder or status mark: the
       // header draws title (:263) then `.pane-title-actions` (:277-342) and nothing else.
-      // Herdr has no `pane.rename` (only `tab.rename`, which names the whole tab, not one
-      // pane), so the title is not a rename button here.
-      .when(Boolean(p.title), el => el.child(div().flex_1().min_w(0).truncate().text_color("#ffffff85").child(p.title)))
+      .when(Boolean(tabTitle), el => el.child(div().flex_1().min_w(0).truncate().text_color("#ffffff85").child(tabTitle)))
       // Orca's TerminalPaneHeaderOverlay header actions (TerminalPaneHeaderOverlay.tsx:285,334):
       // SquareSplitVertical (split) then X (close), size-3 glyphs in size-6 icon-xs boxes.
       // Orca has no split-down or zoom button in the header; those live in the right-click
