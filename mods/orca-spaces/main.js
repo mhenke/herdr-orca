@@ -670,18 +670,23 @@ export default class Spaces extends View {
       .when(this.hoveredRepo === key, el => el
         // The two slots side by side with Orca's `gap-0.5` (2px), not the row's 6px.
         .child(h_flex().flex_none().items_center().gap(2)
-          // SectionHeader.tsx:355-414 — `RepoHeaderCreateWorkspaceButton` is `size-5` with a
-          // `Plus size-3` (repo-header-project-actions.tsx:239-241), so the chevron is NOT the
-          // rightmost thing on the row: there is a plus after it.
-          .child(div().id(`space-new-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
-            .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
-            .on_click((_e, cx) => { cx.stop_propagation(); run("space.new", { folder: g?.top ?? w.folder }); })
-            .child(svg("mods/orca-spaces/plus.svg").size(12).flex_none()))
+          // ORDER, from SectionHeader.tsx:355-414 — the collapse chevron comes FIRST in
+          // `ProjectHeaderActions`, then `RepoHeaderProjectActionsMenu` (the ellipsis, size-3.5,
+          // repo-header-project-actions.tsx:113), then `RepoHeaderCreateWorkspaceButton`
+          // (the plus, size-3, :239-241). Left to right: chevron, ellipsis, plus.
           // SectionHeader.tsx:358: size-5 rounded-md text-muted-foreground,
           // hover:bg-accent/70 and hover:text-foreground — a 70% accent wash, not a 70% white one.
           .child(div().id(`space-fold-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
             .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
-            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(14).flex_none())))), 6,
+            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(14).flex_none()))
+          .child(div().id(`space-more-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
+            .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
+            .on_click((_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "orca-menu", kind: "popup", width: 220, height: 220, props: { tab: "group", target: { id: w.id, path: g?.top ?? w.folder } } }); })
+            .child(svg("mods/orca-spaces/ellipsis.svg").size(14).flex_none()))
+          .child(div().id(`space-new-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
+            .text_color(t.dim).hover((s) => s.bg("#404040b3").text_color(t.foreground))
+            .on_click((_e, cx) => { cx.stop_propagation(); run("space.new", { folder: g?.top ?? w.folder }); })
+            .child(svg("mods/orca-spaces/plus.svg").size(12).flex_none())))), 6,
       { enter: () => this.toggleRepo(key) });
   }
 
@@ -729,15 +734,25 @@ export default class Spaces extends View {
       .text_size(11).line_height("11px").text_color(t.dim)
       .child(statusMark(a.status, 12))
       .child(div().min_w(0).flex_1().truncate().child(agentTitle(a)));
-    const agentBlock = v_flex().min_w(0).gap(0)
+    // `CompactAgentSummaryButton` (worktree-card-compact-agents.tsx:113-150): the label comes
+    // first and the chevron is the LAST child —
+    //   <span flex-1 truncate px-1 font-medium>subjectLabel</span>
+    //   <ChevronDown size-3 shrink-0 ... !expanded && '-rotate-90' />
+    // so the disclosure is on the right, not the left. `size-3` is 12px, and the rotation is
+    // -90 when collapsed (a right-pointing chevron), not a different glyph.
+    // The wrapper is `flex flex-col mt-1 gap-0.5` (WorktreeCardAgents.tsx:381), and a collapsed
+    // pill carries `border border-worktree-sidebar-border/70 bg-worktree-sidebar-accent/35`.
+    const agentBlock = v_flex().min_w(0).mt(4).gap(2)
       .child(h_flex().id(toggleId).h(24).w_full().min_w(0).px(4).gap(4).items_center().rounded(2)
         .text_size(11).line_height("11px").text_color(t.dim).cursor_pointer()
         .role("button")
         .accessibility_label(folded ? `Expand ${mine.length} agents` : `Collapse ${mine.length} agents`)
+        .when(folded, el => el.border_1().border_color("#f0f0f033").bg("#f0f0f009"))
         .hover(s => s.text_color(t.foreground))
         .on_click((_e, cx) => { cx.stop_propagation(); this.toggleAgents(w.id, cx); })
-        .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(10).flex_none())
-        .child(div().min_w(0).truncate().child(`${mine.length} agent${mine.length === 1 ? "" : "s"}`)))
+        .child(div().min_w(0).truncate().px(4).font_medium().child(`${mine.length} agent${mine.length === 1 ? "" : "s"}`))
+        .child(div().flex_1())
+        .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none()))
       .when(!folded, el => el.child(v_flex().min_w(0).gap(2).pt(2).children(mine.map(agentRow))));
     // Orca's frame geometry: every row here is lineage depth 0 (no tree indent, no wrapper).
     // `default-workspace-card.json:38`: statusLane = vars.newStyle && options.show.status.

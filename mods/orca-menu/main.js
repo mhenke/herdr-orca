@@ -54,6 +54,18 @@ function items(p, git) {
         ["New tab", "tab.new", { space: tg.space }],
         ["Close", "tab.close", { id: tg.id }],
       ];
+    // `RepoHeaderProjectActionsMenu` (repo-header-project-actions.tsx:90-118): the ellipsis on a
+    // project group header. It acts on the REPO, not on one of its worktrees, so it is its own
+    // case rather than `space`. Orca's items there are project rename/remove plus the reveal and
+    // delete groups; Herdr has no project entity, so only what maps is offered.
+    case "group":
+      return [
+        ["New worktree", "worktree", { space: tg.id, action: "new" }],
+        ["Open worktree", "worktree", { space: tg.id, action: "open" }],
+        ["Copy Path", "orca-menu.copy-path", { path: tg.path ?? null, id: tg.id }],
+        ["Rename workspace", "space.rename", { id: tg.id }],
+        ["Close workspace", "space.close", { id: tg.id }],
+      ];
     case "space":
       return [
         ["Rename", "space.rename", { id: tg.id }],
