@@ -5,8 +5,21 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec } from "herdr";
+import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, hc } from "herdr";
 import { copyText } from "./clip.js";
+
+// Orca's palette (`SortableTabContextMenu.tsx:15-80`), in its order; `null` is "None".
+const TAB_COLORS = [["None", null], ["Blue", "#3b82f6"], ["Purple", "#a855f7"], ["Pink", "#ec4899"],
+  ["Red", "#ef4444"], ["Orange", "#f97316"], ["Yellow", "#eab308"], ["Green", "#22c55e"],
+  ["Teal", "#14b8a6"], ["Gray", "#9ca3af"]];
+
+// Herdr has no tab colour field, so the menu writes the store orca-tabs reads.
+function stored(key, fallback) {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? "null");
+    return v && typeof v === "object" ? v : fallback;
+  } catch { return fallback; }
+}
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s) {
@@ -38,19 +51,30 @@ function items(p, git) {
       const own = panes().find((x) => x.pane === tg.pane);
       const alone = own && panes().filter((x) => x.tab === own.tab).length < 2;
       return [
-        // Orca's order (TerminalContextMenu.tsx:204-231): Copy, Add to chat, Select All,
-        // Paste, Quick Commands, agent-session rows. Add to chat (:209), Select All (:217),
-        // Quick Commands (:227) and the agent rows (:236-262) have no Herdr command.
+        // Orca's order (TerminalContextMenu.tsx:204-370): Copy, Add to chat, Select All, Paste,
+        // Quick Commands, agent rows, split section, title/ID block, close, clear, reset.
+        // Add to chat (:209) and the agent rows (:236-262) stay out: Herdr has no chat.
         ["Copy", "terminal.copy", {}],
+        // Orca selects the whole buffer (:217); Herdr cannot select, so the closest thing is
+        // the buffer in the clipboard (`hc read` prints the screen and scrollback).
+        ["Select All", "orca-menu.select-all", { terminal: term?.address ?? null }],
         ["Paste", "terminal.paste", {}],
-        // Orca's split section (TerminalContextMenu.tsx:265-302): splits, then expand/collapse.
-        // Equalize Pane Sizes (:281) has no Herdr command.
+        // Orca's Quick Commands menu (:227) is its command surface; Herdr's is the palette.
+        ["Quick Commands", "app.palette", {}],
+        // Orca's split section (TerminalContextMenu.tsx:265-302). Equalize Pane Sizes (:281)
+        // has no equivalent: panes are content inside one layout node, not nodes themselves,
+        // and `layout.resize` only sizes layout nodes (`commands.rs:80`, window.rs:3248).
         ["Split Terminal Right", "pane.split", { direction: "right", pane: tg.pane }],
         ["Split Terminal Down", "pane.split", { direction: "down", pane: tg.pane }],
         [own?.zoomed ? "Collapse Pane" : "Expand Pane", "pane.zoom", { pane: tg.pane }],
-        // Herdr-only: Orca has no right-click routing or park command; kept where Orca's
-        // title/ID block sits (TerminalContextMenu.tsx:307-347). Set Title, Clear Pane Title
-        // and the Copy Session/Terminal/Pane ID rows there have no Herdr command.
+        // Orca's title/ID block (:307-347). Orca's pane title is the tab's custom title
+        // (`ClaudeAccountSwitchSessionTree.tsx:276` = `customTitle || title`), so `tab.rename`
+        // names it, and an empty name drops it (`commands.rs:40`).
+        ...(own?.tab
+          ? [["Set Title…", "tab.rename", { id: own.tab }], ["Clear Pane Title", "tab.rename", { id: own.tab, name: "" }]]
+          : []),
+        // Herdr-only: Orca has no right-click routing or park command; kept where the
+        // title/ID block sits.
         ...(term
           ? [
               toProgram
@@ -59,8 +83,19 @@ function items(p, git) {
             ]
           : []),
         ...(parent ? [[`Send back to ${parent.name || parent.address}`, "terminal.park", { terminal: term.address }]] : []),
+        // Copy Session/Terminal/Pane ID (:329-347): Herdr ids go to the clipboard through
+        // `clip.js`. The session id has no counterpart.
+        ...(term ? [["Copy Terminal ID", "orca-menu.copy-terminal", { id: term.address }]] : []),
+        ["Copy Pane ID", "orca-menu.copy-pane-id", { id: tg.pane ?? "" }],
         [alone ? "Close tab" : "Close Pane", "pane.close", { pane: tg.pane }],
-        // Orca's Clear Screen (:359) and Reset Terminal (:363) have no Herdr command.
+        // Clear Screen (:359) and Reset Terminal (:363): no command sends input, so the
+        // terminal is driven through `hc` — Ctrl+L for a clear, `reset` for a full one.
+        ...(term
+          ? [
+              ["Clear Screen", "orca-menu.clear-screen", { terminal: term.address }],
+              ["Reset Terminal", "orca-menu.reset-terminal", { terminal: term.address }],
+            ]
+          : []),
       ];
     }
     case "tab": {
@@ -69,9 +104,9 @@ function items(p, git) {
       // TabSessionSurfaceSwitchMenuItems rows (:179-185), separator (:186), Pin/Unpin
       // (:187-196), Allow Auto-Close (:197-205), Copy Tab ID (:206), separator (:207),
       // Close (:208-212), Close Others (:213-215), Close Split Pane (:216), separator (:217),
-      // Change Title (:218-222), Tab Color (:223-250). The chat-view and session-switch rows,
-      // Allow Auto-Close, Close Split Pane (closes a tab group, not a pane) and Tab Color have
-      // no Herdr command (commands.rs:30-107).
+      // Change Title (:218-222), Tab Color (:223-250). The chat-view and session-switch rows
+      // stay out: Herdr has no chat. Allow Auto-Close has no counterpart either: Herdr keeps a
+      // tab until `tab.close`, and `hc keep --off` ends a lost terminal but closes no tab.
       const own = spaces().find((s) => (s.tabs ?? []).some((x) => x.id === tg.id));
       const list = own?.tabs ?? [];
       const tab = list.find((x) => x.id === tg.id);
@@ -97,7 +132,18 @@ function items(p, git) {
         // SortableTabContextMenu.tsx:213 — inset, disabled when `tabCount <= 1`; with one tab
         // the loop in choose() would close nothing, so leave the row out.
         ...(list.length > 1 ? [["Close Others", "orca-menu.close-others", { id: tg.id }]] : []),
+        // Close Split Pane (:216) closes the tab's split group; the closest Herdr action is
+        // closing every other pane of the tab, leaving the focused one.
+        ...(mine.length > 1 ? [["Close Split Pane", "orca-menu.close-split-panes", { id: tg.id }]] : []),
         ["Change Title", "tab.rename", { id: tg.id }],
+        // Tab Color (:223-250): Orca draws the palette as one swatch block; a row menu shows
+        // the same choices as rows, the current one marked. Herdr has no tab colour field, so
+        // orca-tabs draws the dot from the store this writes.
+        ...TAB_COLORS.map(([label, value]) => [
+          `${(stored("tab.colors.v1", {})[tg.id] ?? null) === value ? "●" : "○"} Tab Color: ${label}`,
+          "orca-menu.tab-color",
+          { id: tg.id, color: value ?? "" },
+        ]),
       ];
     }
     // `RepoHeaderProjectActionsMenu` (repo-header-project-actions.tsx:121-186): the ellipsis on a
@@ -238,6 +284,27 @@ export default class Menu extends View {
         const owner = spaces().find((s) => (s.tabs ?? []).some((x) => x.id === it[2].id));
         for (const x of owner?.tabs ?? []) if (x.id !== it[2].id) run("tab.close", { id: x.id });
       }
+      if (it[1] === "orca-menu.close-split-panes") {
+        const mine = panes().filter((x) => x.tab === it[2].id);
+        const keep = mine.find((x) => x.focused) ?? mine[0];
+        for (const x of mine) if (x !== keep) run("pane.close", { pane: x.pane });
+      }
+      // Tab colour: the store orca-tabs reads; closing the overlay repaints the strip.
+      if (it[1] === "orca-menu.tab-color") {
+        const all = stored("tab.colors.v1", {});
+        if (it[2].color) all[it[2].id] = it[2].color; else delete all[it[2].id];
+        localStorage.setItem("tab.colors.v1", JSON.stringify(all));
+      }
+      if (it[1] === "orca-menu.copy-terminal" || it[1] === "orca-menu.copy-pane-id") void copyText(it[2].id ?? "");
+      // Select All: Herdr cannot select, so the whole buffer goes to the clipboard.
+      if (it[1] === "orca-menu.select-all" && it[2].terminal) void (async () => {
+        const r = await hc(["read", it[2].terminal]).catch(() => null);
+        if (r?.code === 0 && r.stdout.trim()) await copyText(r.stdout);
+      })();
+      // Clear Screen / Reset Terminal: `hc` writes to the terminal; Ctrl+L clears the screen,
+      // `reset` restores the terminal modes.
+      if (it[1] === "orca-menu.clear-screen" && it[2].terminal) void hc(["keys", it[2].terminal, "ctrl+l"]);
+      if (it[1] === "orca-menu.reset-terminal" && it[2].terminal) void hc(["send", it[2].terminal, "reset"]);
       return;
     }
     if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });

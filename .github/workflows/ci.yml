@@ -27,9 +27,9 @@ jobs:
           done
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v5
         with:
-          enable-cache: true
+          enable-cache: false
 
       - name: Validate git-cliff changelog generation
         run: |
