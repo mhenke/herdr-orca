@@ -120,7 +120,7 @@ export default class Tabs extends View {
     // (AppWorkspaceShell.tsx:163-167).
     const sidebarToggle = (glyph, action) => div().id("sidebar-toggle").ml(6).w(32).h(24).flex_none().flex().items_center().justify_center().rounded(4)
       .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
-      .role("button").accessibility_label("Toggle sidebar")
+      .role("button").accessibility_label("Toggle sidebar").tooltip("Toggle sidebar")
       .on_mouse_down("left", stop).on_click(action).child(glyph);
     // tab-bar-surface.tsx:221-227 — `ml-2 my-auto flex h-7 w-7 shrink-0 items-center
     // justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground`,
