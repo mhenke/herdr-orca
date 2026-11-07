@@ -17,6 +17,7 @@ Every figure and measurement was read directly from Orca's renderer source code,
 The layout coordinates 16 self-contained mods under `mods/`:
 
 - **Three columns at Orca's widths**: left sidebar 280px (min 220, max 500), right panel 350px (min 220, max 900), 1px dividers, square pane corners (radius 0). The center reads flat, as Orca's does.
+- **Sidebar header (`orca-nav`)**: history arrows for the middle column, Orca's Search row, and the Tasks / Automations / Orca Mobile rows. Each opens a page in the workspace column, where Orca opens it; choosing a workspace or tab returns to the terminals.
 - **Project cards in the sidebar (`orca-spaces`)**:
   - Repositories organize into collapsible groups with folder glyphs.
   - Worktrees render as cards carrying branch identities, with `primary` badges on main checkouts.
@@ -50,6 +51,7 @@ The layout coordinates 16 self-contained mods under `mods/`:
   - 208px / 176px context menus for worktrees, project headers, and tabs with full mouse and keyboard navigation (arrows, Enter, Space, Home, End, Esc), clipboard integration, and external file reveal.
 - **Floating overlay (`orca-float` / `orca-pane-status`)**:
   - Bottom-right overlay supporting Orca's "New Terminal" and "Minimize" actions, plus running agent pills.
+- **Honest gaps (`orca-panel-gap`)**: a surface Herdr has no backend for (PR Checks, Ports, Attached worktrees, Tasks, Automations, Orca Mobile) still renders where Orca puts it, with one sentence naming what is missing. No dead controls, no invented data — see `docs/adr/0004-match-orca-layout-and-render-gaps.md`.
 - **Orca's palettes**:
   - `orca-dark` (Ghostty Default Style Dark, Orca's default) and `orca-light` (Builtin Tango Light), plus Orca's greys for the chrome and panels.
 
