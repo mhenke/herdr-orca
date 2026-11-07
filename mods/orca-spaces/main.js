@@ -303,6 +303,7 @@ export default class Spaces extends View {
   grouped(t) {
     const rows = this.ordered(), ps = panes();
     const draw = (r) => this.row(r, t, ps);
+    const flat = (r) => draw(r);
     const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name), ...Object.keys(this.reconnecting)])].sort();
     const loading = m => {
       const layout = machines().find(k => k.name === m)?.layout;
@@ -310,7 +311,7 @@ export default class Spaces extends View {
         || spaces().some(s => (s.machine ?? null) === m && !this.shown.has(s.id));
     };
     const loadingRow = m => div().id(`machine-loading-${m ?? "local"}`).h(30).flex_none().px(8).text_size(13).text_color(t.dim).child("Loading…");
-    if (!remote.length) return loading(null) && !rows.length ? [loadingRow(null)] : rows.map(draw);
+    if (!remote.length) return loading(null) && !rows.length ? [loadingRow(null)] : rows.flatMap(flat);
     const machineNames = [null, ...remote];
     return machineNames.flatMap((m, i) => {
       const mine = rows.filter((r) => (r.w.machine ?? null) === m);
@@ -369,7 +370,7 @@ export default class Spaces extends View {
         .child(div().size(18).flex_none().flex().items_center().justify_center().child(svg("mods/orca-spaces/plus.svg").size(12))).child("New space here"), 8);
       const heading = stop(this, t, `machine-${m ?? "local"}`, head, 8);
       if (rebuilt) return [heading];
-      return [heading, ...(folded ? [] : mine.length ? mine.map(draw) : [loading(m) ? loadingRow(m) : empty])];
+      return [heading, ...(folded ? [] : mine.length ? mine.flatMap(flat) : [loading(m) ? loadingRow(m) : empty])];
     });
   }
 
@@ -396,27 +397,47 @@ export default class Spaces extends View {
       .when(g.behind > 0, (el) => el.child(tipMark(this, t, `behind-${id}`, n(g.behind, "pull"), div().text_color(t.ansi1).child(`\u2193${g.behind}`))));
   }
 
-  row({ w, i, g, tree, kids = 0 }, t, ps) {
+  // Orca's project header (SectionHeader.tsx): h-7, gap-1.5, pr-2, a 16px icon slot, a 13px
+  // semibold label, and a 20px collapse button. The header owns the fold; its cards hide under it.
+  header({ w, g, kids }, t, ps) {
+    const folded = kids > 0 && this.foldedRepos.has(g.repo);
+    const id = `space-head-${w.id}`;
+    return stop(this, t, id, h_flex()
+      .id(id)
+      .h(28).flex_none().w_full().pl(10).pr(8).gap(6).items_center().mt(4)
+      .role("button").accessibility_label(g.name)
+      .on_mouse_down("right", () => this.menu(w))
+      .on_click((_e, cx) => this.toggleRepo(g.repo, cx))
+      .child(projectMark(w, 16, t, ps))
+      .child(div().min_w(0).flex_1().truncate().text_size(13).font_semibold().line_height("16px").text_color(t.foreground).child(g.name))
+      // As Orca's: aria-hidden, the whole header folds, so it lights with the header and has no label.
+      .child(div().id(`space-fold-${w.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(6)
+        .text_color(t.dim).hover((s) => s.bg("#f0f0f0b3"))
+        .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(14).flex_none())), 6,
+      { enter: () => this.toggleRepo(g.repo) });
+  }
+
+  // Orca's worktree card (worktree-card-surface.tsx): ml-1, py-2 (36px single line), rounded-lg,
+  // a w-5 status lane, a 13px/20px title, the primary pill on the main checkout.
+  card({ w, i, g, tree }, t, ps) {
     const fromIndex = this.pressed === null ? -1 : spaces().findIndex(s => s.id === this.pressed);
     const on = w.active;
-    // A checkout with worktrees folds them as an agent folds its sub-agents: an arrow at the
-    // end, and folded, the count; dim, brightening when hovered.
-    const folded = kids > 0 && this.foldedRepos.has(g.repo);
-    const foldId = `space-fold-${w.id}`, lit = this.hot === foldId ? t.foreground : t.dim;
-    return stop(this, t, `space-${w.id}`, v_flex()
+    const busy = (w.tabs ?? []).some(tab => (ps ?? []).some(p => p.tab === tab.id && this.busy[p.pane]));
+    // Orca titles a card by its worktree, the header already carrying the project: a main
+    // checkout whose name is the repo's shows its branch instead of saying the name twice.
+    const title = g && !g.linked && g.branch && w.name === g.name ? g.branch : w.name;
+    return stop(this, t, `space-${w.id}`, h_flex()
       .relative()
       .id(`space-${w.id}`)
-      .px(8)
-      .h(30)
+      .ml(4).pr(6).h(36)
       .flex_none()
-      .justify_center()
+      .items_center()
       .rounded(8)
-      .mx(4)
       .role("button")
       .accessibility_label(w.name)
       // Orca active card: bg foreground/10 over sidebar, border foreground/18.
       .when(on, (el) => el.bg("#3e3e3e").border_1().border_color("#f0f0f02e"))
-      .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
+      .when(!on, (el) => el.hover((s) => s.bg("#f0f0f014")))
       .when(this.pressed === w.id && this.over !== w.id, (el) => el.opacity(0.5))
       .when(this.pressed !== null && this.over === w.id && this.pressed !== w.id, (el) => el.child(
         div().absolute().left(0).right(0).h(2).bg(t.accent)
@@ -447,36 +468,29 @@ export default class Spaces extends View {
         cx.notify();
       })
       .on_mouse_down("right", () => this.menu(w))
-      // The same tree lines as sub-agents: from the checkout's avatar center, turning into the branch icon.
-      .when(tree === "├─", el => el.child(div().absolute().left(16.25).top(0).bottom(0).w(1.5).bg(t.input)))
-      .when(Boolean(tree), el => el.child(div().absolute().left(16.25).top(-4).h(19).w(9.75).border_l(1.5).border_b(1.5).rounded_bl(6).border_color(t.input)))
-      .child(
-        h_flex()
-          .w_full().min_w(0)
-          .gap(8)
-          .items_center()
-          .when(Boolean(tree), el => el.pl(20).child(h_flex().size(18).flex_none().items_center().justify_center()
-            .child(svg("mods/orca-spaces/git-branch.svg").size(16).text_color(t.dim))))
-          .when(!tree, el => el.child(projectMark(w, 16, t, ps)))
-          .child(div().min_w(0).max_w(150).truncate().text_size(13).text_color(t.foreground).child(w.name))
-          .child(g ? this.gitTail(g, tree, w.name, t, w.id) : div().flex_1())
-          // -3: its chevron stands in the column of the heading's last button and a machine's chevron, 23 from the edge.
-          .when(kids > 0, el => el.child(tip(this.hot, t, foldId, folded ? "Expand worktrees" : "Collapse worktrees", stop(this, t, foldId, div().id(foldId).h(20).min_w(20).mr(-3).px(4).gap(3).flex_none().flex().items_center().justify_center().rounded(4)
-            // raised: the row under it already shows hover or selected.
-            .text_size(11).text_color(lit)
-            .role("button").accessibility_label(folded ? "Expand worktrees" : "Collapse worktrees")
-            .on_hover((over, cx) => {
-              if (over) this.hot = foldId;
-              else if (this.hot === foldId) this.hot = null;
-              cx.notify();
-            })
-            // Pressing it neither selects nor drags the space.
-            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-            .on_click((_e, cx) => { cx.stop_propagation(); this.toggleRepo(g.repo, cx); })
-            .child(svg(`mods/orca-spaces/chevron-${folded ? "right" : "down"}.svg`).size(12).flex_none().text_color(lit))
-            .when(folded, el => el.child(String(kids))), 4)))),
+      // Content 2 in from the surface; the lane is w-5 mr-1 as Orca's, and a worktree card adds
+      // SIDEBAR_TREE_INDENT (18) so its title sits under its repo's label, not the header icon.
+      .child(h_flex().w_full().min_w(0).pl(2 + (tree ? 18 : 0)).gap(0).items_center()
+        .child(div().w(20).mr(4).flex_none().flex().items_center().justify_center()
+          .child(div().size(6).rounded_full().flex_none().bg(busy || on ? t.ansi2 : "#f0f0f04d")))
+        .child(div().min_w(0).max_w(150).truncate().text_size(13).line_height("20px").text_color(t.foreground).child(title))
+        .when(g && !g.linked, el => el.child(div().flex_none().ml(6).h(16).px(6).rounded(4).border_1().border_color("#f0f0f033").bg("#f0f0f00f")
+          .text_size(10).font_medium().line_height("14px").text_color("#f0f0f0b3").child("primary")))
+        .child(g ? this.gitTail(g, tree, title, t, w.id) : div().flex_1())),
       // A space goes by its mouse-up, which a key isn't.
-      ), 8, { enter: () => run("space.select", { id: w.id }) });
+      8, { enter: () => run("space.select", { id: w.id }) });
+  }
+
+  // A repo draws its header, then its cards; a folder space is one card on its own.
+  row(r, t, ps) {
+    const out = [];
+    if (r.g && !r.g.linked) {
+      out.push(this.header(r, t, ps));
+      if (!(r.kids > 0 && this.foldedRepos.has(r.g.repo))) out.push(this.card(r, t, ps));
+    } else {
+      out.push(this.card(r, t, ps));
+    }
+    return out;
   }
 
   render() {
