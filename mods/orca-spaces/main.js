@@ -4,7 +4,7 @@
 // the agents list, not here. Click to switch, right-click for its menu, drag to reorder.
 
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, Scrollbar } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
 import { repoMark, tint, parseRemote, avatarUrlFor, ensureAvatar } from "./project.js";
 import { statusMark, agentStateMark } from "./status.js";
@@ -80,8 +80,11 @@ export default class Spaces extends View {
       }
     });
     // where() -> { name, branch, owner, repo, linked }, null: not a repo.
-    // Seeded from the last session, matching Orca's persisted worktree store
-    // (hydrated-worktree-purge.ts:19-31). Rows paint from cached state while refresh runs.
+    // Seeded from the last session, the Herdr equivalent of the project list Orca hydrates
+    // from its persisted store (`sidebar/index.tsx:69` reads `s.repos`;
+    // `main/persistence/loading-store/store.ts:68` owns it). Herdr exposes no project catalog
+    // (`defaults/herdr.d.ts`), so a repo no `exec` has ever probed is unreachable; this cache
+    // is seeded whenever a space's git is read, and rows paint from it while refresh runs.
     this.git = stored("git.cache.v1", {});
     // Orca keeps reviews out of the worktree row: `buildWorkspaceReviewFacts` reads a
     // persisted cache keyed `repo::branch` (`getGitHubPRCacheKeyCandidates`) and the card
@@ -107,6 +110,9 @@ export default class Spaces extends View {
     // pointer is over the overlay instead of the header.
     this.menuKey = null;
     this.over = null;
+    // Orca reveals the sidebar thumb on `.scrollbar-sleek-parent:hover` (`main.css:781-800`);
+    // the placed bar's own `hover` mode only sees the bar, so the list's pointer drives it.
+    this.listHover = false;
     this.machines = [];
     this.reconnecting = stored("machines.reconnecting", {});
     for (const state of Object.values(this.reconnecting)) if (state && typeof state === "object") state.busy = false;
@@ -917,17 +923,17 @@ export default class Spaces extends View {
       ? getFolderWorkspaceCardSurfaceInset({ isGrouped: true, groupDepth: 1 })
       : getWorktreeCardSurfaceInset({ isGrouped: Boolean(g), groupDepth: 0 });
     const geometry = { cardPaddingLeft: getFlushWorktreeCardPaddingLeft(Math.max(0, contentIndent - surfaceInset), false), surfaceInset };
-    // `singleLine` (`default-workspace-card.json:33`) is the only shape with no second row:
-    // no meta text and no inline agents (`hasMetaRow` here is drawn from what the card shows).
-    const singleLine = !metaText && mine.length === 0;
+    // Orca's classic cards are never `singleLine`: `default-workspace-card.json:29` sets
+    // `inlineAgents` from `options.show.inlineAgents && !vars.compact`, and the migration adds
+    // `inline-agents` to every user's card props (`normalize-loaded-ui-state.ts:106`), so
+    // `singleLine` (`default-workspace-card.json:34`) is false even while the card has no agent.
+    // `worktree-card-surface.tsx:67` then always draws `pt-1.25 pb-1.5` = 5/6px. Fixed here so
+    // an agent starting/stopping cannot resize the row; `mine.length` must not feed the padding.
     return stop(this, t, `space-${w.id}`, v_flex()
       .relative()
       .id(`space-${w.id}`)
-      // Orca's vertical padding (`worktree-card-surface.tsx:67`): `py-2` only for a title-only
-      // card (`default-workspace-card.json:33` `singleLine`); once there is a meta row or agent
-      // rows it is `pt-1.25 pb-1.5` = 5/6px.
       .ml(WORKTREE_CARD_SURFACE_MARGIN + geometry.surfaceInset).pr(6)
-      .when(singleLine, (el) => el.py(8)).when(!singleLine, (el) => el.pt(5).pb(6))
+      .pt(5).pb(6)
       .flex_none()
       .rounded(8)
       // `worktree-card-surface.tsx:71-76` draws `border border-transparent` on every card, so
@@ -1100,19 +1106,22 @@ export default class Spaces extends View {
     const tool = (id, label, icon, fn, more) => tip(this.hot, t, id, label, stop(this, t, id, div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(this.hot === id ? t.foreground : t.dim).on_hover(this.glow(id)).role("button").accessibility_label(label).hover(s => s.bg(t.hover))
       .on_click(fn).child(svg(`mods/orca-spaces/${icon}.svg`).size(14))), more);
     return focusRoot(this, v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      // `overflow_y_scrollbar()` is what `orca-files` uses for its tree and it paints a working
-      // bar. The sibling `Scrollbar.vertical("space-list")` pair used here before needs the bar
-      // to fill a parent it never got (the row was `flex_1` with no height of its own), so the
-      // sidebar scrolled with no visible thumb. One container, one bar, no name to match.
-      .child(v_flex().id("space-list").flex_1().min_h(0).overflow_y_scrollbar().mode("always")
-        .on_mouse_up("left", (_e, cx) => { this.pressed = this.over = null; cx.notify(); })
-        // Herdr reports no release outside the sidebar, so leaving ends a drag, as in the inbox.
-        .on_hover((on, cx) => {
-          if (on || this.pressed === null) return;
-          this.pressed = this.over = null;
-          cx.notify();
-        })
-        .child(v_flex().id("space-content").w_full().flex_none().px(0).pb(8)
+      // Gutter port of Orca's sidebar scrollbar: `.worktree-sidebar-scrollbar` reserves an 8px
+      // bar plus `padding-right: 4px` (`main.css:767-781`), so no row ever sits under the thumb.
+      // A placed Herdr bar fills the container it is put in (`gpui-kit.d.ts:21188-21218`) and
+      // `overflow_y_scroll` — not `overflow_y_scrollbar` — is the area a named bar pairs with;
+      // the row gives the area the height `flex_1` alone lacked, and the 12px column is the inset.
+      .child(h_flex().w_full().flex_1().min_h(0)
+        .child(v_flex().id("space-list").flex_1().min_h(0).overflow_y_scroll()
+          .on_mouse_up("left", (_e, cx) => { this.pressed = this.over = null; cx.notify(); })
+          // Herdr reports no release outside the sidebar, so leaving ends a drag, as in the inbox.
+          .on_hover((on, cx) => {
+            if (this.listHover !== on) { this.listHover = on; cx.notify(); }
+            if (on || this.pressed === null) return;
+            this.pressed = this.over = null;
+            cx.notify();
+          })
+          .child(v_flex().id("space-content").w_full().flex_none().px(0).pb(8)
             // StartupWorktreeRefreshStatus.tsx:22-29 status row with mx-3 mb-2 gap-2 text-xs text-muted-foreground.
             // StartupWorktreeRefreshStatus.tsx:14-16 delays 200ms before showing; omitted because Herdr has no frame timer.
             .when(!this.loaded, el => el.child(h_flex().flex_none().mx(12).mb(8).gap(8).items_center()
@@ -1124,6 +1133,10 @@ export default class Spaces extends View {
             .when(this.loaded && rows.length === 0, el => el.child(div().flex().flex_col().items_center().gap(8).px(16).py(24).w_full()
               .text_size(11).text_center().text_color(t.muted)
               .child(div().child("No workspaces found"))))
-            .children(rows.length ? this.grouped(t, cx, rows) : []))));
+            .children(rows.length ? this.grouped(t, cx, rows) : [])))
+        // Orca's thumb is transparent until the sidebar is hovered (`main.css:781-800`); the
+        // list's `.on_hover` flips the bar to `always`, so the reveal is the same.
+        .child(div().w(12).flex_none().relative()
+          .child(Scrollbar.vertical("space-list").mode(this.listHover ? "always" : "hover")))));
   }
 }
