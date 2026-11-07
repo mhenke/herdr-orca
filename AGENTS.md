@@ -1,11 +1,23 @@
 # herdr-orca — agent notes
 
 Orca-layout port for herdr-app, packaged like herdr-t3.
-Read `GLOSSARY.md` first: repo / space / main checkout / linked worktree /
+Read `GLOSSARY.md` for the domain: repo / space / main checkout / linked worktree /
 project group / top branch mean exactly one thing each here.
+
+   Codebases (read, never guess):
+   - Orca (design + behavior spec): `~/Projects/orca`
+     (`src/renderer/.../sidebar` for layout, `src/shared/sidebar-list` for row
+     plan, `src/main/git/worktrees` for worktree identity).
+   - herdr-app (host behavior + mod API): `~/Projects/herdr-app`
+     (`src/model.rs` for spaces/agents/rollup, `herdr.d.ts` for the JS contract).
+   - herdr-t3 (packaging example): `~/Projects/herdr-t3`.
 
 ## Iron rules (paid for in full)
 
+0. **No Herdr change without its Orca counterpart open in `~/Projects/orca`.** Before
+   editing a Herdr mod, read the Orca file that owns the behavior and quote its path
+   and rule in the edit comment. A diff that cannot name its Orca source does not
+   ship. The Orca codebase is read-only truth; this repo is the translation.
 1. **Orca's code is the spec, not screenshots.** Every geometry value, color,
    status rule and grouping rule in this package traces to a file and line in
    `~/Projects/orca`. Tailwind classes lie to the eye (`mr-1` is 4px in a

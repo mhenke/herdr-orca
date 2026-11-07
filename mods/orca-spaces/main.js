@@ -491,13 +491,17 @@ export default class Spaces extends View {
     const group = [w, ...(also ?? []).map(a => a.w)];
     const on = group.some(s => s.active);
     // Orca titles a card by its worktree's branch when the header above already says the
-    // repo/folder (`herdr-file-viewer` -> `main`), else the space's own name. The branch
-    // follows as the meta row only when it adds to the title (default-workspace-card.json
-    // -> IdentityBlock -> Branch, 11px muted).
+    // repo/folder (`herdr-file-viewer` -> `main`), else the space's own name
+    // (`default-workspace-card.json`: `title: trim(ws.title)`). The branch meta shows whenever
+    // there is a branch (`branch: !folder && len(branch) > 0 && !newStyle && (!compact || ...)`):
+    // classic non-compact cards print it even when it equals the title — hence master/master.
     const branch = g?.branch ?? w.branch ?? null;
     // Orca's worktree title is the branch for an unnamed worktree; a name the user gave wins.
     const title = !w.named && branch ? branch : w.name;
-    const meta = branch && branch !== title ? branch : null;
+    // `default-workspace-card.json`: folder cards print the folder's own last segment
+    // (`folderInMeta`, `WorktreeCardFolderPath` = `getDirectoryName`), branch cards the branch.
+    const meta = g ? branch : base(place(w, ps));
+    const metaMono = !g;
     // Orca's card lists its own agents (inlineAgents) with a 6px status dot each, from
     // agents(): the same rows the agents view reads, so a collapsed card shows the count
     // of real rows and never invents one.
@@ -599,8 +603,9 @@ export default class Spaces extends View {
             .when(isPrimary, el => el.child(div().flex_none().h(16).px(6).rounded(4).border_1().border_color("#f0f0f033").bg("#f0f0f00f")
               .text_size(10).font_medium().line_height("14px").text_color("#f0f0f0b3").child("primary")))
             .child(g ? this.gitTail(g, t, w.id) : div().flex_1()))
-          // Meta row: the branch, 11px muted, as Orca's Branch part.
-          .when(Boolean(meta), el => el.child(div().min_w(0).truncate().text_size(11).line_height("11px").text_color(t.dim).child(meta)))
+          // Meta row: the branch, or the folder's own last segment — 11px muted, mono for paths
+          // (`WorktreeCardFolderPath`: `font-mono text-[11px] leading-none`).
+          .when(Boolean(meta), el => el.child(div().min_w(0).truncate().text_size(11).line_height("11px").text_color(t.dim).when(metaMono, m => m.font_family("JetBrains Mono")).child(meta)))
           // Orca's compact agent summary (worktree-card-compact-agents.tsx): h-6, px-1,
           // 11px muted, a chevron that folds the rows, which carry a 6px status dot each.
           .when(mine.length > 0, el => el.child(agentBlock))),
