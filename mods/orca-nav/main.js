@@ -40,7 +40,22 @@ export default class Nav extends View {
       // text-xs semibold muted/80; actions gap-1, icon-xs buttons (24px) with 14px icons, stroke 2.25.
       .child(h_flex().w_full().h(32).mt(8).px(8).gap(6).items_center().justify_between()
         .child(h_flex().min_w(0).items_center()
-          .child(div().pl(8).pr(2).text_size(12).font_semibold().text_color("#969eaecc").child("Projects")))
+          .child(div().pl(8).pr(2).text_size(12).font_semibold().text_color("#969eaecc").child("Projects"))
+          // ProjectsCollapseAllButton.tsx:41-47 — `flex shrink-0 overflow-hidden
+          // text-muted-foreground` that is `w-0 opacity-0` until the header is hovered, then
+          // `w-6 opacity-100`. ChevronsDownUp collapses, ChevronsUpDown expands (:23-24).
+          // Herdr exposes no header-hover group, so the button stays visible: same slot and
+          // glyph, without the reveal.
+          .child(div().id("proj-collapse-all").size(24).flex_none().flex().items_center().justify_center().rounded(6)
+            .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
+            .role("button").accessibility_label("Collapse all projects")
+            .on_click(() => run("orca-spaces.collapse-all"))
+            .child(svg("mods/orca-nav/chevrons-down-up.svg").size(14)))
+          .child(div().size(24).flex_none().flex().items_center().justify_center().rounded(6)
+            .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).cursor_pointer()
+            .role("button").accessibility_label("Expand all projects")
+            .on_click(() => run("orca-spaces.expand-all"))
+            .child(svg("mods/orca-nav/chevrons-up-down.svg").size(14))))
         .child(h_flex().flex_none().items_center().gap(4)
           // sidebar-header-actions.tsx:89-91 — the first of three slots is
           // `flex size-6 shrink-0 items-center` (24x24), holding a `Button variant="ghost"

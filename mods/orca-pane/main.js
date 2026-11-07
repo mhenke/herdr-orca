@@ -6,7 +6,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { panes, props, run, theme, home } from "herdr";
+import { panes, props, run, theme, home, openOverlay } from "herdr";
 
 function icon(p, size, color) {
   if (!p?.icon) return null;
@@ -60,6 +60,14 @@ export default class Pane extends View {
       .text_size(12)
       .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
       .on_click(() => run("pane.focus", { pane }))
+      // TerminalPaneHeaderOverlay.tsx:149 `onContextMenuCapture={(e) => onPaneTitleContextMenu(e, pane.id)}`
+      // — the pane title bar opens the pane menu on right-click. `orca-menu` already implements
+      // the `pane` case (split right/down, zoom, right-click routing, close), so this is the
+      // missing caller, not a missing menu.
+      .on_mouse_down("right", (_e, cx) => {
+        cx.stop_propagation();
+        openOverlay({ mod: "orca-menu", kind: "popup", width: 220, height: 260, props: { tab: "pane", target: { pane, terminal: p.terminal } } });
+      })
       .when(Boolean(pic), (el) => el.child(pic))
       .child(div().flex_none().truncate().max_w(260).font_medium().text_color(t.foreground).child(name))
       .child(div().flex_1().truncate().text_color(t.dim).child(folder(p.cwd)))

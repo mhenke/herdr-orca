@@ -47,7 +47,22 @@ export default class Spaces extends View {
     this.cx = cx;
     // pane.go onto this list (mod.json's "focusable"): the keyboard starts at the heading's button.
     cx.spawn(async (cx) => {
-      for (;;) if (await nextCommand() === "focus") enter(this, cx, "space-new");
+      for (;;) {
+        const cmd = await nextCommand();
+        if (cmd === "focus") enter(this, cx, "space-new");
+        // `project-collapse-all.ts` setAllProjectsCollapsed: collapsing adds every project key;
+        // expanding clears all project keys (nested ones included), keeping machine folds.
+        // Keys are the same ones `header()` folds on: repo name, or `space:<id>` for a folder.
+        else if (cmd === "collapse-all" || cmd === "expand-all") {
+          if (cmd === "collapse-all") {
+            for (const k of this.projectKeys()) this.foldedRepos.add(k);
+          } else {
+            this.foldedRepos.clear();
+          }
+          localStorage.setItem("repos.folded", JSON.stringify([...this.foldedRepos]));
+          cx.notify();
+        }
+      }
     });
     this.git = {}; // where() -> { name, branch, owner, repo, linked, pr }, null: not a repo
     this.checked = {}; // where() -> when it was last looked at
@@ -502,9 +517,23 @@ export default class Spaces extends View {
 
   // Orca's project header (SectionHeader.tsx): h-7, gap-1.5, pr-2, a 16px icon slot, a 13px
   // semibold label, and a 20px collapse button. The header owns the fold; its cards hide under it.
+  // A folder workspace folds by its own id: there is no repo to key it on. Shared with
+  // collapse-all so the button and the header can never disagree about a row's key.
+  foldKey({ w, g }) {
+    return g?.repo ?? `space:${w.id}`;
+  }
+
+  // Every project key currently rendered, for `setAllProjectsCollapsed`. Orca collects them
+  // from the row plan (`getRenderedProjectCollapseKeys`, project-collapse-all.ts:5); the
+  // equivalent here is the group header each rendered row emits.
+  projectKeys() {
+    const keys = new Set();
+    for (const r of this.ordered()) if (!r.unopened) keys.add(this.foldKey(r));
+    return [...keys];
+  }
+
   header({ w, g }, t, ps) {
-    // A folder workspace folds by its own id: there is no repo to key it on.
-    const key = g?.repo ?? `space:${w.id}`;
+    const key = this.foldKey({ w, g });
     const folded = this.foldedRepos.has(key);
     const id = `space-head-${w.id}`;
     return stop(this, t, id, h_flex()
@@ -693,14 +722,16 @@ export default class Spaces extends View {
   // workspace renders its folder row (folder glyph + name, `folder-row.tsx`) above its
   // session card — hence tmp three times: folder row, card title, card path meta.
   row(r, t, ps) {
+    // Fold first: Orca collapses the whole repo group (SectionHeader owns the fold), and a
+    // linked worktree is still a row of that group. Checking `linked` first left the group
+    // header collapsed while its worktree cards kept drawing.
+    if (r.g && this.foldedRepos.has(r.g.repo)) return r.head ? [this.header(r, t, ps)] : [];
     if (r.g?.linked) return [this.card(r, t, ps)];
     if (!r.g) {
       const key = `space:${r.w.id}`;
       if (this.foldedRepos.has(key)) return [this.header(r, t, ps)];
       return [this.header(r, t, ps), this.card(r, t, ps)];
     }
-    // Orca folds the whole repo group, so every card of it hides, not only the head's.
-    if (this.foldedRepos.has(r.g.repo)) return r.head ? [this.header(r, t, ps)] : [];
     // Only the repo's first space heads the group; its later spaces are further cards.
     if (!r.head) return [this.card(r, t, ps)];
     return [this.header(r, t, ps), this.card(r, t, ps)];
