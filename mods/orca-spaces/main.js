@@ -44,6 +44,10 @@ const base = (path) => path.replace(/\/+$/, "").split("/").pop();
 // Changes made outside Herdr (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
 const FALLBACK = 60000;
+// How long a space waits for its git answer before it is drawn without one. Long enough that a
+// local `git` read lands first (so a new worktree appears under its repo, not beside it), short
+// enough that a space on an unreachable machine still shows up.
+const SETTLE = 1500;
 // Safely read a stored JSON value of the expected shape; a mangled key never throws.
 function stored(key, fallback) {
   try {
@@ -96,9 +100,9 @@ export default class Spaces extends View {
     this.ready = {}; // machine -> its layout was readable at the last look
     this.at = {}; // space -> its where() at the last look
     this.watching = new Set(); // local repos' git folders
-    // Spaces made while this runs wait (at most a moment) for their git, so a
-    // worktree appears under its repo instead of jumping there.
-    this.shown = new Set(spaces().map((s) => s.id));
+    // Spaces made while this runs wait (at most a moment) for their git, so a worktree appears
+    // under its repo instead of jumping there. Only the age of each new space is tracked; whether
+    // it is ready is recomputed every pass (`settled`), so nothing has to be latched or cleared.
     this.born = {};
     this.pressed = null;
     // The group whose menu overlay is open: its header cluster stays visible while the
@@ -123,20 +127,26 @@ export default class Spaces extends View {
   checkNew(cx) {
     const now = Date.now();
     const sp = spaces();
-    for (const s of sp) if (!this.shown.has(s.id)) this.born[s.id] ??= now;
     const due = this.due(now, sp, panes());
     if (due.size) this.refreshGit(due, cx);
+    // A space younger than SETTLE is held back from the list until its git answer arrives. That
+    // answer notifies on its own, but when there is no answer to wait for — a folder outside git,
+    // an unreachable machine — nothing would repaint and the row would stay hidden until the
+    // 60s fallback. If one is still settling, ask for the frame that shows it.
+    const settling = sp.some((s) => !this.settled(s, panes(), now));
+    // The row order git implies is committed here, in the task phase, not from `render`.
+    this.settleRows(cx);
     // Agent state is read straight from the host model (`space.status`, `agent.status`), so a
     // running agent changes it without touching git and without a new space. Nothing notified
     // in that case, and the indicators sat on whatever the last render caught — the bug that
     // made a working agent look idle. Repaint when any space or agent status differs from the
-    // last look. Same shape as the existing `shown` check: cheap, and only on a real change.
+    // last look: cheap, and only on a real change.
     // `agents()` reports `address`, not `id` (an agent has address/pane/space/tab/status);
     // keying on `a.id` made every entry `undefined:idle`, so a real change never differed.
     const now2 = { spaces: sp.map((s) => `${s.id}:${s.status}`).join(","), agents: agents().map((a) => `${a.address}:${a.status}`).join(",") };
     const changed = now2.spaces !== this.statusSeen?.spaces || now2.agents !== this.statusSeen?.agents;
     this.statusSeen = now2;
-    if (changed || sp.some((s) => !this.shown.has(s.id)) || this.orderingDue(now)) cx.notify();
+    if (changed || settling) cx.notify();
 
   }
 
@@ -423,19 +433,29 @@ export default class Spaces extends View {
     openOverlay({ mod: "orca-menu", kind: "popup", width: 208, height: 300, props: { tab: "space", target: { id: w.id, path } } });
   }
 
-  orderingDue(now) {
-    return this.ordering && now - this.ordering.at >= 1000
-      && this.ordering.machines.every(name => machines().some(m => m.name === name && m.layout === "ready"));
-  }
-
   // Orca's rows are worktrees, keyed by host+path (host-qualified-identity.ts), not by open
   // session: two tabs on one checkout are one card. Merge Herdr spaces on the same worktree
   // before emitting, so the card and its agents span them.
-  ordered(cx) {
+  // Rows are a pure derivation of host state, like Orca's `planSidebarRows` under `useMemo`
+  // (`use-section-rows.ts:2,95`). Nothing here may mutate this view or dispatch a command:
+  // it runs inside `render`, and a reorder fired from render both loses commands and re-enters
+  // the frame. Reordering is the drag handler's job (`use-document-drop.ts:72` fires
+  // `onReorderWorktrees`); nothing here moves a space.
+  //
+  // `settled` is the one fact the old version kept here: a space is drawn only once its place
+  // is known, so a card does not flash as a folder-less row and then jump into its repo. It is
+  // now computed on each pass from `where()` instead of being latched into a `shown` set, which
+  // needed a timer to poke it and a `born` map to age it.
+  settled(w, ps, now) {
+    if (where(w, ps) in this.git) return true;
+    this.born[w.id] ??= now;
+    return now - this.born[w.id] > SETTLE;
+  }
+
+  ordered() {
+    const now = Date.now();
     const sp = spaces(), ps = panes();
-    const ready = (w) => this.shown.has(w.id) || where(w, ps) in this.git || Date.now() - (this.born[w.id] ??= Date.now()) > 1500;
-    for (const w of sp) if (!this.shown.has(w.id) && ready(w)) this.shown.add(w.id);
-    const rows = sp.map((w, i) => ({ w, i, g: this.git[where(w, ps)] ?? null }));
+    const rows = sp.map((w, i) => ({ w, i, g: this.git[where(w, ps)] ?? null, ok: this.settled(w, ps, now) }));
     // A repo worktree is one card: `linked` worktrees and second same-checkout spaces fold
     // into the first space on that top-level folder. Folder spaces merge only with themselves.
     const seen = new Set(), list = [];
@@ -462,7 +482,14 @@ export default class Spaces extends View {
       out.push(top);
       if (!r.g || r.g.linked || placed.has(r.g.repo)) continue;
       placed.add(r.g.repo);
-      const kids = list.filter((k) => nested(k) && k.g.repo === r.g.repo);
+      // Main worktree first, then the rest — a pure partition, re-evaluated every pass, exactly
+      // as Orca's `orderMainWorktreeFirst` (`section-order.ts:4-16`). `list` is in space
+      // order, so a linked worktree that happens to be an earlier space would otherwise sort
+      // above the main checkout. Nothing is written to the host: the order is a view.
+      const kids = [
+        ...list.filter((k) => nested(k) && k.g.repo === r.g.repo && !k.g.linked),
+        ...list.filter((k) => nested(k) && k.g.repo === r.g.repo && k.g.linked),
+      ];
       top.kids = kids.length;
       // Orca lists every worktree of the repo, opened or not. A worktree with no space is a
       // card that opens it on click (`space.new {folder}`), so the group's rows match git.
@@ -477,46 +504,42 @@ export default class Spaces extends View {
         kids.push({ w, i: -1, g, key: `wt:${wt.path}`, also: [], unopened: true });
       }
       top.kids = kids.length;
-      // Rows with no open space still need their review: nothing probed their branch, so ask
-      // for it here, keyed exactly like `reviewOf` looks it up. Local machine only — `gh` on
-      // the far side of an ssh may not be authenticated.
-      if (cx && !r.w.machine) {
-        for (const k of kids) {
-          if (!k.unopened || !k.g.branch) continue;
-          this.lookupPRByBranch(`${readPair(k.g.repo)[1]}::${k.g.branch}`, k.g.base, k.g.head, k.g.branch, k.g.top, cx);
-        }
-      }
       // Not filtered here: `row()` hides a folded repo's cards so its header stays, which is
-      // what a fold means. Filtering here too made the whole group disappear.
+      // what a fold means. Filtering it here too made the whole group disappear.
       kids.forEach((k) => out.push({ ...k, head: false }));
     }
-    // space.next/prev and ctrl-N follow the model, so it keeps the rows' order, folded rows included: folding moves nothing.
-    // Simulate the batch so later indexes include earlier moves. An attempted write can lose a sync conflict: let its echo settle before retrying.
-    const order = sp.map(w => w.id);
-    const target = out.map(r => r.w.id);
-    const key = JSON.stringify([order, target, machines()]);
-    if (order.every((id, i) => id === target[i])) {
-      this.ordering = null;
-    } else if (this.ordering?.key !== key || this.orderingDue(Date.now())) {
-      const moved = new Set();
-      this.ordering = { key, at: Date.now(), machines: [] };
-      for (let i = 0; i < out.length; i++) {
-        // Synthetic worktree rows are not spaces: nothing may move or select them by id.
-        if (out[i].unopened) continue;
-        const from = order.indexOf(out[i].w.id);
-        if (from === i) continue;
-        run("space.move", { id: out[i].w.id, index: i + 1 });
-        moved.add(out[i].w.machine ?? null);
-        order.splice(i, 0, order.splice(from, 1)[0]);
-      }
-      this.ordering.machines = [...moved];
-    }
-    const visible = out.filter(r => r.unopened || this.shown.has(r.w.id));
+    // Nothing here mutates or dispatches: the order below IS the answer, recomputed each pass.
+    // Ordering it in the plan is what keeps the list from rewriting itself while it loads.
+    const visible = out.filter(r => r.unopened || r.ok);
     // The drag indicator needs both cards' row positions. `i` is the space index, not the
     // row index (folded groups, merged spaces and unopened worktrees all shift it), so the
     // dragging card's position is looked up here, by its row id.
     this.rowIndex = new Map(visible.map((r, i) => [r.w.id, i]));
     return visible;
+  }
+
+  // Everything that must happen in the task phase, once per tick: ask for the reviews of rows
+  // that have no open space, then reconcile the host's order with the plan.
+  //
+  // Orca has no equivalent of the second half, and neither should we: its row order is a pure
+  // partition of the plan's items (`orderMainWorktreeFirst` = `[...main, ...rest]`,
+  // `section-order.ts:4-16`), recomputed every render. Only a drag commits an order
+  // (`use-document-drop.ts:72`).
+  //
+  // We used to dispatch one `space.move` per out-of-place row from here. Every dispatcher echo
+  // re-entered the frame, each move renumbered the rows still to be moved, and the list visibly
+  // built itself outward from the middle. Sorting in the plan removes the cascade entirely.
+  settleRows(cx) {
+    const out = this.ordered();
+    // Rows with no open space still need their review: nothing else probes those branches. Ask
+    // here, in the task phase, keyed exactly like `reviewOf` looks it up. Local machine only —
+    // `gh` on the far side of an ssh may not be authenticated. This used to live in the row
+    // builder, which made a network lookup a side effect of rendering.
+    for (const r of out) {
+      if (!r.unopened || r.w.machine || !r.g?.branch) continue;
+      if (this.reviewOf(r.g)) continue;
+      this.lookupPRByBranch(`${readPair(r.g.repo)[1]}::${r.g.branch}`, r.g.base, r.g.head, r.g.branch, r.g.top, cx);
+    }
   }
 
   // `worktree-card-agents-expansion-state.ts`: each card's disclosure is its own state,
@@ -544,7 +567,7 @@ export default class Spaces extends View {
     };
   }
 
-  grouped(t, cx, rows = this.ordered(cx)) {
+  grouped(t, cx, rows = this.ordered()) {
     const ps = panes();
     // `SectionHeader.tsx:190-192`: a header draws its collapse chevron only when its group
     // has rows (`row.count > 0`). The count is every card of the group, folded or not.
@@ -672,7 +695,7 @@ export default class Spaces extends View {
   // equivalent here is the group header each rendered row emits.
   projectKeys(cx) {
     const keys = new Set();
-    for (const r of this.ordered(cx)) if (!r.unopened) keys.add(this.foldKey(r));
+    for (const r of this.ordered()) if (!r.unopened) keys.add(this.foldKey(r));
     return [...keys];
   }
 
@@ -1039,7 +1062,7 @@ export default class Spaces extends View {
     const sp = spaces();
     // `WorktreeList.tsx:285-287`: the empty state is the row plan's emptiness, not the raw
     // collection's — an unopened worktree or a group with no rows still counts as a row.
-    const rows = this.ordered(cx);
+    const rows = this.ordered();
     // The shipped mods (the Terminals picker) still color spaces from "space.colors": the same color, from the name.
     const colors = Object.fromEntries(sp.filter(p => p.name !== "~").map(p => [p.id, tint(p.name, false)]));
     if (JSON.stringify(colors) !== JSON.stringify(shared("space.colors") ?? {})) setShared("space.colors", colors);
