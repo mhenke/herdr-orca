@@ -20,10 +20,15 @@ worktree / project group / top branch mean exactly one thing each here.
    repeatedly (tool zoom, antialiasing, stale renders). Pixels may confirm a render
    happened, never what the value should be.
 
-   **Query the Orca graph first.** `~/Projects/orca` carries a Graphify knowledge
-   graph (`graphify-out/`). Run `graphify query "<question>"` (or `graphify path` /
-   `graphify explain`) to find the file that owns a behavior instead of grepping the
-   tree; open the file it names and quote that file in the edit comment.
+   **Query the Orca graph first — once it exists.** `~/Projects/orca` is meant to
+   carry a Graphify graph in `graphify-out/`, and the query form to use is
+   `graphify query "<question>"` (or `graphify path` / `graphify explain`) so you
+   find the file that owns a behavior instead of grepping the tree; open the file
+   it names and quote it in the edit comment. **Status: not built.** A full
+   `graphify extract . --code-only` on Orca's ~37,570 files ran 40+ minutes, finished
+   AST extraction, then exited without writing `graph.json` (only `.graphify_build.json`
+   and `cache/` remain). Until it lands, read the source directly; don't cite the graph
+   as the reason for a value.
 
    **`~/Projects/herdr-t3` has a graph too.** It is the reference Herdr layout this
    package is shaped like (`layouts/ mods/ keys.json extras/themes/ scripts/sync.sh
@@ -32,28 +37,21 @@ worktree / project group / top branch mean exactly one thing each here.
    packaging, sync, keys and mod-structure questions; use the Orca graph for what
    the UI looks like and how it behaves. Its graph is built, no need to rebuild.
 
-   **Point every query at the graph explicitly — the env is rigged.**
-   `~/.zshrc:164` exports `GRAPHIFY_OUT="$HOME/.graphify/oh-my-opencode-slim"`,
-   and that wins over cwd: a bare `graphify query` in `herdr-t3` answered from
-   7348 nodes of a different project instead of its own 874, so "how does
-   sync.sh install layouts" returned `src/cli/install.ts` and never `sync.sh`.
-   It does not warn. Always pass the graph:
+   **Query from the project folder; check the graph line.** A bare `graphify query`
+   answers from `./graphify-out/`, so `cd ~/Projects/herdr-t3` first when you want
+   herdr-t3, and `cd ~/Projects/orca` for Orca. Confirm on the first output line:
+   it prints the graph it used and its node count — if that is not the project you
+   meant, the answer is about the wrong codebase.
 
-   ```
-   graphify query "<question>" --graph ~/Projects/orca/graphify-out/graph.json
-   graphify query "<question>" --graph ~/Projects/herdr-t3/graphify-out/graph.json
-   graphify path A B --graph ~/Projects/orca/graphify-out/graph.json
-   ```
-
-   `--graph` beats the variable and works from any cwd. `env -u GRAPHIFY_OUT
-   graphify query …` also works, but only from the project folder. Check the
-   first output line: it prints the graph it used and its node count — if that
-   is not the project you meant, the answer is about the wrong codebase.
-   Related traps: `extract` takes no `--graph`; it writes wherever `GRAPHIFY_OUT`
-   points, so an extract run outside one `env -u GRAPHIFY_OUT graphify extract .`
-   lands in that other project's folder and prunes the graph already there (9097
-   nodes went once). An interrupted extract leaves only `.graphify_build.json`,
-   so a missing `graph.json` means rebuild, not query.
+   This used to be a trap, worth knowing how it broke: `~/.zshrc` exported
+   `GRAPHIFY_OUT="$HOME/.graphify/oh-my-opencode-slim"`, which beats cwd, so a
+   query in herdr-t3 answered from 7348 nodes of another project (its own has 874)
+   and "how does sync.sh install layouts" returned `src/cli/install.ts`, never
+   `sync.sh`, with no warning. The export is removed; `--graph <path>` also works
+   and beats any variable. Related: `extract` has no `--graph` and writes wherever
+   `GRAPHIFY_OUT` points (one run pruned 9097 nodes from a store it did not own),
+   and an interrupted extract leaves only `.graphify_build.json`, so a missing
+   `graph.json` means rebuild, not query.
 2. **Copy the owning function, not its outputs.** Hand-tuned literals drift;
    the port of `indentation.ts` (`mods/orca-spaces/indentation.js`) ended five
    rounds of indent patches. If Orca computes it somewhere, port that module.
