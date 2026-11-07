@@ -38,7 +38,7 @@ export default class PanelHead extends View {
           .role("button").accessibility_label(label)
           .hover(s => s.opacity(1))
           .on_click(() => run("layout.select", { stack: "panel-body", child: id }))
-          .child(svg(`mods/workspace-chrome/${icon}.svg`).size(16).text_color(on ? t.foreground : t.dim))
+          .child(svg(`mods/orca-panel-head/${icon}.svg`).size(16).text_color(on ? t.foreground : t.dim))
           .when(on, el => el.child(div().absolute().bottom(0).left(9).right(9).h(2).bg(t.foreground).rounded_t(2)));
       }))
       .child(div().flex_1());

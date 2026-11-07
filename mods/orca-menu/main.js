@@ -80,7 +80,7 @@ function menuIcon(command) {
   const name = command === "orca-menu.copy-path" || command === "orca-menu.copy-name" ? "copy"
     : command === "orca-menu.open-terminal" ? "terminal"
     : command.endsWith(".close") ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : command === "pane.split" ? "panel-right" : command === "pane.zoom" ? "square" : "terminal";
-  return name === "copy" ? "mods/orca-menu/copy.svg" : `mods/workspace-chrome/${name}.svg`;
+  return `mods/orca-menu/${name}.svg`;
 }
 
 // The key bound to a command, for the hint on the right.
