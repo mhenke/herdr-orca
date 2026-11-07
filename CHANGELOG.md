@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-07
+
+### Bug Fixes
+
+- **ci:** Disable setup-uv lockfile cache and add orca-menu parity rows
+- **release:** Use offline git-cliff mode across scripts and workflows
+- **spaces:** Show main checkout when repo is opened only on linked worktrees
+- **orca-spaces:** Anchor each repo at its main worktree, and stop the list jumping
+- **orca-tabs:** Keep the sidebar toggle in one slot and draw Orca's window controls
+- **orca-panel-head:** One right-sidebar toggle, in the titlebar slot
+
+### Documentation
+
+- **readme:** Document main checkout auto-discovery and update release skill path
+- **adr:** Match Orca's layout, and render the gap where Herdr has no backend
+- **glossary:** Page, gap and saved project; correct the title-only card
+- **pipeline:** Delta the project doc onto today's architecture
+
+### Features
+
+- **layout:** Give the middle column the Tasks, Automations and Orca Mobile pages
+- **orca-panel-gap:** Name the Tasks, Automations and Orca Mobile gaps
+- **orca-tabs,orca-spaces:** Choosing a workspace shows the terminals again
+- **orca-nav:** Add history arrow icons and update nav svg stroke geometry
+- **orca-nav:** Add history arrows and Tasks, Automations, Orca Mobile nav rows
+- **orca-tabs:** Add tooltip to sidebar toggle button
+
+### Styling
+
+- **orca-nav:** Update arrow icons to standard Lucide path vectors
 ## [0.1.0] - 2026-11-07
 
 ### Bug Fixes
@@ -109,4 +139,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stroke width, and the group header's missing plus
 - The palette was invented; the drop indicator was the wrong shape
 - Refresh the raster after the row-order fix
+[0.2.0]: https://github.com/mhenke/herdr-orca/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/mhenke/herdr-orca/releases/tag/v0.1.0
 
