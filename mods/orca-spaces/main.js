@@ -256,6 +256,22 @@ export default class Spaces extends View {
         }
       }
       this.git[key] = info;
+      // Orca's right-aligned meta badge cluster (`WorktreeCardMetaBadges.tsx:86` `ml-auto ...
+      // pr-1.5`) draws the linked review: `ReviewIcon` (worktree-review-presentation.tsx:105)
+      // picks GitPullRequestClosed / GitPullRequestDraft / GitMerge or the plain PR glyph by
+      // state, toned by `getStateTone` (merged purple, open emerald, closed/neutral muted).
+      // Herdr carries no PR, so it comes from `gh pr list --head <branch>`, which is also what
+      // Orca's review link resolves through. Only the current branch is asked, once per probe;
+      // no gh, no auth or no PR simply leaves the slot empty, as Orca's `review == null` does.
+      if (info.branch && !on) {
+        try {
+          const pr = await exec("gh", ["pr", "list", "--head", info.branch, "--json", "number,state,isDraft", "--limit", "1"], { cwd });
+          if (pr.code === 0) {
+            const [first] = JSON.parse(pr.stdout || "[]");
+            if (first?.number) info.pr = { number: first.number, state: first.isDraft ? "draft" : String(first.state ?? "").toLowerCase() };
+          }
+        } catch {}
+      }
       // Orca's rows are the repo's worktrees (`listRepoWorktrees`), not its open sessions, so an
       // unopened worktree still draws a card. Record each one; rows without a space open in it on click.
       if (!info.linked) {
@@ -468,6 +484,19 @@ export default class Spaces extends View {
     });
   }
 
+  // `ReviewIcon` (worktree-review-presentation.tsx:105-120): the glyph is state-specific —
+  // merged GitMerge, closed GitPullRequestClosed, draft GitPullRequestDraft, else the plain
+  // PullRequestIcon — and the tone is `getStateTone` (:54-70): merged purple-400/70, open
+  // emerald-500/80, closed muted-foreground/60, draft muted-foreground/50. `size-3` is the
+  // MetaIconBadge glyph size.
+  prBadge(pr, t, id) {
+    const icon = pr.state === "merged" ? "git-merge" : pr.state === "closed" ? "git-pull-request-closed" : pr.state === "draft" ? "git-pull-request-draft" : "git-pull-request";
+    const tone = pr.state === "merged" ? "#c084fcb3" : pr.state === "open" ? "#10b981cc" : pr.state === "draft" ? "#acacac80" : pr.state === "closed" ? "#acacac99" : "#acacacb3";
+    return div().flex_none().flex().items_center().justify_center().pr(6)
+      .child(tip(this.hot, t, `pr-${id}`, `PR #${pr.number}`, stop(this, t, `pr-${id}`, div().id(`pr-${id}`)
+        .child(svg(`mods/orca-spaces/${icon}.svg`).size(12).flex_none().text_color(tone)))));
+  }
+
   // Only what's unusual, after the name: "herdr \u00b7 spike \u21912 \u21931". The repo or
   // branch goes when the name already says it (a worktree is named after its branch),
   // and master/main go: nearly every space is on one.
@@ -659,8 +688,13 @@ export default class Spaces extends View {
               .text_size(10).font_medium().line_height("14px").text_color("#f0f0f0b3").child("primary")))
             .child(g ? this.gitTail(g, t, w.id) : div().flex_1()))
           // Meta row: the branch, or the folder's own last segment — 11px muted, mono for paths
-          // (`WorktreeCardFolderPath`: `font-mono text-[11px] leading-none`).
-          .when(Boolean(meta), el => el.child(div().min_w(0).truncate().text_size(11).line_height("11px").text_color(t.dim).when(metaMono, m => m.font_family("JetBrains Mono")).child(meta)))
+          // (`WorktreeCardFolderPath`: `font-mono text-[11px] leading-none`). The review badge
+          // sits at the row's end, which is Orca's `ml-auto ... pr-1.5` cluster
+          // (WorktreeCardMetaBadges.tsx:86) and the only thing it holds for a classic card.
+          .when(Boolean(meta), el => el.child(h_flex().w_full().min_w(0).items_center()
+            .child(div().min_w(0).truncate().text_size(11).line_height("11px").text_color(t.dim).when(metaMono, m => m.font_family("JetBrains Mono")).child(meta))
+            .child(div().flex_1())
+            .when(Boolean(g?.pr), row => row.child(this.prBadge(g.pr, t, w.id)))))
           // Orca's compact agent summary (worktree-card-compact-agents.tsx): h-6, px-1,
           // 11px muted, a chevron that folds the rows, which carry a 6px status dot each.
           .when(mine.length > 0, el => el.child(agentBlock))),
@@ -708,6 +742,13 @@ export default class Spaces extends View {
           cx.notify();
         })
         .child(v_flex().id("space-content").w_full().flex_none().px(0).pb(8)
-          .children(this.grouped(t)))));
+          // EmptyState.tsx:23-27 — with no filters in Herdr only the first branch applies:
+          // `flex flex-col items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground`
+          // holding "No workspaces found". Orca gates it on `startupWorktreeRefreshCompleted`;
+          // Herdr reports no equivalent, and a zero-space list is already settled.
+          .when(sp.length === 0, el => el.child(div().flex().flex_col().items_center().gap(2).px(16).py(24).w_full()
+            .text_size(11).text_center().text_color(t.muted)
+            .child(div().child("No workspaces found"))))
+          .children(sp.length ? this.grouped(t) : []))));
   }
 }
