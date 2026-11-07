@@ -49,15 +49,18 @@ worktree / project group / top branch mean exactly one thing each here.
    (`lookupPRByBranch`, `foldKey`, `setPr`) — never to a plausible-looking Orca
    name it is merely reminiscent of.
 
-   **Query the Orca graph first — once it exists.** `~/Projects/orca` is meant to
-   carry a Graphify graph in `graphify-out/`, and the query form to use is
-   `graphify query "<question>"` (or `graphify path` / `graphify explain`) so you
+   **Query the Orca graph first.** `~/Projects/orca/graphify-out/graph.json` is
+   built and usable (**237,654 nodes**, 332 MB), so the query form is
+   `graphify query "<question>"` (or `graphify path` / `graphify explain`) to
    find the file that owns a behavior instead of grepping the tree; open the file
-   it names and quote it in the edit comment. **Status: not built.** A full
-   `graphify extract . --code-only` on Orca's ~37,570 files ran 40+ minutes, finished
-   AST extraction, then exited without writing `graph.json` (only `.graphify_build.json`
-   and `cache/` remain). Until it lands, read the source directly; don't cite the graph
-   as the reason for a value.
+   it names and quote it in the edit comment. It is large enough that a broad
+   question truncates — narrow it (`--budget N`, or `context_filter=['call']`)
+   rather than reading a partial answer as the whole one.
+
+   An earlier attempt on Orca's ~37,570 files died after AST extraction without
+   writing `graph.json`; that is stale. The build that succeeded is what
+   `graphify-out/` holds now. Still read the source file to confirm a value —
+   the graph finds the owner, it does not prove the line.
 
    **`~/Projects/herdr-t3` has a graph too.** It is the reference Herdr layout this
    package is shaped like (`layouts/ mods/ keys.json extras/themes/ scripts/sync.sh

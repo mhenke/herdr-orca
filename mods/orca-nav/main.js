@@ -34,10 +34,17 @@ export default class Nav extends View {
     return v_flex().w_full().flex_none().px(8).pt(8).pb(4).gap(2).bg(t.chrome)
       .child(search)
       .child(div().h(2))
-      // Navigation rows.
-      .child(this.row(t, "nav-tasks", "list-checks", "Tasks", noop))
-      .child(this.row(t, "nav-automations", "calendar-clock", "Automations", noop))
-      .child(this.row(t, "nav-mobile", "smartphone", "Orca Mobile", noop))
+      // Orca's SidebarNav renders Tasks, Automations and Orca Mobile by default
+      // (`shouldShowTasksButton` etc. are `!== false`, SidebarNav.tsx:25-31), but each opens a
+      // page Herdr has no equivalent for — `openTaskPage()`, `activeView = 'automations'`,
+      // `activeView = 'mobile'`. Three rows that do nothing when clicked are worse than an
+      // honest gap, so they are dropped and this note takes the same space. Orca's own escape
+      // hatch is the same idea: `hideAutomationsButton` / `hideMobileButton` flip a setting and
+      // the row stops rendering; we simply start there.
+      .child(v_flex().mt(2).w_full().rounded(6).border_1().border_color("#f0f0f01a").px(8).py(8).gap(3)
+        .child(div().text_size(11).font_semibold().text_color("#f0f0f099").child("Orca port"))
+        .child(div().text_size(11).line_height("15px").text_color("#f0f0f066")
+          .child("Tasks, Automations and Orca Mobile open pages Herdr has no equivalent for, so those rows are left out rather than shown dead.")))
       .child(div().h(4))
       // Projects header — SidebarHeader.tsx:61-66: mt-2 h-8 gap-1.5 px-2; title pl-2 pr-0.5
       // text-xs semibold muted/80; actions gap-1, icon-xs buttons (24px) with 14px icons, stroke 2.25.

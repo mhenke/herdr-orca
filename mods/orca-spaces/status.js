@@ -18,7 +18,10 @@
 //   idle     <span className="block size-2 rounded-full bg-neutral-500/40" />     (8px, 40% alpha)
 //   permission  <AgentQuestionIcon className="size-3" /> — a full 12px glyph, the only branch
 //            that fills the box. Herdr's `blocked` is Orca's `permission`.
-//   failed     size-1.5 (6px) red-500 dot.  `interrupted` 6px muted-foreground dot.
+// Orca also has `failed` (6px red-500 dot) and `interrupted` (6px muted dot). They are not
+// ported: Herdr's `Model::status` (model.rs:528-536) only ever returns `working`, `blocked`,
+// `done` or `idle` — `blocked | error` both fold into "blocked" before reaching a mod — so a
+// branch for either would be dead code pretending to be parity.
 //
 // `working` is the case an 8px filled dot gets wrong: at a glance it reads as `done`.
 import { div, svg } from "gpui-kit";
@@ -30,8 +33,6 @@ export const STATUS_COLORS = {
   working: "#eab308", // yellow-500
   done: "#10b981", // emerald-500
   idle: "#73737366", // neutral-500 at 40%
-  failed: "#ef4444", // red-500
-  interrupted: "#acacac", // muted-foreground
 };
 
 // The 12px box every branch shares (`h-3 w-3`).
@@ -65,8 +66,6 @@ export function statusMark(status, size = 12) {
         .text_color(STATUS_COLORS.working).spin(1000),
     );
   }
-  if (status === "failed") return box(size).child(div().size(6).rounded_full().flex_none().bg(STATUS_COLORS.failed));
-  if (status === "interrupted") return box(size).child(div().size(6).rounded_full().flex_none().bg(STATUS_COLORS.interrupted));
   // `done`/`active` share emerald; everything else falls to the quiet idle dot.
   return dot(size, STATUS_COLORS[status] ?? STATUS_COLORS.idle);
 }
