@@ -42,20 +42,20 @@ Sixteen mods, all `"place": "none"` (composed into blocks rather than floated):
 |---|---|---|
 | `orca-chrome` | titlebar strip and the sidebar footer | 66 |
 | `orca-nav` | Search, Tasks/Automations/Orca Mobile rows, history arrows, Projects header | 142 |
-| `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, saved folders | 1141 |
+| `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, saved folders | 1175 |
 | `orca-tabs` | the tab rail, window controls, right-sidebar toggle | 311 |
 | `orca-pane` | the terminal pane header, incl. its right-click | 100 |
 | `orca-pane-status` | the agent mark drawn in a pane header | 35 |
 | `orca-panel-head` | the right panel's activity switcher | 115 |
 | `orca-panel-gap` | the honest body for a panel or page Herdr has no backend for | 61 |
-| `orca-files` | the file tree (virtualized), preview, name/content search | 818 |
-| `orca-changes` | the source-control list and diff | 313 |
-| `orca-agents` | the agents panel | 110 |
+| `orca-files` | the file tree (virtualized), preview, name/content search | 1021 |
+| `orca-changes` | the source-control list, split commit actions, and PR creation | 482 |
+| `orca-agents` | the agents panel with workspace/project/all scopes and search | 204 |
 | `orca-status` | the bottom status bar | 68 |
-| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global` | 384 |
+| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global` | 405 |
 | `new-menu` | the create popup behind `+` | 119 |
 | `orca-landing` | the empty-workspace page | 108 |
-| `orca-float` | the floating agent-session panel | 156 |
+| `orca-float` | the floating agent-session panel | 160 |
 
 Three rules shape the composition:
 
@@ -142,7 +142,7 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 - **Overall coverage**: 0% by unit-test measure. There is no test runner, no `package.json` and no test files.
 - **Testing framework**: none. `scripts/verify.py` is an audit, not a suite.
 - **Rationale**: the defects this project actually shipped were four runtime throws, three invented values and three fabricated citations. None is visible to a unit test; the oracle for a value is `~/Projects/orca`, which is not a JS dependency. So the audit checks what would have caught them, and it did — it found three fabricated line citations in its first run.
-- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (428 citations); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
+- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (480 citations checked); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
 - **Known untested areas**: pointer interaction. Keys are injectable — this build's `hyprctl` speaks the Lua dispatcher, and `hl.dsp.send_key_state({mods="", state="down", key="f"})` reaches the focused window (a programmatically focused `Input` accepted typed text this way). Pointer is not: `hl.dsp.cursor` exposes only `move` and `move_to_corner`, and `xdotool`, `ydotool`, `wlrctl` are absent while `/dev/uinput` is root-only. So hover, click and drag stay code-verified; typing is verifiable when a probe can focus an element.
 
 ## Entry Points
@@ -158,15 +158,19 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 
 ## Changed Files
 
-`.claude/pipeline/project-doc.md` is a DELTA patch over the 22:55 delta. Re-read for this patch:
-`AGENTS.md`, `GLOSSARY.md` (new terms: space folder, explorer mode, search result),
-`mods/orca-files/main.js` (tree now render-through-`v_virtual_list`; `rg` exit 2 kept as a
-partial result in both the listing and the content search; both query rows mounted, one hidden),
-`mods/orca-nav/main.js` (Add-project awaits `pickFolder()`), the tooltip sweep across
-`orca-chrome`, `orca-pane`, `orca-status`, `orca-tabs`. Sections re-read: Architecture Pattern
-(mod table sizes, virtualized tree), Folder Structure (mod count), Cross-Cutting Concerns
-(render budget, error bar), Test Coverage (citation count, injectability facts).
+`.claude/pipeline/project-doc.md` is a DELTA patch over the previous delta. Re-scanned files:
+- `mods/orca-agents/main.js`: Added Orca's `VaultScopeSwitch` (`workspace`, `project`, `all`) from `AiVaultPanelControls.tsx:87-160`, live search filter from `AiVaultPanelHeader.tsx:161-202`, and count bar from `AiVaultSessionListBar.tsx:50-54`. Added `search.svg` and `x.svg`.
+- `mods/orca-changes/main.js`: Added split commit action button from `commit-action-menu.tsx:34-85`, action dropdown with compound actions from `source-control-dropdown-items.ts:128-143`, and Create PR modal dialog/workflow via `gh pr create` from `use-hosted-review-creation.ts:80-150` and `review-animated-visual-ship-styles.tsx:7`. Added `git-pull-request.svg`.
+- `mods/orca-menu/main.js`: Fixed display name resolution line citation to `worktree-default-display-name.ts:13-25`.
+- `mods/orca-spaces/main.js`: Focus fallback on first group header's `space-new` and remote machine string passing.
+- `mods/orca-files/main.js`: Dropped the invented `rg --max-count 20` (Orca sets no per-file cap, so badges and totals no longer undercount); search summary `text-2xs` = 11px; match-row gap 4px (`SearchResultItems.tsx:178`). Match-click reveal is left unimplemented and documented: `EditorState`'s JS surface is `value`/`set_value`/`on`/`release` only, so no line or scroll target reaches JS.
+- `mods/orca-spaces/main.js` + `mods/orca-menu/main.js`: The `space` menu is now worktree-keyed (`WorktreeContextMenuView.tsx:165-298`): `Update`/`Close` only for an open space, `Open in`/`Copy Path`/`Copy Worktree Name` and the worktree actions always, `Remove worktree` only when linked. Opener passes `{id, path, top, branch, machine, linked, folder}`. Agent rows activate their pane (`worktree-card-compact-agent-row.tsx:311`) and stop the card's press.
+- `mods/orca-changes/main.js`: Commit & Push / Push / Sync actions and the Create-PR dialog (`gh pr create`); the PR cache is not written from this mod because the sidebar keys it `JSON.stringify([machine, commonDir])`.
+- `/.claude/pipeline/project-doc.md`: LOC table refreshed to current `main.js` sizes (orca-spaces 1175, orca-files 1021, orca-changes 482, orca-menu 405).
+- Re-scanned, no substantive change: `README.md` (prose rewrite, 78+/113-), `RECIPE.md` (6 lines), `mods/orca-float/main.js` (4 lines — the session row's focus click was already present).
+- `GLOSSARY.md`: Added canonical definitions for `Vault scope`, `Commit action menu`, and `Hosted review creation`.
+- `docs/adr/0005-live-agent-scoping-vs-transcript-indexing.md`: Recorded the architectural decision to bind the Agents panel to in-memory live agent models rather than crawling on-disk transcripts.
 
 ## Last Scanned
 
-2026-11-07T23:45:00Z
+2026-11-08T00:21:26Z

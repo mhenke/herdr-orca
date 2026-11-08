@@ -14,18 +14,26 @@ exactly one thing here.
 - **Project group** — the sidebar unit Orca heads with one `SectionHeader`: a repo on one machine
   plus every worktree of it. Exactly one header per repo, never one per space.
 - **Project key** — the string a project group folds on: the repo identity
-  `JSON.stringify([machine, common-dir])`, or `space:<id>` for a folder with no repo
-  (`mods/orca-spaces/main.js:310`, `:657-659`). The header keys on `foldKey` (`:671`) and
-  collapse-all maps the rendered rows through it via `projectKeys` (`:70-71`, `:664-667`), so
-  they cannot disagree.
+  `JSON.stringify([machine, common-dir])`, or `space:<id>` for a folder with no repo. The header
+  keys on `foldKey` (`worktree-plan.js`) and collapse-all maps the rendered rows through it via
+  `projectKeys`, so they cannot disagree.
 - **Top branch** — the branch the project group treats as primary: the main checkout's own
   branch. Only the main checkout can carry the `primary` badge; a linked worktree and a plain
   folder workspace carry none.
 - **Worktree row** — one card in a project group, identified by its machine and path, not by an
-  open space (`mods/orca-spaces/main.js:424-438`). Two spaces on one checkout are one row; a
-  worktree with no space is still a row, and clicking it opens a space there (`:462-470`).
+  open space (`ordered()` builds the rows, `card()` draws them). Two spaces on one checkout are
+  one row; a worktree with no space is still a row, and clicking it opens a space there.
 - **Card** — the clickable row for one worktree row inside a project group; its agents span every
   space open on that checkout.
+- **Worktree menu** — the context menu a card opens, belonging to its worktree rather than to a
+  space: `Update` and `Close` exist only while a space is open on the checkout, while `Open in`,
+  the copy actions and the worktree actions are offered on a closed checkout too. Herdr's tab is
+  still named `space`; the concept is the worktree (`WorktreeContextMenuView.tsx:165-298`).
+  _Avoid_: space menu, card menu, workspace context menu.
+- **Space-born action** — a menu action that needs a live Herdr space to name its target, as
+  opposed to a worktree action, which needs only the checkout's facts. `Update` and `Close` are
+  space-born; everything else on a card is worktree-born.
+  _Avoid_: space-only, tab action.
 - **Agent** — a terminal Herdr recognises as running a known program. Its status word is one of
   `working | blocked | done | idle` (`herdr-app/src/model.rs:528-536`). That is the whole
   vocabulary: Herdr folds `error` into `blocked` before a mod sees it (`:532`), and Orca's other
@@ -55,8 +63,10 @@ exactly one thing here.
 - **Review** — the pull request for a worktree's own branch, drawn as a mark at the end of the
   card's meta row. A review belongs to a **branch**, never to a repo: two worktrees of one repo
   have different reviews, and a worktree with no PR has none. It is read from a persisted cache
-  keyed `<common-dir>::<branch>`, not fetched while rendering (`mods/orca-spaces/main.js:82-88`,
-  `:350-357`); a cached `null` means "asked, no PR".
+  keyed `<common-dir>::<branch>`, not fetched while rendering; a cached `null` means "asked, no
+  PR". Unlike the project key it carries no machine, but the lookup only ever runs on the local
+  machine (`if (!on && info.branch)`), so a remote worktree shows no review rather than a wrong
+  one; the hostless key is latent, not a live collision.
 - **Port** — reproduce Orca's behaviour and result using Herdr's primitives. Not *transcribe*
   (copy its markup literally, impossible here) and not *invent* (a control Orca has no
   counterpart for). See AGENTS.md rule 1.
@@ -84,3 +94,13 @@ exactly one thing here.
 - **Search result** — a Contents-mode answer, grouped by file: the file, its match count and its
   matching lines. A result belongs to a file, and the summary counts matches *and* files, so
   "no results" means no matching text, not an empty tree.
+- **Vault scope** — the visibility boundary applied to agents in the Agents panel: `Workspace`
+  restricts agents to the active space, `Project` encompasses all spaces sharing the same repository
+  or root folder, and `All` includes every live agent across the system.
+  _Avoid_: agent filter, session scope, agent mode.
+- **Commit action menu** — the split action trigger in the Changes panel pairing the primary commit
+  operation with a dropdown of git synchronization and review actions.
+  _Avoid_: git dropdown, commit menu, action list.
+- **Hosted review creation** — the workflow of drafting, configuring, and publishing a pull request
+  on the remote host directly from the Changes panel.
+  _Avoid_: PR dialog, review modal, make PR.
