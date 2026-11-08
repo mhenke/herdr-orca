@@ -59,6 +59,69 @@ function inFolder(root, path) {
   return Boolean(root && path && (path === root || path.startsWith(root + "/") || root.startsWith(path + "/")));
 }
 
+// Git cache reader for project/repository resolution across worktrees.
+// `git.cache.v2` stores git info keyed by [machine, folder].
+function gitCache() {
+  try {
+    return JSON.parse(localStorage.getItem("git.cache.v2") ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+
+// Resolves project scope for active space across linked worktrees and same-repo checkouts.
+// Port of Orca's `deriveAiVaultScopeSessionPaths` (ai-vault-scope-paths.ts:47-95)
+// and `buildAiVaultSessionProjectById` (ai-vault-session-projects.ts:80-120).
+function resolveProjectScope(activeSpace, sp) {
+  if (!activeSpace) {
+    return { projectFolder: null, projectPaths: new Set(), isSameProject: () => false };
+  }
+  const projectFolder = activeSpace.folder ?? null;
+  const cache = gitCache();
+  const activeKey = JSON.stringify([activeSpace.machine ?? null, projectFolder]);
+  // `git.cache.v2` keys by [machine, folder]; a space opened on a linked worktree may only be
+  // reachable through the repo entry that lists it (`top`/`worktrees`).
+  const activeGit = cache[activeKey] ?? Object.values(cache).find(
+    (g) => g?.top === projectFolder || (g?.worktrees ?? []).some((wt) => wt.path === projectFolder)
+  );
+  const activeRepo = activeGit?.repo ?? null;
+  const projectPaths = new Set();
+  if (projectFolder) projectPaths.add(projectFolder);
+
+  if (activeRepo) {
+    for (const g of Object.values(cache)) {
+      if (g?.repo === activeRepo) {
+        if (g.top) projectPaths.add(g.top);
+        for (const wt of g.worktrees ?? []) {
+          if (wt.path) projectPaths.add(wt.path);
+        }
+      }
+    }
+  }
+
+  // Spaces belonging to the same repository (share git common-dir or known worktree path)
+  // or matching the folder workspace.
+  const isSameProject = (space) => {
+    if (!space) return false;
+    if (space.id === activeSpace.id) return true;
+    if (activeRepo) {
+      const spaceKey = JSON.stringify([space.machine ?? null, space.folder]);
+      const spaceGit = cache[spaceKey];
+      if (spaceGit?.repo === activeRepo) return true;
+      if (space.folder && projectPaths.has(space.folder)) return true;
+    }
+    return Boolean(projectFolder && space.folder && inFolder(projectFolder, space.folder));
+  };
+
+  for (const s of sp) {
+    if (s.folder && isSameProject(s)) {
+      projectPaths.add(s.folder);
+    }
+  }
+
+  return { projectFolder, projectPaths, isSameProject };
+}
+
 // `formatTimeAgo` (ai-vault-session-time.tsx:32-74).
 function ago(ms) {
   if (!Number.isFinite(ms)) return "Unknown time";
@@ -395,7 +458,7 @@ export default class AgentsPanel extends View {
     const sp = spaces() ?? [];
     const activeSpace = sp.find((s) => s.active);
     const workspaceAvailable = Boolean(activeSpace);
-    const projectFolder = activeSpace?.folder;
+    const { projectFolder, projectPaths, isSameProject } = resolveProjectScope(activeSpace, sp);
     const projectAvailable = Boolean(projectFolder);
 
     let effectiveScope = this.scope;
@@ -405,20 +468,24 @@ export default class AgentsPanel extends View {
       effectiveScope = "all";
     }
 
-    // Filter by scope (AiVaultPanel.tsx:140-148)
+    // Filter by scope (AiVaultPanel.tsx:140-148, deriveAiVaultScopeSessionPaths,
+    // ai-vault-scope-paths.ts:47-95).
     let filtered = rawList;
     if (effectiveScope === "workspace" && activeSpace) {
       filtered = filtered.filter((a) => a.space === activeSpace.id);
-    } else if (effectiveScope === "project" && projectFolder) {
-      filtered = filtered.filter((a) => inFolder(projectFolder, sp.find((x) => x.id === a.space)?.folder));
+    } else if (effectiveScope === "project" && projectAvailable) {
+      filtered = filtered.filter((a) => isSameProject(sp.find((x) => x.id === a.space)));
     }
 
     // The same scope filter for history rows, by their recorded cwd
     // (useAiVaultPanelSessions, src/renderer/src/components/right-sidebar/ai-vault/session-list/ai-vault-session-filters.ts:20).
-    const scopeFolder =
-      effectiveScope === "workspace" ? activeSpace?.folder : effectiveScope === "project" ? projectFolder : null;
     let history = this.history;
-    if (scopeFolder) history = history.filter((s) => inFolder(scopeFolder, s.cwd));
+    if (effectiveScope === "workspace" && activeSpace?.folder) {
+      history = history.filter((s) => inFolder(activeSpace.folder, s.cwd));
+    } else if (effectiveScope === "project" && projectAvailable) {
+      const paths = [...projectPaths];
+      history = history.filter((s) => s.cwd && paths.some((p) => inFolder(p, s.cwd)));
+    }
 
     // Search over the loaded fields. Orca searches a full-text index built in the main
     // process (src/main/ai-vault-search/session-search-engine.ts); Herdr has no index, so
