@@ -1,6 +1,6 @@
 # 0005 — Scope Agents panel from live host models, not on-disk transcript indexing
 
-- **Status**: accepted
+- **Status**: superseded by [0008](0008-transcript-history-off-the-render-path.md)
 - **Date**: 2026-11-07
 
 ## Context

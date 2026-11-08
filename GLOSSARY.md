@@ -30,6 +30,9 @@ exactly one thing here.
   the copy actions and the worktree actions are offered on a closed checkout too. Herdr's tab is
   still named `space`; the concept is the worktree (`WorktreeContextMenuView.tsx:165-298`).
   _Avoid_: space menu, card menu, workspace context menu.
+- **Pane menu** — the context menu opened from a pane's header or surface. Evaluates the pane
+  and terminal identity, providing clipboard, screen maintenance, split, and agent continuation actions.
+  _Avoid_: terminal menu, terminal context menu, buffer menu, right-click popup.
 - **Space-born action** — a menu action that needs a live Herdr space to name its target, as
   opposed to a worktree action, which needs only the checkout's facts. `Update` and `Close` are
   space-born; everything else on a card is worktree-born.
@@ -38,6 +41,45 @@ exactly one thing here.
   `working | blocked | done | idle` (`herdr-app/src/model.rs:528-536`). That is the whole
   vocabulary: Herdr folds `error` into `blocked` before a mod sees it (`:532`), and Orca's other
   states (`monitoring`, `permission`, `unconfirmed`, `interrupted`) do not exist here.
+- **Tab** — one space's set of panes, drawn in the tab rail. A tab belongs to exactly one space,
+  and a pane to exactly one tab; moving a tab to another space is not `space.move`.
+  _Avoid_: workspace, window, session.
+- **Pane** — an individual viewport slot inside a tab. Holds either a running terminal process or an
+  embedded mod view.
+  _Avoid_: window, tile, split, view.
+- **Mod pane** — a pane hosting a mod view (such as a file tree or git diff) rather than a shell terminal.
+  Sits beside terminal panes inside a tab's layout tree.
+  _Avoid_: widget pane, plugin window, tool split.
+- **Terminal split** — the division of a tab's viewport into two adjacent panes, either vertically
+  (`right`) or horizontally (`down`).
+  _Avoid_: tab split, window split, column split.
+- **Tab migration** — transferring an active tab and its running terminals from one space into another.
+  Distinct from tab reordering, which only changes position within the current space.
+  _Avoid_: tab move, space move, workspace transfer.
+- **Tab color** — the accent tint assigned to a tab, drawn as an indicator dot before the label.
+  _Avoid_: tab theme, tab badge, tab tag.
+- **Tab group** — Orca's multi-column container allowing multiple parallel tab strips in one workspace.
+  Not a Herdr construct: Herdr maintains strictly one tab strip per space.
+  _Avoid_: split tab bar, tab column, workspace column.
+- **Session capture** — the sanitised, bounded tail of a pane's scrollback that seeds a fork or a
+  handoff. It is a raw digest of the session, never the session, and carries no instruction framing.
+  _Avoid_: transcript, log dump, history.
+- **Fork prompt** — a markdown instruction envelope enclosing a session capture that directs the
+  *same* agent to treat the prior transcript as background context for an independent session.
+  _Avoid_: fork context, fork template.
+- **Continuation prompt** — a markdown instruction envelope enclosing a session capture that directs
+  a *different* agent to continue from that stopping point.
+  _Avoid_: handoff prompt, continuation context.
+- **Resume** — reopening a past session in its own CLI, in the folder the session recorded. It is
+  the same session; nothing is seeded and no new prompt is written.
+  _Avoid_: restore, reopen, continue.
+- **Fork** — a new session of the *same* agent, seeded with a fork prompt, so the earlier work
+  carries over while the original stays untouched. If in a git repository, the fork opens in an
+  isolated branch; otherwise it opens in an independent tab in the same folder.
+  _Avoid_: clone, duplicate, branch.
+- **Handoff** — a new session of a *different* agent, seeded with a continuation prompt. Fork and
+  handoff share their mechanism; they differ only in whether the agent changes.
+  _Avoid_: continue, transfer, hand-over.
 - **Mark** — the status glyph at the head of a card or an agent row. Not a dot: the mark differs
   by state — a turning ring for `working`, a question glyph for `blocked` (Herdr's word for
   Orca's `permission`), a filled dot for `done`, a quieter dot for `idle`. A card's mark shows

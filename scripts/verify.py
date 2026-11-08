@@ -38,6 +38,9 @@ LOCAL = {
     # Herdr's own kind-binding file. A mod names it to explain how Herdr spells a key
     # ("ctrl-shift-t"), which is a fact about Herdr, not a parity claim about Orca.
     "keys.json",
+    # Herdr's standard-agent catalog. A mod names it to say which agents it can offer, which is
+    # a fact about Herdr, not a parity claim about Orca.
+    "programs.json",
 }
 
 CITE = re.compile(r"([A-Za-z0-9_./-]+\.(?:tsx?|jsx?|json|css))(?![\w.])(?::(\d+)(?:-(\d+))?)?")

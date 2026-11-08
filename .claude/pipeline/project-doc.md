@@ -36,26 +36,28 @@ No `package.json`, no lockfile, no installed npm dependencies. That is intention
 
 `layouts/orca.json` is the root of the system and owns geometry: three columns, their sizes, dividers, background, theme name and the terminal padding. Each region's contents come from exactly one mod. Mods draw; the layout arranges. A mod that also tried to size itself would fight the layout, so sizes live in the layout and only padding/type inside mods.
 
-Sixteen mods, all `"place": "none"` (composed into blocks rather than floated):
+Eighteen mods, all `"place": "none"` (composed into blocks rather than floated):
 
 | Mod | Owns | LOC |
 |---|---|---|
 | `orca-chrome` | titlebar strip and the sidebar footer | 66 |
-| `orca-nav` | Search, Tasks/Automations/Orca Mobile rows, history arrows, Projects header | 142 |
-| `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, saved folders | 1175 |
+| `orca-nav` | Search, Tasks/Automations/Orca Mobile rows, history arrows, Projects header and its options menu | 429 |
+| `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, saved folders | 1340 |
 | `orca-tabs` | the tab rail, window controls, right-sidebar toggle | 311 |
-| `orca-pane` | the terminal pane header, incl. its right-click | 100 |
+| `orca-pane` | the terminal pane header, its drag grip, and its right-click | 159 |
 | `orca-pane-status` | the agent mark drawn in a pane header | 35 |
 | `orca-panel-head` | the right panel's activity switcher | 115 |
 | `orca-panel-gap` | the honest body for a panel or page Herdr has no backend for | 61 |
-| `orca-files` | the file tree (virtualized), preview, name/content search | 1021 |
-| `orca-changes` | the source-control list, split commit actions, and PR creation | 482 |
-| `orca-agents` | the agents panel with workspace/project/all scopes and search | 204 |
+| `orca-files` | the file tree (virtualized), preview, name/content search; opens a file from `props.file` | 1026 |
+| `orca-changes` | the source-control list, split commit actions, conflict resolution, and PR creation | 696 |
+| `orca-agents` | the agents panel: live scopes, search, and session history with resume | 479 |
 | `orca-status` | the bottom status bar | 68 |
-| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global` | 405 |
+| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global`, plus the transcript capture shared with handoff | 451 |
 | `new-menu` | the create popup behind `+` | 119 |
 | `orca-landing` | the empty-workspace page | 108 |
 | `orca-float` | the floating agent-session panel | 160 |
+| `orca-handoff` | the hand off / fork agent-session dialog | 364 |
+| `orca-tab-move` | the move-tab overlay: reorder in a space, migrate to another | 424 |
 
 Three rules shape the composition:
 
@@ -168,9 +170,20 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 - `mods/orca-changes/main.js`: Commit & Push / Push / Sync actions and the Create-PR dialog (`gh pr create`); the PR cache is not written from this mod because the sidebar keys it `JSON.stringify([machine, commonDir])`.
 - `/.claude/pipeline/project-doc.md`: LOC table refreshed to current `main.js` sizes (orca-spaces 1175, orca-files 1021, orca-changes 482, orca-menu 405).
 - Re-scanned, no substantive change: `README.md` (prose rewrite, 78+/113-), `RECIPE.md` (6 lines), `mods/orca-float/main.js` (4 lines — the session row's focus click was already present).
+- `mods/orca-agents/main.js`: The Agents panel gained Orca's session history: an OMP transcript adapter (bounded head/tail read per file, since `readTextFile` caps at 1 MiB), parsed rows with title/preview/metadata, and resume via `terminal.open { argv: ["omp", "--resume=<path>"], folder: <session cwd> }`. Only the OMP store is read; another CLI is another adapter.
+- `mods/orca-nav/main.js` + `mods/orca-spaces/main.js`: Orca's workspace options menu (`SidebarWorkspaceOptionsMenu.tsx`, `sidebar-header-actions.tsx:92`) as the mod's own popup: group by (none/status/repo), sort by (name/smart/recent/repo/manual), project order, and the hide filters, persisted in `workspace.options.v1`; `orca-spaces`' projection reads that key, so the choices change the rows.
+- `mods/orca-changes/main.js`: Conflict resolution buttons from the porcelain XY pair, Discard all behind a confirmation, the too-many-changes banner (Stage All / Retry), and Fetch / Pull / Rebase / Force Push / Publish in the action menu; a changed-file row now opens the file through `tab.new { mod: "orca-files", props: { file } }`. Diff view stays unported — one editor buffer, no diff model.
+- `mods/orca-pane/main.js`: A 32px drag grip centred in the pane header (`terminal.css:275-307`, title fg at 36%) swaps with a neighbour by the released drag's dominant axis, because `pane.swap` takes only a direction; pane rename is absent from Herdr and named in the comment.
+- `mods/orca-spaces/main.js`: A card's status lane is now Orca's button: click toggles read/unread (mod-owned `spaces.unread.v1`, since Herdr has no unread state), the mark swaps to a bell on hover, and the press/release are stopped so the card does not also select.
+- `mods/orca-files/main.js`: Accepts `props.file`, so `tab.new`/`pane.split` can open the viewer on a file.
+- `mods/orca-handoff/main.js` (new): Orca's `AgentSessionContinuationDialog.tsx` ("Hand Off to Another Agent") and `TerminalAgentSessionForkDialog.tsx` ("Fork Agent Session") as one dialog whose `action` is `fork` or `handoff`; the fork uses `buildAgentSessionForkPrompt`, the handoff `buildAgentSessionContinuationPrompt`, both seeded by the shared capture.
+- `mods/orca-menu/transcript.js` (new): the shared session capture — ANSI-stripped, bounded scrollback (`buildBoundedSessionTranscript`) and the two prompt builders, ported from `agent-session-fork-context.ts` and `agent-session-continuation.ts`.
+- `mods/orca-tab-move/main.js` (new): the move-tab overlay — `tab.move { id, index }` for in-space reordering (`tab-order.ts:137`) and space migration by parking terminals, `space.select`, then `terminal.keep { place: "tab" }` (`workspace-layout-workspace-move.ts:61`).
+- `GLOSSARY.md`: distinguished the three continuations — **Resume** (same session, its own CLI), **Fork** (new session, same agent), **Handoff** (new session, different agent) — plus **Session capture** and **Tab**.
 - `GLOSSARY.md`: Added canonical definitions for `Vault scope`, `Commit action menu`, and `Hosted review creation`.
 - `docs/adr/0005-live-agent-scoping-vs-transcript-indexing.md`: Recorded the architectural decision to bind the Agents panel to in-memory live agent models rather than crawling on-disk transcripts.
+- `docs/adr/0008-transcript-history-off-the-render-path.md`: Supersedes 0005's history ban: the live rows stay, and a bounded (12 sessions, 64 KiB head + 16 KiB tail) OMP-adapter scan runs off the render path on init plus a 60-second timer, resuming with the session's recorded cwd.
 
 ## Last Scanned
 
-2026-11-08T00:21:26Z
+2026-11-08T00:54:45Z
