@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-08
+
+### Documentation
+
+- Update ADRs 0006-0007, glossary terms, license notice, and project doc
+
+### Features
+
+- **new-menu:** Add dynamic agent discovery, model list drilldown, and filter search
+- **orca-tabs:** Add drag reordering indicator, middle-click close, and process close guards
+- **orca-pane,orca-menu:** Add centered 6-dot grip affordance, pane swaps, and directional split actions
+- **orca-spaces:** Add bundled agent icons and align idle status mark with completed sessions
 ## [0.6.0] - 2026-11-08
 
 ### Documentation
@@ -212,6 +224,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stroke width, and the group header's missing plus
 - The palette was invented; the drop indicator was the wrong shape
 - Refresh the raster after the row-order fix
+[0.7.0]: https://github.com/mhenke/herdr-orca/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mhenke/herdr-orca/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mhenke/herdr-orca/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/mhenke/herdr-orca/compare/v0.3.0...v0.4.0
