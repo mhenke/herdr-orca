@@ -1,3 +1,5 @@
+// Derived from Herdr App's defaults/mods/tabs/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, setShared } from "herdr";
@@ -26,6 +28,8 @@ function find(node, id) {
 export default class Tabs extends View {
   init(_props, cx) {
     this.pressed = null;
+    this.pressX = 0;
+    this.pressY = 0;
     // Which tab is under the pointer. Orca's close/collapse reveal is `group-hover` on the
     // tab (SortableTab.tsx:317,323); gpui-kit has no group-hover, so the id is tracked here.
     this.hoveredTab = null;
@@ -97,10 +101,11 @@ export default class Tabs extends View {
     const t = theme();
     const space = (spaces() ?? []).find(p => p.active);
     const shown = space?.tabs ?? [];
-    // Tab colour store, read once per render. orca-menu writes
-    // localStorage["tab.colors.v1"] = { "<tabId>": "#rrggbb" }; a missing key or empty
-    // string means the tab has no colour. SortableTab.tsx:293-297 drives the dot below.
+    // Tab colour store, read once per render. orca-menu writes shared("tab.colors")
+    // and mirrors to localStorage["tab.colors.v1"]. SortableTab.tsx:293-297 drives the dot below.
     const tabColorStore = (() => {
+      const s = shared("tab.colors");
+      if (s && typeof s === "object") return s;
       try {
         const v = localStorage.getItem("tab.colors.v1");
         return v ? JSON.parse(v) : {};
@@ -170,15 +175,75 @@ export default class Tabs extends View {
           this.hoveredTab = next;
           cx.notify();
         })
-        .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); this.pressed = i; if (e.click_count === 2) run("tab.rename", { id: c.id }); })
-        .on_mouse_up("left", () => {
-          const from = this.pressed; this.pressed = null;
+        .cursor_grab()
+        .when(this.pressed === i, el => el.cursor_grabbing().opacity(0.8))
+        // Tab reordering & pane split drag — SortableTab.tsx:213 and useTabDragSplit.ts:74.
+        // Dragging along the strip reorders via `tab.move` (TAB_DRAG_ACTIVATION_DISTANCE_PX = 12 in useTabDragSplit.ts:42).
+        // Dragging down onto the terminal area drops into 4 quadrants (resolvePaneColumnEdgeZone in tab-drop-zone.ts:38-80):
+        //   - Left: pane.split right + pane.swap left
+        //   - Right: pane.split right
+        //   - Bottom: pane.split down
+        //   - Top: pane.split down + pane.swap up
+        .on_mouse_down("left", (e, cx) => {
+          cx.stop_propagation();
+          this.pressed = i;
+          this.pressX = e.position?.x ?? 0;
+          this.pressY = e.position?.y ?? 0;
+          if (e.click_count === 2) run("tab.rename", { id: c.id });
+          cx.notify();
+        })
+        .on_mouse_up("left", (e, cx) => {
+          const from = this.pressed;
+          this.pressed = null;
           const source = from === null ? null : shown[from];
+          if (!source) return;
 
-          if (source && from !== i) run("tab.move", { id: source.id, index: shown.findIndex(x => x.id === c.id) + 1 });
-          // Orca shows the workspace when one of its tabs is chosen; `layout.select` switches the
-          // center stack back to the terminals (`commands.rs:81`).
-          else { run("tab.select", { id: c.id }); run("layout.select", { stack: "main", child: "main-terminals" }); }
+          const releaseX = e.position?.x ?? this.pressX ?? 0;
+          const releaseY = e.position?.y ?? this.pressY ?? 0;
+          const dx = releaseX - (this.pressX || releaseX);
+          const dy = releaseY - (this.pressY || releaseY);
+          const tabHeight = e.bounds?.height || 36;
+
+          // Dragged down onto the terminal area into 4 quadrants (useTabDragSplit.ts:74 & resolvePaneColumnEdgeZone).
+          if (dy > tabHeight + 10) {
+            const targetPane = panes().find((p) => p.focused) ?? panes()[0];
+            const paneArg = targetPane?.pane ? { pane: targetPane.pane } : {};
+            if (Math.abs(dx) > Math.abs(dy) * 0.7) {
+              if (dx > 0) {
+                run("pane.split", { direction: "right", ...paneArg });
+              } else {
+                run("pane.split", { direction: "right", ...paneArg });
+                run("pane.swap", { direction: "left" });
+              }
+            } else {
+              if (dy > 200) {
+                run("pane.split", { direction: "down", ...paneArg });
+              } else {
+                run("pane.split", { direction: "down", ...paneArg });
+                run("pane.swap", { direction: "up" });
+              }
+            }
+            cx.notify();
+            return;
+          }
+
+          // Horizontal drag along tab bar — SortableTab.tsx:213 (TAB_DRAG_ACTIVATION_DISTANCE_PX = 12 in useTabDragSplit.ts:42).
+          if (Math.abs(dx) >= 12) {
+            const tabWidth = e.bounds?.width || 144;
+            const startX = (e.bounds?.x || 0) - i * tabWidth;
+            const rawTarget = Math.floor((releaseX - startX) / tabWidth);
+            const targetIndex = Math.max(0, Math.min(shown.length - 1, rawTarget));
+            if (targetIndex !== i) {
+              run("tab.move", { id: source.id, index: targetIndex + 1 });
+              cx.notify();
+              return;
+            }
+          }
+
+          // Plain click — select tab and restore main-terminals layout stack
+          run("tab.select", { id: c.id });
+          run("layout.select", { stack: "main", child: "main-terminals" });
+          cx.notify();
         })
         // `orca-menu` owns the tab menu (it already has the "tab" case); pointing at Herdr's
         // shipped `menu` made this mod depend on a mod outside the package.

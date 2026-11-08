@@ -1,3 +1,5 @@
+// Derived from Herdr App's defaults/mods/menu/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 // Context menus (Herdr's items). Opened as a popup with
 // props { tab: "pane" | "tab" | "space" | "group", target }.
 // ↑/↓ move, Enter runs, Esc closes. An item is [label, command, args];
@@ -5,7 +7,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, hc } from "herdr";
+import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, hc, shared, setShared } from "herdr";
 import { copyText } from "./clip.js";
 import { buildBoundedSessionTranscript } from "./transcript.js";
 
@@ -22,10 +24,10 @@ function stored(key, fallback) {
   } catch { return fallback; }
 }
 
-// Where a space is now: its first terminal's live folder, else where it was made.
+// Where a space is: its designated workspace folder (GLOSSARY.md:
+// "The space is the scope; the terminal is only where keystrokes go").
 function place(s) {
-  const tabs = new Set((s.tabs ?? []).map((c) => c.id));
-  return panes().find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
+  return s?.folder ?? null;
 }
 
 // A space's checkout: "main" (a repo's own), "linked" (a worktree), or null.
@@ -125,12 +127,14 @@ function items(p, git) {
       return [
         ...(pane
           ? [
+              // Orca TabWorkspaceLayoutMenuSection.tsx:14 — 4-quadrant splits (Right, Left, Down, Up).
               ["Split Terminal…", "mod.open", { name: "orca-split-menu" }],
               ["Split Terminal Right", "pane.split", { direction: "right", pane }],
+              ["Split Terminal Left", "orca-menu.split-left", { pane }],
               ["Split Terminal Down", "pane.split", { direction: "down", pane }],
+              ["Split Terminal Up", "orca-menu.split-up", { pane }],
             ]
           : []),
-        ["Move Tab…", "mod.open", { name: "orca-tab-move" }],
         // Herdr-only, in Orca's first slot: Orca reorders tabs by drag (SortableTab.tsx:213) and
         // has no move rows; `tab.move` backs these.
         ...(tab?.index > 1 ? [["Move Left", "tab.move", { id: tg.id, index: tab.index - 1 }]] : []),
@@ -148,16 +152,6 @@ function items(p, git) {
         // closing every other pane of the tab, leaving the focused one.
         ...(mine.length > 1 ? [["Close Split Pane", "orca-menu.close-split-panes", { id: tg.id }]] : []),
         ["Change Title", "tab.rename", { id: tg.id }],
-        // Tab Color (:223-250): Orca draws the palette as one swatch block; a row menu shows
-        // the same choices as rows, the current one marked. Herdr has no tab colour field, so
-        // orca-tabs draws the dot from the store this writes.
-        ...TAB_COLORS.map(([label, value]) => [
-          // `||` not `??`: clearing a colour stores "", which `??` passes through, so the
-          // None row stayed unmarked after a colour was removed (`value` is null for None).
-          `${(stored("tab.colors.v1", {})[tg.id] || null) === value ? "●" : "○"} Tab Color: ${label}`,
-          "orca-menu.tab-color",
-          { id: tg.id, color: value ?? "" },
-        ]),
       ];
     }
     // `RepoHeaderProjectActionsMenu` (repo-header-project-actions.tsx:121-186): the ellipsis on a
@@ -218,6 +212,8 @@ function menuIcon(it, zoomed) {
   if (command === "mod.open" && args?.name === "orca-tab-move") return "mods/orca-menu/arrow-right.svg";
   if (command === "mod.open" && args?.name === "orca-split-menu") return "mods/orca-menu/panel-right-close.svg";
   if (command === "pane.split") return `mods/orca-menu/${args?.direction === "down" ? "panel-bottom-close" : "panel-right-close"}.svg`;
+  if (command === "orca-menu.split-left") return "mods/orca-menu/arrow-left.svg";
+  if (command === "orca-menu.split-up") return "mods/orca-menu/arrow-up.svg";
   if (command === "pane.zoom") return `mods/orca-menu/${zoomed ? "minimize-2" : "maximize-2"}.svg`;
   if (command === "worktree") return `mods/orca-menu/${args?.action === "new" ? "git-branch-plus" : args?.action === "open" ? "workflow" : "unlink"}.svg`;
   if (command === "tab.move") return `mods/orca-menu/${it[0] === "Move Left" ? "arrow-left" : "arrow-right"}.svg`;
@@ -249,7 +245,8 @@ function section(p, list, i) {
   if (p?.tab === "pane" && it[1] === "pane.split" && prev[1] !== "pane.split") return true;
   if (p?.tab === "tab") {
     // After the split section (SortableTabContextMenu.tsx:178) and before Change Title (:217).
-    if (prev[1] === "pane.split") return true;
+    const isSplit = (x) => x && (x[1] === "pane.split" || x[1] === "orca-menu.split-left" || x[1] === "orca-menu.split-up" || (x[1] === "mod.open" && x[2]?.name === "orca-split-menu"));
+    if (isSplit(prev) && !isSplit(it)) return true;
     if (it[0] === "Change Title") return true;
   }
   // The global list is Herdr's own; keep its rows apart as before.
@@ -327,11 +324,15 @@ export default class Menu extends View {
         const keep = mine.find((x) => x.focused) ?? mine[0];
         for (const x of mine) if (x !== keep) run("pane.close", { pane: x.pane });
       }
-      // Tab colour: the store orca-tabs reads; closing the overlay repaints the strip.
-      if (it[1] === "orca-menu.tab-color") {
-        const all = stored("tab.colors.v1", {});
-        if (it[2].color) all[it[2].id] = it[2].color; else delete all[it[2].id];
-        localStorage.setItem("tab.colors.v1", JSON.stringify(all));
+      if (it[1] === "orca-menu.split-left") {
+        run("pane.split", { direction: "right", ...(it[2]?.pane ? { pane: it[2].pane } : {}) });
+        run("pane.swap", { direction: "left" });
+        return;
+      }
+      if (it[1] === "orca-menu.split-up") {
+        run("pane.split", { direction: "down", ...(it[2]?.pane ? { pane: it[2].pane } : {}) });
+        run("pane.swap", { direction: "up" });
+        return;
       }
       if (it[1] === "orca-menu.copy-terminal" || it[1] === "orca-menu.copy-pane-id") void copyText(it[2].id ?? "");
       // Copy Context (terminal-pane-menu-agent-session-actions.ts:58-65): clean bounded transcript to clipboard
@@ -378,9 +379,23 @@ export default class Menu extends View {
     else run(it[1], it[2]);
   }
 
+  setTabColor(tabId, color) {
+    if (!tabId) return;
+    const cur = shared("tab.colors");
+    const all = cur && typeof cur === "object" ? { ...cur } : stored("tab.colors.v1", {});
+    if (color) all[tabId] = color;
+    else delete all[tabId];
+    try { localStorage.setItem("tab.colors.v1", JSON.stringify(all)); } catch {}
+    setShared("tab.colors", all);
+    closeOverlay(props()?.overlay);
+  }
+
   render(cx) {
     const t = theme();
     const p = props();
+    const tabId = p?.tab === "tab" ? (p.target?.id ?? null) : null;
+    const tabColors = tabId ? (shared("tab.colors") ?? stored("tab.colors.v1", {})) : {};
+    const activeTabColor = tabColors[tabId] ?? null;
     const list = items(p, this.git);
     const zoomed = panes().find((x) => x.pane === p?.target?.pane)?.zoomed;
     const bad = destructive();
@@ -446,6 +461,50 @@ export default class Menu extends View {
             // (dropdown-menu.tsx:219).
             .child(div().pl(16).flex_none().whitespace_nowrap().text_color(t.muted).child(shortcut(it[1], it[2]))));
         }),
+        ...(p?.tab === "tab"
+          ? [
+              // SortableTabContextMenu.tsx:223-250: compact Tab Color palette (16px circular swatches).
+              v_flex()
+                .pt(6)
+                .pr(10)
+                .pb(6)
+                .pl(32)
+                .child(div().text_size(10).font_semibold().text_color(t.muted).mb(6).child("Tab Color"))
+                .child(
+                  h_flex()
+                    .flex_wrap()
+                    .gap(8)
+                    .children(
+                      TAB_COLORS.map(([name, val]) => {
+                        const isSelected = activeTabColor === val;
+                        return div()
+                          .id(`tab-color-${name.toLowerCase()}`)
+                          .size(16)
+                          .rounded(8)
+                          .cursor_pointer()
+                          .tooltip(name)
+                          .hover((s) => s.opacity(0.8))
+                          .when(Boolean(val), (el) =>
+                            el
+                              .bg(val)
+                              .border(isSelected ? 2 : 1)
+                              .border_color(isSelected ? t.foreground : "#00000000")
+                          )
+                          .when(!val, (el) =>
+                            el
+                              .border(isSelected ? 2 : 1)
+                              .border_color(isSelected ? t.foreground : t.muted)
+                              .flex()
+                              .items_center()
+                              .justify_center()
+                              .child(div().w(8).h(1).bg(t.muted))
+                          )
+                          .on_click((_e, _cx) => this.setTabColor(tabId, val));
+                      })
+                    )
+                ),
+            ]
+          : []),
       ]);
   }
 }

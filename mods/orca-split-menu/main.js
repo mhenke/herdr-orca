@@ -1,3 +1,5 @@
+// Derived from Herdr App's defaults/mods/menu/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 // Orca Split Menu (`TerminalTabSplitMenuSection.tsx:47-77`, `TerminalContextMenu.tsx:265-306`,
 // and `SortableTabContextMenu.tsx:157-216`).
 // Exposes `mod.open:orca-split-menu`. Provides directional splits for terminal,
@@ -39,7 +41,7 @@ export default class SplitMenu extends View {
     const isZoomed = Boolean(focusedPane?.zoomed);
 
     const list = [
-      // Direct terminal splits (TerminalContextMenu.tsx:265-279, TerminalTabSplitMenuSection.tsx:59-74)
+      // Direct terminal splits across 4 quadrants (TerminalContextMenu.tsx:265-279, TabWorkspaceLayoutMenuSection.tsx:14-41)
       {
         id: "split-right",
         label: "Split Terminal Right",
@@ -53,15 +55,41 @@ export default class SplitMenu extends View {
         },
       },
       {
+        id: "split-left",
+        label: "Split Terminal Left",
+        icon: "arrow-left.svg",
+        shortcut: "2",
+        keys: ["2", "l"],
+        section: "terminal",
+        action: (_cx, overlay) => {
+          closeOverlay(overlay);
+          run("pane.split", { direction: "right", pane: focusedPane?.pane });
+          run("pane.swap", { direction: "left" });
+        },
+      },
+      {
         id: "split-down",
         label: "Split Terminal Down",
         icon: "panel-bottom-close.svg",
-        shortcut: "2",
-        keys: ["2", "d"],
+        shortcut: "3",
+        keys: ["3", "d"],
         section: "terminal",
         action: (_cx, overlay) => {
           closeOverlay(overlay);
           run("pane.split", { direction: "down", pane: focusedPane?.pane });
+        },
+      },
+      {
+        id: "split-up",
+        label: "Split Terminal Up",
+        icon: "arrow-up.svg",
+        shortcut: "4",
+        keys: ["4", "u"],
+        section: "terminal",
+        action: (_cx, overlay) => {
+          closeOverlay(overlay);
+          run("pane.split", { direction: "down", pane: focusedPane?.pane });
+          run("pane.swap", { direction: "up" });
         },
       },
       // Mod splits: File Browser and Git Changes (tab-bar-static-create-menu.tsx:213-225)
@@ -70,7 +98,7 @@ export default class SplitMenu extends View {
         label: "Split Right with File Browser",
         icon: "file-text.svg",
         shortcut: "F",
-        keys: ["3", "f"],
+        keys: ["f"],
         section: "mods",
         action: (_cx, overlay) => {
           closeOverlay(overlay);
@@ -82,7 +110,7 @@ export default class SplitMenu extends View {
         label: "Split Down with File Browser",
         icon: "file-text.svg",
         shortcut: "⇧F",
-        keys: ["4", "shift+f"],
+        keys: ["shift+f"],
         section: "mods",
         action: (_cx, overlay) => {
           closeOverlay(overlay);
@@ -94,7 +122,7 @@ export default class SplitMenu extends View {
         label: "Split Right with Git Changes",
         icon: "git-branch.svg",
         shortcut: "C",
-        keys: ["5", "c"],
+        keys: ["c"],
         section: "mods",
         action: (_cx, overlay) => {
           closeOverlay(overlay);
@@ -106,7 +134,7 @@ export default class SplitMenu extends View {
         label: "Split Down with Git Changes",
         icon: "git-branch.svg",
         shortcut: "⇧C",
-        keys: ["6", "shift+c"],
+        keys: ["shift+c"],
         section: "mods",
         action: (_cx, overlay) => {
           closeOverlay(overlay);
