@@ -48,6 +48,8 @@ export default class Pane extends View {
     // (`PaneInfo.title`, herdr.d.ts:193 — "what the program set, or the mod's name").
     const tab = spaces().flatMap((s) => s.tabs).find((t) => t.id === p.tab);
     const tabTitle = tab && tab.named ? tab.name : p.title;
+    const siblingPanes = panes().filter((x) => x.tab === p.tab);
+    const paneCount = siblingPanes.length;
     return h_flex()
       .id(`pane-head-${pane}`)
       .size_full()
@@ -85,9 +87,59 @@ export default class Pane extends View {
       // (`herdr-app commands`) — and the title shown here is derived (tab name or terminal
       // title), so both actions are omitted, not faked.
       .when(Boolean(tabTitle), el => el.child(div().flex_1().min_w(0).truncate().text_color("#ffffff85").child(tabTitle)))
+      // TerminalPaneHeaderOverlay.tsx:188-196, terminal.css:275-306:
+      // `.pane-title-drag-handle`: rendered when `paneCount > 1`. Centered at `left: 50%`,
+      // `width: 32px`, `height: 100%`, cursor: grab. Displays the 6-dot grip affordance.
+      // Click: opens the pane layout & split/swap popup menu.
+      .when(paneCount > 1 && this.hovered, (el) =>
+        el.child(
+          div()
+            .id(`pane-drag-handle-${pane}`)
+            .absolute()
+            .top(0)
+            .left_1_2()
+            .ml(-16)
+            .w(32)
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(4)
+            .cursor_grab()
+            .active((s) => s.cursor_grabbing())
+            .hover((s) => s.bg("#ffffff1a"))
+            .accessibility_label("Move or split pane")
+            .tooltip("Move or split pane")
+            .on_click((_e, cx) => {
+              cx.stop_propagation();
+              openOverlay({
+                mod: "orca-menu",
+                kind: "popup",
+                width: 240,
+                height: 320,
+                props: { tab: "pane", target: { pane, terminal: p.terminal } }
+              });
+            })
+            .child(
+              div()
+                .flex()
+                .flex_col()
+                .gap(3)
+                .items_center()
+                .children([0, 1].map(() =>
+                  div()
+                    .flex()
+                    .gap(3)
+                    .children([0, 1, 2].map(() =>
+                      div().size(2).rounded_full().bg("#ffffff66")
+                    ))
+                ))
+            )
+        )
+      )
       // Orca's TerminalPaneHeaderOverlay header actions (TerminalPaneHeaderOverlay.tsx:285,334):
-      // SquareSplitVertical (split) then X (close), size-3 glyphs in size-6 icon-xs boxes.
-      // Orca has no split-down or zoom button in the header; those live in the right-click
+      // SquareSplitVertical (split right), split-down (split down), then X (close), size-3 glyphs in size-6 icon-xs boxes.
+      // Orca has no zoom button in the header; those live in the right-click
       // menu (TerminalContextMenu.tsx:269,277,294), which `orca-menu` already provides.
       // The trigger buttons sit at opacity 0 until the bar is hovered (terminal.css:401,414),
       // matching this `.when(this.hovered)` gate.
@@ -98,7 +150,7 @@ export default class Pane extends View {
         .child(div().ml_auto().flex().flex_shrink_0().items_center().gap(0)
           // TerminalPaneHeaderOverlay.tsx:212-238,277-330 — `.pane-title-actions`, left to right:
           // Hand Off to Another Agent (MessageSquarePlus, `isTuiAgent` / active terminal agent),
-          // Split Terminal Right (SquareSplitVertical), and Close Pane (X).
+          // Split Terminal Right (SquareSplitVertical), Split Terminal Down (split-down), and Close Pane (X).
           .when(Boolean(p.terminal), h => h
             .child(this.button(`ph-h-${pane}`, "message-square-plus", () => {
               openOverlay({
@@ -109,7 +161,8 @@ export default class Pane extends View {
                 props: { action: "handoff", terminal: p.terminal, pane }
               });
             }).accessibility_label("Hand off to another agent").tooltip("Hand off to another agent")))
-          .child(this.button(`ph-r-${pane}`, "square-split-vertical", "pane.split", { direction: "right", pane }).accessibility_label("Split terminal").tooltip("Split terminal"))
+          .child(this.button(`ph-r-${pane}`, "square-split-vertical", "pane.split", { direction: "right", pane }).accessibility_label("Split terminal right").tooltip("Split terminal right"))
+          .child(this.button(`ph-d-${pane}`, "split-down", "pane.split", { direction: "down", pane }).accessibility_label("Split terminal down").tooltip("Split terminal down"))
           .child(this.button(`ph-x-${pane}`, "x", "pane.close", { pane }).accessibility_label("Close pane").tooltip("Close pane"))));
   }
 }

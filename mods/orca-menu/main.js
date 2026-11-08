@@ -73,11 +73,20 @@ function items(p, git) {
               ["Copy Context", "orca-menu.copy-context", { terminal: term.address }],
             ]
           : []),
-        // Orca's split section (TerminalContextMenu.tsx:265-302). Equalize Pane Sizes (:281)
-        // has no equivalent: panes are content inside one layout node, not nodes themselves,
-        // and `layout.resize` only sizes layout nodes (`commands.rs:80`, window.rs:3248).
+        // Orca's split section (TerminalContextMenu.tsx:265-302, TabWorkspaceLayoutMenuSection.tsx:14-41).
+        // Equalize Pane Sizes (:281) has no equivalent: panes are content inside one layout node.
         ["Split Terminal Right", "pane.split", { direction: "right", pane: tg.pane }],
+        ["Split Terminal Left", "orca-menu.split-left", { pane: tg.pane }],
         ["Split Terminal Down", "pane.split", { direction: "down", pane: tg.pane }],
+        ["Split Terminal Up", "orca-menu.split-up", { pane: tg.pane }],
+        ...(own && panes().filter((x) => x.tab === own.tab).length > 1
+          ? [
+              ["Swap with Left", "pane.swap", { pane: tg.pane, direction: "left" }],
+              ["Swap with Right", "pane.swap", { pane: tg.pane, direction: "right" }],
+              ["Swap with Above", "pane.swap", { pane: tg.pane, direction: "up" }],
+              ["Swap with Below", "pane.swap", { pane: tg.pane, direction: "down" }],
+            ]
+          : []),
         [own?.zoomed ? "Collapse Pane" : "Expand Pane", "pane.zoom", { pane: tg.pane }],
         // Orca's title/ID block (:307-347). Orca's pane title is the tab's custom title
         // (`ClaudeAccountSwitchSessionTree.tsx:276` = `customTitle || title`), so `tab.rename`
@@ -214,6 +223,7 @@ function menuIcon(it, zoomed) {
   if (command === "pane.split") return `mods/orca-menu/${args?.direction === "down" ? "panel-bottom-close" : "panel-right-close"}.svg`;
   if (command === "orca-menu.split-left") return "mods/orca-menu/arrow-left.svg";
   if (command === "orca-menu.split-up") return "mods/orca-menu/arrow-up.svg";
+  if (command === "pane.swap") return `mods/orca-menu/arrow-${args?.direction ?? "right"}.svg`;
   if (command === "pane.zoom") return `mods/orca-menu/${zoomed ? "minimize-2" : "maximize-2"}.svg`;
   if (command === "worktree") return `mods/orca-menu/${args?.action === "new" ? "git-branch-plus" : args?.action === "open" ? "workflow" : "unlink"}.svg`;
   if (command === "tab.move") return `mods/orca-menu/${it[0] === "Move Left" ? "arrow-left" : "arrow-right"}.svg`;
@@ -241,8 +251,13 @@ function section(p, list, i) {
   // (TerminalContextMenu.tsx:355), tab (SortableTabContextMenu.tsx:207), space (:196).
   if (it[1].endsWith(".close")) return true;
   // Orca's pane menu separates the Copy/Paste block from the split section
-  // (TerminalContextMenu.tsx:263).
-  if (p?.tab === "pane" && it[1] === "pane.split" && prev[1] !== "pane.split") return true;
+  // (TerminalContextMenu.tsx:263), and separates swap/move and zoom blocks.
+  if (p?.tab === "pane") {
+    const isSplit = (x) => x && (x[1] === "pane.split" || x[1] === "orca-menu.split-left" || x[1] === "orca-menu.split-up");
+    if (isSplit(it) && !isSplit(prev)) return true;
+    if (it[1] === "pane.swap" && prev[1] !== "pane.swap") return true;
+    if (it[1] === "pane.zoom" && prev[1] !== "pane.zoom") return true;
+  }
   if (p?.tab === "tab") {
     // After the split section (SortableTabContextMenu.tsx:178) and before Change Title (:217).
     const isSplit = (x) => x && (x[1] === "pane.split" || x[1] === "orca-menu.split-left" || x[1] === "orca-menu.split-up" || (x[1] === "mod.open" && x[2]?.name === "orca-split-menu"));
@@ -314,10 +329,27 @@ export default class Menu extends View {
       // Display name: the space's, else the worktree's branch, else the folder's last segment
       // (`worktree-default-display-name.ts:13-25`).
       if (it[1] === "orca-menu.copy-name") void copyText(space?.name || it[2].name || String(it[2].folder ?? "").replace(/\/+$/, "").split("/").pop() || "");
-      // Close Others — the tab's own space only (SortableTabContextMenu.tsx:213).
+      // Close Others — SortableTabContextMenu.tsx:213 & useBulkTabCloseConfirmation (bulk-tab-close-confirmation.ts:5-15)
       if (it[1] === "orca-menu.close-others") {
         const owner = spaces().find((s) => (s.tabs ?? []).some((x) => x.id === it[2].id));
-        for (const x of owner?.tabs ?? []) if (x.id !== it[2].id) run("tab.close", { id: x.id });
+        const targetIds = (owner?.tabs ?? []).filter((x) => x.id !== it[2].id && !x.settled).map((x) => x.id);
+        if (targetIds.length > 0) {
+          openOverlay({
+            mod: "orca-tabs",
+            kind: "dialog",
+            modal: true,
+            width: 384,
+            height: 180,
+            props: {
+              confirmClose: {
+                kind: "bulk",
+                scope: "others",
+                tabIds: targetIds,
+              }
+            }
+          });
+        }
+        return;
       }
       if (it[1] === "orca-menu.close-split-panes") {
         const mine = panes().filter((x) => x.tab === it[2].id);
@@ -325,13 +357,20 @@ export default class Menu extends View {
         for (const x of mine) if (x !== keep) run("pane.close", { pane: x.pane });
       }
       if (it[1] === "orca-menu.split-left") {
+        if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
         run("pane.split", { direction: "right", ...(it[2]?.pane ? { pane: it[2].pane } : {}) });
         run("pane.swap", { direction: "left" });
         return;
       }
       if (it[1] === "orca-menu.split-up") {
+        if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
         run("pane.split", { direction: "down", ...(it[2]?.pane ? { pane: it[2].pane } : {}) });
         run("pane.swap", { direction: "up" });
+        return;
+      }
+      if (it[1] === "pane.swap") {
+        if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
+        run("pane.swap", { direction: it[2].direction });
         return;
       }
       if (it[1] === "orca-menu.copy-terminal" || it[1] === "orca-menu.copy-pane-id") void copyText(it[2].id ?? "");
@@ -375,8 +414,57 @@ export default class Menu extends View {
       if (it[1] === "orca-menu.reset-terminal" && it[2].terminal) void hc(["send", it[2].terminal, "reset"]);
       return;
     }
-    if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
-    else run(it[1], it[2]);
+    if (it[1] === "worktree") {
+      openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
+    } else if (it[1] === "tab.close") {
+      // Close tab confirmation — terminal-tab-actions.ts:121-131 & running-terminal-close-guard.ts:56-97
+      const owner = spaces().find((s) => (s.tabs ?? []).some((x) => x.id === it[2].id));
+      const tab = (owner?.tabs ?? []).find((x) => x.id === it[2].id);
+      if (tab) {
+        if (tab.settled) {
+          let skipPinned = false;
+          try { skipPinned = localStorage.getItem("orca.confirmClosePinnedTab") === "false"; } catch {}
+          if (!skipPinned) {
+            const tabPanes = panes().filter((p) => p.tab === tab.id);
+            const pane = tabPanes.find((p) => p.program?.agent) ?? tabPanes[0];
+            const program = pane?.program;
+            const name = tab.named ? (tab.name ?? "Terminal") : (pane?.title || program?.name || tab.name || "Terminal");
+            openOverlay({
+              mod: "orca-tabs",
+              kind: "dialog",
+              modal: true,
+              width: 384,
+              height: 200,
+              props: { confirmClose: { kind: "pinned", tabId: tab.id, tabLabel: name } }
+            });
+            return;
+          }
+        }
+        const tabPanes = panes().filter((p) => p.tab === tab.id);
+        const isAgent = tabPanes.some((p) => p.program?.agent || p.status === "working" || p.status === "blocked") ||
+                        tab.status === "working" || tab.status === "blocked";
+        const isRunningCommand = tabPanes.some((p) => p.program && !p.program.shell && !p.program.agent);
+        let skipRunning = false;
+        try { skipRunning = localStorage.getItem("orca.skipCloseTerminalWithRunningProcessConfirm") === "true"; } catch {}
+        if (!skipRunning && (isAgent || isRunningCommand)) {
+          const pane = tabPanes.find((p) => p.program?.agent) ?? tabPanes[0];
+          const program = pane?.program;
+          const name = tab.named ? (tab.name ?? "Terminal") : (pane?.title || program?.name || tab.name || "Terminal");
+          openOverlay({
+            mod: "orca-tabs",
+            kind: "dialog",
+            modal: true,
+            width: 384,
+            height: isAgent ? 240 : 208,
+            props: { confirmClose: { kind: isAgent ? "agent" : "command", tabId: tab.id, tabLabel: name } }
+          });
+          return;
+        }
+      }
+      run("tab.close", it[2]);
+    } else {
+      run(it[1], it[2]);
+    }
   }
 
   setTabColor(tabId, color) {
