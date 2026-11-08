@@ -8,7 +8,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
-import { repoMark, tint, parseRemote, avatarUrlFor, ensureAvatar } from "./project.js";
+import { repoMark, tint, parseRemote } from "./project.js";
 import { statusMark, agentStateMark } from "./status.js";
 import { getFolderWorkspaceRowGeometry, getFlushWorktreeCardPaddingLeft, getProjectGroupHeaderPaddingLeft, WORKTREE_CARD_SURFACE_MARGIN, LEGACY_STATUS_LANE_WIDTH } from "./indentation.js";
 import { tip, tipMark } from "./tip.js";
@@ -342,15 +342,9 @@ export default class Spaces extends View {
       const common = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, on });
       const repo = common.stdout.trim();
       const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
-      // Orca's RepoIconGlyph shows the fork's PARENT avatar, not the fork's own
-      // (`repo-slug-upstream.ts` getRepoUpstream, then `githubAvatarSlug` keeps origin only for
-      // a renamed fork). Both reads are local/no-op-safe: `git remote get-url` reads no lock,
-      // and `gh` is skipped entirely when the repo has no upstream and isn't a fork.
-      let owner = null;
-      // `resolveGitHubApiRepositoryCandidates` asks `--repo <upstream>` with `headRepo: origin`
-      // (github-api-repository.ts:127-133), then `pullRequestMatchesHeadRepository` drops a PR
-      // whose head owner is not origin's (pull-request-lookup-data.ts:187-193). Both owners are
-      // needed to ask the question and to reject a fork's same-named branch.
+      // Orca's PR query needs the base repo and origin head owner (`pr-branch-lookup.ts:41-48`;
+      // `github-api-repository.ts:127-133`); repo icons use a repo-owned image or Folder instead
+      // (`src/renderer/src/components/repo/repo-icon.tsx:145-177`), so no remote-derived icon is stored.
       let baseRepo = null; // the repo PRs are filed in: upstream when there is one
       let head = null; // origin's owner: who the branch must belong to
       try {
@@ -376,11 +370,9 @@ export default class Spaces extends View {
               if (slug) baseRepo = `${po}/${pr}`;
             }
           }
-          // A renamed fork keeps its own identity; a same-name fork shows the parent's.
-          owner = avatarUrlFor(slug && slug.repo !== o.repo ? o : (slug ?? o));
         }
       } catch {}
-      const info = { name, top: topDir, branch: null, owner, base: baseRepo, head, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
+      const info = { name, top: topDir, branch: null, base: baseRepo, head, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
       // Only the branch name is read. `# branch.ab` (ahead/behind) fed the removed gitTail,
       // and Orca's card has no such element; the flag still prints the header we parse.
       for (const line of r.stdout.split("\n")) {
@@ -766,11 +758,9 @@ export default class Spaces extends View {
         else if (this.hoveredRepo === key) this.hoveredRepo = null;
         cx.notify();
       })
-      // Orca's RepoIconGlyph: the repo's own image when it has one, else a lucide Folder
-      // (repo-icon.tsx:145). Herdr has no per-repo icon, so the origin remote's GitHub owner
-      // avatar is the image source; the first render kicks off a one-time fetch and writes it
-      // under the app folder, and `image()` reads that cached file from then on.
-      .child(repoMark(w, 16, t, ps, g?.owner ?? null))
+      // Orca's RepoIconGlyph uses the repo's own image or Folder (`src/renderer/src/components/repo/repo-icon.tsx:145-177`);
+      // Herdr has no per-repo image, so repoMark draws the bundled Folder asset.
+      .child(repoMark(16))
       .child(div().min_w(0).flex_1().truncate().text_size(13).font_semibold().line_height("16px").text_color(t.foreground).child(g?.name ?? w.name))
       // Orca's hover cluster (`worktree-list/rows/ProjectHeaderActions.tsx:5-15`, used at
       // `rows/SectionHeader.tsx:355-399`): an ABSOLUTE overlay — `can-hover:absolute right-1
@@ -884,9 +874,40 @@ export default class Spaces extends View {
     // Herdr's `AgentInfo` has no parent/lineage, child count, timestamp or turn text, so Orca's
     // `+N` child disclosure, `text-[10px]` timestamp, `" - "` secondary line and `.75rem`
     // lineage indent (`worktree-card-compact-agent-row.tsx:226-297`) have no data here.
-    // The agent-type icon is the program table's `program.icon` (`AgentTypeIcon size={13}`).
+    // `AgentTypeIcon` size={13} (`worktree-card-compact-agent-row.tsx:241-242`) is Orca's
+    // `AgentIcon` (`agent-catalog.tsx:50-122`): every agent has its own mark, chosen from the
+    // catalog and glyph files (`status-bar/icons.tsx:4-22,343-366`,
+    // `agent-icon-glyphs.tsx:61-109`) with `agent-favicon-assets.ts:1-31,36-65` for the rest;
+    // where Orca names none, the program table's own icon is drawn.
+    // What changes for drawing is whether the mark brings its own fills: omp's gradient
+    // (`OmpIcon`, `agent-icon-glyphs.tsx:30-62`), Droid's white-on-black
+    // (`status-bar/icons.tsx:343-366`) and Kilo's yellow/black keep theirs, so they are images —
+    // `svg()` is a one-color mask (gpui-kit.d.ts:20273-20281) and greys them. Aider's is
+    // currentColor, so it takes the tint, and the bundled favicons are images whatever their
+    // extension.
+    const ownFills = new Set(["omp", "droid", "kilo"]);
+    const agentIconOverrides = {
+      codex: "mono",
+      omp: "mods/orca-spaces/omp.svg",
+      gemini: "mods/orca-spaces/agent-icons/gemini.png",
+      cursor: "mods/orca-spaces/agent-icons/cursor.png",
+      grok: "mods/orca-spaces/agent-icons/grok.png",
+      qoder: "mods/orca-spaces/agent-icons/qoder.png",
+      hermes: "mods/orca-spaces/agent-icons/hermes.png",
+      "dsh-tui": "mods/orca-spaces/agent-icons/dsh.png",
+      droid: "mods/orca-spaces/agent-icons/droid.svg",
+      kilo: "mods/orca-spaces/agent-icons/kilo.svg",
+      aider: "mods/orca-spaces/agent-icons/aider.svg",
+    };
     const agentIcon = (a, size) => {
       const p = a.program;
+      const override = agentIconOverrides[a.app];
+      // `mono` reuses the program table's own glyph; everything else in the map is a mark this
+      // mod carries, in the agent's colors or in the text color.
+      if (override === "mono") return p?.icon ? svg(p.icon).size(size).flex_none().text_color(t.muted) : null;
+      if (override) return ownFills.has(a.app) || !override.endsWith(".svg")
+        ? image(override).w(size).h(size).flex_none()
+        : svg(override).size(size).flex_none().text_color(t.muted);
       if (!p?.icon) return null;
       return p.tint ? svg(p.icon).size(size).flex_none().text_color(t.muted) : image(p.icon).w(size).h(size).flex_none();
     };
@@ -1178,9 +1199,6 @@ export default class Spaces extends View {
     // make the same call; the header cannot see the row plan itself.
     if (keys.length !== shared("projects.count")) setShared("projects.count", keys.length);
     const asks = props()?.newMenu && machines().length > 1;
-    // One fetch per repo per session; `ensureAvatar` writes the file and notifies once, so the
-    // next render draws the avatar instead of the Folder.
-    for (const g of Object.values(this.git)) if (g?.owner) ensureAvatar(g.owner, cx);
     // Fold saved-project rows: folders persisted in localStorage["projects.saved.v1"]
     // that no open space's folder covers. The folder glyph + basename row opens a space
     // in that folder; hover reveals a remove button (Orca's RepositoryRemoveProjectButton).
