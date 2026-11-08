@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-08
+
+### Bug Fixes
+
+- **keys:** Drop a shortcut bound to a mod that is not shipped
+
+### Documentation
+
+- Add Agent mark glossary definition and list orca-tabs omp.svg in NOTICE
+- Correct README, RECIPE and rules for 18 mods and the program table
+
+### Features
+
+- **orca-tabs:** Bundle agent tab marks and draw the idle state dot
+- **extras:** Ship the omp program entry and install its icon
+
+### Refactoring
+
+- **mods:** Trim comments and dead locals in new-menu, orca-pane and orca-spaces
 ## [0.7.0] - 2026-11-08
 
 ### Documentation
@@ -224,6 +243,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stroke width, and the group header's missing plus
 - The palette was invented; the drop indicator was the wrong shape
 - Refresh the raster after the row-order fix
+[0.8.0]: https://github.com/mhenke/herdr-orca/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mhenke/herdr-orca/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mhenke/herdr-orca/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mhenke/herdr-orca/compare/v0.4.0...v0.5.0
