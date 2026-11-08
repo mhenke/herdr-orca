@@ -78,7 +78,6 @@ export default class Spaces extends View {
     // `stablyai/orca::main` slot. Bumping the key retires those entries instead of trusting them.
     this.prCache = stored("pr.cache.v2", {});
     this.prAsking = new Set(); // keys with a hydrating `gh` in flight
-    this.prChecked = {}; // key -> when the cache last answered
     this.checked = {}; // where() -> when it was last looked at
     this.unsure = new Set(); // where()s git couldn't answer for (a machine away)
     this.pending = new Set(); // where()s to look at next
@@ -439,16 +438,28 @@ export default class Spaces extends View {
 
   setPr(key, data) {
     this.prCache[key] = { data, at: Date.now() };
-    this.prChecked[key] = Date.now();
     localStorage.setItem("pr.cache.v2", JSON.stringify(this.prCache));
   }
 
-  menu(w) {
+  menu(w, g) {
     // A popup is as tall as its items; height is only the most.
     const s = spaces().find((x) => x.id === w.id);
-    const path = s ? place(s, panes()) : null;
+    const path = s ? place(s, panes()) : (g?.top ?? w.folder ?? null);
+    // `WorktreeContextMenu` wraps the worktree, not a tab (`worktree-card-surface.tsx:139-146`),
+    // and reads `tabsByWorktree` only while it is open
+    // (`use-worktree-context-menu-model.tsx:101-102`); its worktree rows need no open space.
+    // So a row that has no space still hands over the worktree's own facts.
+    const target = {
+      id: w.id,
+      path,
+      top: g?.top ?? w.folder ?? null,
+      branch: g?.branch ?? w.branch ?? null,
+      machine: w.machine ?? null,
+      linked: g ? Boolean(g.linked) : null,
+      folder: w.folder ?? g?.top ?? path,
+    };
     // WorktreeContextMenuView.tsx:147 — `min-w-52` (208).
-    openOverlay({ mod: "orca-menu", kind: "popup", width: 208, height: 300, props: { tab: "space", target: { id: w.id, path } } });
+    openOverlay({ mod: "orca-menu", kind: "popup", width: 208, height: 300, props: { tab: "space", target } });
   }
 
   // Orca's rows are worktrees, keyed by host+path (host-qualified-identity.ts), not by open
@@ -460,10 +471,6 @@ export default class Spaces extends View {
   // it runs inside `render`, and a reorder fired from render both loses commands and re-enters
   // the frame. Reordering is the drag handler's job (`use-document-drop.ts:72` fires
   // `onReorderWorktrees`); nothing here moves a space.
-  discoverable(w, ps) {
-    return this.loaded || where(w, ps) in this.git;
-  }
-
   ordered() {
     const plan = projectWorktreePlan({
       spaces: spaces(),
@@ -654,7 +661,10 @@ export default class Spaces extends View {
   // equivalent here is the group header each rendered row emits.
   projectKeys(cx) {
     const keys = new Set();
-    for (const r of this.ordered()) if (!r.unopened) keys.add(this.foldKey(r));
+    // Orca keys off the rendered header rows (`getRenderedProjectCollapseKeys`,
+    // project-collapse-all.ts:5-16), so an unopened checkout's header counts too; `row()`
+    // draws a header exactly when `r.head` is set (`main.js:1012`).
+    for (const r of this.ordered()) if (r.head) keys.add(this.foldKey(r));
     return [...keys];
   }
 
@@ -666,7 +676,7 @@ export default class Spaces extends View {
       .id(id)
       .h(28).flex_none().w_full().pl(getProjectGroupHeaderPaddingLeft(0)).pr(8).gap(6).items_center().mt(4)
       .role("button").accessibility_label(g?.name ?? w.name)
-      .on_mouse_down("right", () => this.menu(w))
+      .on_mouse_down("right", () => this.menu(w, g))
       .on_click((_e, cx) => this.toggleRepo(key, cx))
       .on_hover((on, cx) => {
         if (on) this.hoveredRepo = key;
@@ -797,6 +807,19 @@ export default class Spaces extends View {
       return h_flex().min_w(0).h(24).px(4).gap(4).items_center()
         .text_size(11).line_height("11px").text_color(t.muted)
         .hover((s) => s.bg("#4040402e"))
+        .cursor_pointer()
+        // Orca's row activates the agent's pane (`worktree-card-compact-agent-row.tsx:311`,
+        // `use-worktree-agent-activation.ts:18-52`): it reveals the worktree, focuses the
+        // pane, and drops the row when the pane no longer resolves. Herdr's `agent.focus`
+        // focuses the agent's own space, tab and pane (`herdr.d.ts:68`), and `agents()` is
+        // live, so an address still in it is the resolve check; a vanished one is skipped.
+        .on_click((_e, cx) => {
+          cx.stop_propagation();
+          if (agents().some((x) => x.address === a.address)) run("agent.focus", { terminal: a.address });
+        })
+        // The card selects on mouse-up, so the row stops the press like the pill does.
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
         // AgentStateDot size="sm": 10px box, 6px inner, `done` = CircleCheck
         // (`src/renderer/src/components/AgentStateDot.tsx:114-116,148-157`) — not the card lane's StatusIndicator.
         .child(agentStateMark(a.status))
@@ -844,6 +867,11 @@ export default class Spaces extends View {
         .when(!expanded, el => el.border_1().border_color("#ffffff0d").bg("#35353559"))
         .hover((s) => s.bg("#f0f0f009"))
         .on_click((_e, cx) => { cx.stop_propagation(); this.toggleAgents(w.id, cx); })
+        // Orca stops the press on the pill, not only the click
+        // (`worktree-card-compact-agent-row.tsx:312-314`). This card activates on mouse-up,
+        // so the release is stopped too — stopping only the click left the card selecting.
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
         .when(expanded, el => el.child(div().min_w(0).flex_1().truncate().px(4).font_medium().child(`${mine.length} agents`)))
         .when(!expanded, el => el.child(h_flex().min_w(0).flex_1().items_center().gap(4).overflow_hidden()
           .children(visibleGroups.map(cluster))
@@ -955,7 +983,7 @@ export default class Spaces extends View {
         } else if (from === w.id) { run("space.select", { id: w.id }); run("layout.select", { stack: "main", child: "main-terminals" }); }
         cx.notify();
       })
-      .on_mouse_down("right", () => this.menu(w))
+      .on_mouse_down("right", () => this.menu(w, g))
       // Card root (worktree-card-surface.tsx): ml-1, py-2 for a title-only card, rounded-lg, and a
       // padding-left that the geometry module derives from the group depth. The content row is
       // `flex gap-0.5 items-start`, so the status lane sits at the top and never drives the title.
@@ -1104,8 +1132,6 @@ export default class Spaces extends View {
             .child(svg("mods/orca-spaces/trash.svg").size(10)));
       });
 
-    const tool = (id, label, icon, fn, more) => tip(this.hot, t, id, label, stop(this, t, id, div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(this.hot === id ? t.foreground : t.dim).on_hover(this.glow(id)).role("button").accessibility_label(label).hover(s => s.bg(t.hover))
-      .on_click(fn).child(svg(`mods/orca-spaces/${icon}.svg`).size(14))), more);
     return focusRoot(this, v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
       // Orca's sidebar bar is an 8px webkit scrollbar with `padding-right: 4px`
       // (`main.css:767-781`), transparent until the sidebar is hovered (`:781-800`). A webkit

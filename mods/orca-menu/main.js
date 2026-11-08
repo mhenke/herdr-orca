@@ -159,21 +159,35 @@ function items(p, git) {
         ["Rename workspace", "space.rename", { id: tg.id }],
         ["Close workspace", "space.close", { id: tg.id }],
       ];
-    case "space":
-      // Orca's order (WorktreeContextMenuView.tsx:165-205): Update, then Open in / Copy Path /
-      // Copy Worktree Name, then worktree work, then the destructive row.
+    case "space": {
+      // Orca keys the menu on the worktree, not a tab (`worktree-card-surface.tsx:139-146`):
+      // Update and Close belong to a tab, while Open in / Copy Path / Copy Worktree Name and
+      // the worktree work are unconditional (`WorktreeContextMenuView.tsx:165-298`). A card
+      // with no open space still shows the latter, from the facts its opener passes.
+      const open = spaces().some((s) => s.id === tg.id);
+      // The opener carries `linked`; `git` is the probe's fallback for a row whose git state
+      // had not loaded, or for a caller that sends only { id, path }.
+      const linked = typeof tg.linked === "boolean" ? tg.linked : git === "linked";
+      const repo = typeof tg.linked === "boolean" || git !== null;
+      const folder = tg.top || tg.folder || tg.path || null;
+      // The worktree dialog takes a space when one is open, `{ folder, machine }` otherwise
+      // (defaults/mods/worktree/main.js:158).
+      const args = { ...(open ? { space: tg.id } : {}), ...(folder ? { folder } : {}), ...(tg.machine ? { machine: tg.machine } : {}) };
       return [
-        ["Update", "space.rename", { id: tg.id }],
+        ...(open ? [["Update", "space.rename", { id: tg.id }]] : []),
         // Orca's "Open in" is a submenu of external editors (WorktreeOpenInMenu.tsx:295-325);
         // Herdr has no external-open command, so this opens a Herdr terminal in the
         // worktree's folder instead (terminal.open, commands.md:277).
-        ["Open in Terminal", "terminal.open", tg.path ? { folder: tg.path } : {}],
-        ["Copy Path", "orca-menu.copy-path", { path: tg.path ?? null, id: tg.id }],
-        ["Copy Worktree Name", "orca-menu.copy-name", { id: tg.id }],
-        ...(git ? [["New worktree", "worktree", { space: tg.id, action: "new", ...(tg.path ? { folder: tg.path } : {}) }], ["Open worktree", "worktree", { space: tg.id, action: "open", ...(tg.path ? { folder: tg.path } : {}) }]] : []),
-        ...(git === "linked" ? [["Remove worktree", "worktree", { space: tg.id, action: "remove", ...(tg.path ? { folder: tg.path } : {}) }]] : []),
-        ["Close", "space.close", { id: tg.id }],
+        ["Open in Terminal", "terminal.open", folder ? { folder } : {}],
+        ["Copy Path", "orca-menu.copy-path", { path: folder, id: tg.id }],
+        // The display name is custom, else the branch, else the folder's last segment
+        // (`worktree-default-display-name.ts:13-25`).
+        ["Copy Worktree Name", "orca-menu.copy-name", { id: tg.id, name: tg.branch ?? null, folder }],
+        ...(repo ? [["New worktree", "worktree", { ...args, action: "new" }], ["Open worktree", "worktree", { ...args, action: "open" }]] : []),
+        ...(linked ? [["Remove worktree", "worktree", { ...args, action: "remove" }]] : []),
+        ...(open ? [["Close", "space.close", { id: tg.id }]] : []),
       ];
+    }
     default:
       return [
         ["New space", "space.new", {}],
@@ -253,11 +267,14 @@ export default class Menu extends View {
     this.handle = cx.focus_handle();
     this.handle.focus();
     const p = props();
-    const space = p?.tab === "space" && spaces().find((s) => s.id === p.target?.id);
-    const folder = space && place(space);
-    if (folder)
+    const tg = p?.target ?? {};
+    const space = p?.tab === "space" && spaces().find((s) => s.id === tg.id);
+    // A card hands over the worktree's own `linked`, so only a space whose git state has not
+    // loaded needs the checkout probe.
+    const folder = space ? place(space) : tg.folder ?? tg.top ?? null;
+    if (p?.tab === "space" && folder && typeof tg.linked !== "boolean")
       cx.spawn(async (cx) => {
-        this.git = await checkout(folder, space.machine).catch(() => null);
+        this.git = await checkout(folder, tg.machine ?? space?.machine ?? null).catch(() => null);
         cx.notify();
       });
   }
@@ -280,7 +297,9 @@ export default class Menu extends View {
       const folder = space ? place(space) : "";
       if (it[1] === "orca-menu.copy-tab-id") void copyText(it[2].id ?? "");
       if (it[1] === "orca-menu.copy-path") void copyText(it[2].path || folder);
-      if (it[1] === "orca-menu.copy-name") void copyText(space?.name ?? "");
+      // Display name: the space's, else the worktree's branch, else the folder's last segment
+      // (`worktree-default-display-name.ts:13-25`).
+      if (it[1] === "orca-menu.copy-name") void copyText(space?.name || it[2].name || String(it[2].folder ?? "").replace(/\/+$/, "").split("/").pop() || "");
       // Close Others — the tab's own space only (SortableTabContextMenu.tsx:213).
       if (it[1] === "orca-menu.close-others") {
         const owner = spaces().find((s) => (s.tabs ?? []).some((x) => x.id === it[2].id));
