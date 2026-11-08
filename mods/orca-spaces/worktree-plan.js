@@ -30,19 +30,19 @@ export function parseWorktreeList(output) {
 }
 
 /**
- * Where a space is now: its first terminal's live folder, else where it was made.
- * `ps`: panes(), read once by the caller (each read copies every pane).
+ * Where a space is: its designated workspace folder (GLOSSARY.md:
+ * "The space is the scope; the terminal is only where keystrokes go").
+ * Terminal cwd changes inside a space must never change its location key.
  */
-export function place(s, ps = []) {
-  const tabs = new Set((s.tabs ?? []).map((c) => c.id));
-  return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
+export function place(s, _ps = []) {
+  return s?.folder ?? null;
 }
 
 /**
  * Host-qualified workspace identity key [machine, folder].
- * Port of `getWorktreeHostIdentity` (`host-qualified-identity.ts`).
+ * Port of `getWorktreeHostIdentity` (`host-qualified-identity.ts:48`).
  */
-export const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
+export const where = (s, ps) => JSON.stringify([s?.machine ?? null, place(s, ps)]);
 
 export const base = (path) => path.replace(/\/+$/, "").split("/").pop();
 
@@ -67,6 +67,78 @@ export function foldKey({ w, g }) {
 }
 
 /**
+ * Attention priority ranking matching Herdr host's rollup (`herdr-app/src/model.rs:92-97`):
+ * blocked (4) > done (3) > working (2) > idle (1) > none (0).
+ */
+export const STATUS_RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
+
+/**
+ * Recent = the newest tab change of the card (`smart-sort.ts:31` reads `lastActivityAt`; Herdr's
+ * tab carries `changed_at`), so the timestamp the panes already report is the sort key.
+ */
+export function recentOf(r) {
+  return Math.max(0, ...(r.w.tabs ?? []).map((tab) => tab.changed_at ?? 0));
+}
+
+export function optionTitle(r) {
+  const branch = r.g?.branch ?? r.w.branch ?? null;
+  return !r.w.named && branch ? branch : r.w.name;
+}
+
+/**
+ * `sidebar-row-plan.ts:185` sorts inside a project group and keeps the main worktree first for
+ * every sort but manual (`section-order.ts:3-16`).
+ */
+export function sortRows(rows, sortBy) {
+  if (sortBy === "manual") return rows;
+  const main = rows.filter((r) => r.g && !r.g.linked);
+  const rest = rows.filter((r) => !(r.g && !r.g.linked));
+  const cmp = {
+    name: (a, b) => optionTitle(a).localeCompare(optionTitle(b)),
+    smart: (a, b) => (STATUS_RANK[b.w.status] ?? 0) - (STATUS_RANK[a.w.status] ?? 0)
+      || recentOf(b) - recentOf(a) || optionTitle(a).localeCompare(optionTitle(b)),
+    recent: (a, b) => recentOf(b) - recentOf(a) || optionTitle(a).localeCompare(optionTitle(b)),
+    repo: (a, b) => (a.g?.name ?? "").localeCompare(b.g?.name ?? "") || optionTitle(a).localeCompare(optionTitle(b)),
+  }[sortBy];
+  return cmp ? [...main, ...rest.sort(cmp)] : rows;
+}
+
+/**
+ * `buildWorkspaceRowPredicate` (workspace-row-filters.ts:99-130) over the plan's rows. The host
+ * scope filters every row; folder workspaces then skip the kind/repo/sleeping filters (:119-121),
+ * which is why a project filter never hides a folder workspace.
+ */
+export function applyWorkspaceOptions(rows, o = {}) {
+  const hosts = Array.isArray(o.visibleWorkspaceHostIds) ? new Set(o.visibleWorkspaceHostIds) : null;
+  const repos = Array.isArray(o.filterRepoIds) && o.filterRepoIds.length ? new Set(o.filterRepoIds) : null;
+  const kept = rows.filter((r) => {
+    if (hosts && !hosts.has(r.w.machine ?? null)) return false;
+    if (!r.g) return true;
+    // Herdr's git cache stores no default-branch name, so "default branch" is the repo's main
+    // checkout (`!linked`), the row Orca's scan marks `isMainWorktree`.
+    if (o.hideDefaultBranchWorkspace && !r.g.linked) return false;
+    if (o.hideDetachedHeadWorkspaces && r.g.branch === "(detached)") return false;
+    if (repos && !repos.has(r.g.repo)) return false;
+    return true;
+  });
+  if (o.groupBy !== "repo") return sortRows(kept, o.sortBy);
+  // The plan emits one project's rows consecutively, so consecutive runs are the groups.
+  const blocks = [];
+  for (const r of kept) {
+    const k = r.g ? `repo:${r.g.repo}` : `space:${r.w.id}`;
+    const last = blocks[blocks.length - 1];
+    if (last?.key === k) last.rows.push(r); else blocks.push({ key: k, rows: [r] });
+  }
+  if (o.projectOrderBy === "recent") blocks.sort((a, b) => recentOf(b.rows[0]) - recentOf(a.rows[0]));
+  const out = [];
+  for (const b of blocks) {
+    // Only the block's first row heads it, so filtering the head row promotes the next one.
+    sortRows(b.rows, o.sortBy).forEach((r, i) => out.push({ ...r, head: i === 0 }));
+  }
+  return out;
+}
+
+/**
  * Projects the worktree plan from active spaces, terminal panes, and cached git state.
  * Pure data transformation: no UI components, timers, or side effects.
  *
@@ -80,6 +152,7 @@ export function foldKey({ w, g }) {
  * @param {Set} [options.foldedRepos] Set of collapsed project keys
  * @param {boolean} [options.loaded] Whether startup worktree refresh has completed
  * @param {Function} [options.whereFn] Custom space location resolver (defaults to `where`)
+ * @param {Object} [options.options] Workspace view options (filters, sort, grouping)
  * @returns {{ groups: Array, list: Array, visibleRows: Array, projectKeys: string[], rowIndex: Map<string, number>, out: Array }}
  */
 export function projectWorktreePlan({
@@ -89,6 +162,7 @@ export function projectWorktreePlan({
   foldedRepos = new Set(),
   loaded = false,
   whereFn = where,
+  options = {},
 } = {}) {
   const getWhere = (w) => (whereFn ? whereFn(w, ps) : where(w, ps));
   // Orca draws rows only after discovery completes.
@@ -204,7 +278,8 @@ export function projectWorktreePlan({
       };
       // No `...r.g`: a sibling worktree shares the repo but not the review. Orca reads each
       // worktree's own branch, so carrying the main worktree's PR onto this row was the bug.
-      const g = { ...r.g, top: wt.path, branch: wt.branch || r.g.branch, linked: true, pr: undefined };
+      // Detached HEAD worktrees have no branch name; they must not fall back to `r.g.branch`.
+      const g = { ...r.g, top: wt.path, branch: wt.branch || "", linked: true, pr: undefined };
       kids.push({ w, i: -1, g, key: `wt:${wt.path}`, also: [], unopened: true });
     }
     top.kids = kids.length;
@@ -216,7 +291,7 @@ export function projectWorktreePlan({
 
   // Nothing here mutates or dispatches: the order below IS the answer, recomputed each pass.
   // Ordering it in the plan is what keeps the list from rewriting itself while it loads.
-  const visibleRows = out.filter((r) => r.unopened || r.ok);
+  const visibleRows = applyWorkspaceOptions(out.filter((r) => r.unopened || r.ok), options);
 
   // The drag indicator needs both cards' row positions. `i` is the space index, not the
   // row index (folded groups, merged spaces and unopened worktrees all shift it), so the
@@ -225,9 +300,8 @@ export function projectWorktreePlan({
   const rowIndex = new Map(visibleRows.map((r, i) => [r.w.id, i]));
 
   // Every project key currently rendered, for `setAllProjectsCollapsed`. Orca collects them
-  // from the row plan (`getRenderedProjectCollapseKeys`, project-collapse-all.ts:5); the
-  // equivalent here is the group header each rendered row emits.
-  const projectKeys = [...new Set(visibleRows.filter((r) => !r.unopened).map(foldKey))];
+  // from the row plan (`getRenderedProjectCollapseKeys`, project-collapse-all.ts:7-13: all rendered headers).
+  const projectKeys = [...new Set(visibleRows.filter((r) => r.head).map(foldKey))];
 
   // Grouped structure by project key (repo or space:<id>)
   const groupMap = new Map();

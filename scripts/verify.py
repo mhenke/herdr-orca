@@ -33,7 +33,7 @@ ORCA = os.path.expanduser("~/Projects/orca")
 # a reference to a local file, not an Orca parity claim.
 LOCAL = {
     "main.js", "project.js", "status.js", "indentation.js", "focus.js", "tip.js", "clip.js",
-    "worktree-plan.js",
+    "worktree-plan.js", "review-store.js",
     "mod.js", "mod.json", "jsconfig.json", "tsconfig.json", "gpui-kit.d.ts", "herdr.d.ts",
     # Herdr's own kind-binding file. A mod names it to explain how Herdr spells a key
     # ("ctrl-shift-t"), which is a fact about Herdr, not a parity claim about Orca.

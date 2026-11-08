@@ -1,6 +1,7 @@
 // Port of orca src/renderer/src/components/sidebar/worktree-list/rows/indentation.ts.
 // Every card inset in Orca is derived here, so the constants are the only place a width
 // can change. Hard-coding the results per row is what let the lane, indent and title drift.
+// Portions ported from Orca (MIT, Copyright (c) 2026 Lovecast Inc.); see NOTICE.
 
 export const SIDEBAR_TREE_INDENT = 18;
 const PROJECT_WORKTREE_CARD_EXTRA_INDENT = 2;
@@ -76,13 +77,28 @@ export function getFlushWorktreeCardPaddingLeft(contentIndent, applyNewCardStyle
     : FLUSH_CARD_MIN_CONTENT_INSET;
 }
 
-export function getNewCardStyleParentContentMarginLeft(contentIndent) {
-  if (contentIndent <= 0) return 0;
-  const legacyInnerPadding = Math.max(FLUSH_CARD_MIN_CONTENT_INSET, contentIndent - FLUSH_CARD_CONTENT_PULLBACK);
-  const newInnerPadding = Math.max(FLUSH_CARD_MIN_CONTENT_INSET, contentIndent - FLUSH_CARD_CONTENT_PULLBACK - NEW_CARD_STYLE_STATUS_LANE_EXTRA_PULLBACK);
-  const paddingShift = legacyInnerPadding - newInnerPadding;
-  const remainingShift = NEW_CARD_STYLE_STATUS_LANE_EXTRA_PULLBACK - paddingShift;
-  if (remainingShift <= 0) return 0;
-  // Shallow rows hit the padding floor; finish with margin but never pass the inner edge.
-  return Math.max(-newInnerPadding, -remainingShift);
+// `getFolderWorkspaceRowGeometry` (indentation.ts:68-121). Legacy folder-scanned workspaces keep
+// the compact anchor at groupDepth 1; every other row takes the normal path at depth 0.
+export function getFolderWorkspaceRowGeometry({
+  experimentalNewWorktreeCardStyle,
+  isFolderBackedWorkspaceChild,
+  isGrouped,
+  groupDepth,
+  lineageDepth,
+}) {
+  if (experimentalNewWorktreeCardStyle && isFolderBackedWorkspaceChild) {
+    // Standalone rows get no lineage wrapper offset, so align to the grouped repo-card anchor.
+    const parentGroupDepth = Math.max(0, clampDepth(groupDepth) - 1);
+    const contentAnchor = getWorktreeCardContentIndent({ isGrouped: true, groupDepth: parentGroupDepth, lineageDepth: 0 });
+    const surfaceInset = getWorktreeCardSurfaceInset({ isGrouped: true, groupDepth: parentGroupDepth });
+    return { surfaceInset, cardContentIndent: Math.max(0, contentAnchor - surfaceInset) };
+  }
+
+  const contentIndent = isFolderBackedWorkspaceChild
+    ? getFolderWorkspaceCardContentIndent({ groupDepth })
+    : getWorktreeCardContentIndent({ isGrouped, groupDepth, lineageDepth });
+  const surfaceInset = isFolderBackedWorkspaceChild
+    ? getFolderWorkspaceCardSurfaceInset({ isGrouped: true, groupDepth })
+    : getWorktreeCardSurfaceInset({ isGrouped, groupDepth });
+  return { surfaceInset, cardContentIndent: Math.max(0, contentIndent - surfaceInset) };
 }

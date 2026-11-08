@@ -39,10 +39,39 @@ const REPO_BADGE_COLOR = "#737373";
 // names the fork's parent. `githubAvatarSlug` (shared/repo-icon.ts) then keeps origin only when
 // the fork was RENAMED (`origin.repo !== upstream.repo`), because a same-name fork shows the
 // parent's avatar while a renamed one keeps its own identity.
+// Remote URL parser: ports Orca's `parseRemoteRepo` and `cleanPath`
+// (`remote-repo.ts:38-48`, `remote-repo.ts:138-192`).
+// Handles protocol URLs (ssh://git@github.com:22/owner/repo.git, https://) without
+// confusing ports with owners, and SCP-like syntax (git@github.com:owner/repo.git).
 export function parseRemote(remoteUrl) {
-  const m = String(remoteUrl ?? "").trim().match(/^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^/:]+)[/:]([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
-  if (!m || !/^[A-Za-z0-9-]+$/.test(m[2]) || !m[3]) return null;
-  return { host: m[1].toLowerCase(), owner: m[2], repo: m[3] };
+  const trimmed = String(remoteUrl ?? "").trim().replace(/^git\+/, "");
+  if (!trimmed) return null;
+
+  if (trimmed.includes("://")) {
+    try {
+      const url = new URL(trimmed);
+      const host = url.hostname.toLowerCase();
+      const parts = url.pathname
+        .replace(/^\/+/, "")
+        .replace(/\/+$/, "")
+        .replace(/\.git$/i, "")
+        .split("/")
+        .map((p) => p.trim())
+        .filter(Boolean);
+      if (parts.length >= 2 && /^[A-Za-z0-9_.-]+$/.test(parts[0]) && parts[1]) {
+        return { host, owner: parts[0], repo: parts[1] };
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  const scp = trimmed.match(/^(?:[^@/:]+@)?([^:\s/]+):([^\s/]+)\/([^\s/]+?)(?:\.git)?\/?$/);
+  if (scp && /^[A-Za-z0-9_.-]+$/.test(scp[2]) && scp[3]) {
+    return { host: scp[1].toLowerCase(), owner: scp[2], repo: scp[3] };
+  }
+  return null;
 }
 
 export function avatarUrlFor({ host, owner }) {

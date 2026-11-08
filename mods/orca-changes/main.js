@@ -1,6 +1,9 @@
+// Derived from Herdr App's defaults/mods/changes/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea, Input, InputState } from "gpui-base";
-import { spaces, panes, focused, exec, watchFolder, theme, window, run } from "herdr";
+import { spaces, exec, watchFolder, theme, window, run } from "herdr";
+import { recordReview, invalidateReview } from "./review-store.js";
 
 function fade(color, factor) {
   if (!color || typeof color !== "string") return "#00000000";
@@ -8,16 +11,11 @@ function fade(color, factor) {
   return color.slice(0, 7) + Math.round(alpha * factor).toString(16).padStart(2, "0");
 }
 
-// Orca scopes the panel to the project, not to whatever folder the focused
-// terminal happens to sit in: a terminal in /tmp must not empty the tree.
+// Orca scopes the panel to the project/workspace folder (open-uncommitted-entry.ts:6-36,
+// GLOSSARY.md: "The space is the scope; the terminal is only where keystrokes go").
 function location() {
-  const space = (spaces() ?? []).find(s => s.active), f = focused();
-  const pane = f?.pane ? (panes() ?? []).find(p => p.pane === f.pane) : null;
-  const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
-  const live = pane?.cwd || f?.cwd;
-  const project = space?.folder || live;
-  const cwd = live && project && !(live.startsWith(project + "/") || live === project) ? project : live || project;
-  return { cwd, on, space: space?.id };
+  const space = (spaces() ?? []).find(s => s.active);
+  return { cwd: space?.folder ?? null, on: space?.machine ?? null, space: space?.id };
 }
 const key = () => JSON.stringify(location());
 // Reads write nothing under .git (no index refresh or lock, no fsmonitor cookie):
@@ -26,9 +24,9 @@ const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.a
 // Pathspecs stay under the arg limit while keeping one index write per batch.
 const chunks = (paths, size = 200) => Array.from({ length: Math.ceil(paths.length / size) }, (_, i) => paths.slice(i * size, i * size + size));
 
-// `props.file` is read against orca-files' root, which is the same focus-derived cwd this mod
-// keys its context on (both call location()); status paths are relative to the git toplevel,
-// so rebase them onto that cwd.
+// `props.file` is read against orca-files' root, which is space.folder (GLOSSARY.md:
+// "The space is the scope; the terminal is only where keystrokes go").
+// Status paths are relative to git toplevel, so rebase onto space.folder if they differ.
 function relPath(from, to) {
   const a = from.replace(/\/+$/, "").split("/"), b = to.split("/");
   let i = 0;
@@ -335,9 +333,28 @@ export default class Changes extends View {
         const out = res.stdout.trim();
         this.note = `Created PR: ${out}`;
 
-        // The sidebar badge is orca-spaces' cache, keyed `JSON.stringify([machine, commonDir])`
-        // (worktree-plan.js:52). This mod cannot derive that key, so it does not write it; the
-        // badge appears on the sidebar's next PR probe.
+        // Update the review store immediately so the sidebar badge appears without waiting for
+        // the 15-minute negative cache interval. Keyed `<common-dir>::<branch>`
+        // (hosted-review-creation.ts:289-293, hosted-review-branch-cache.ts:66-79).
+        const common = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: root, on });
+        const repo = common.code === 0 ? common.stdout.trim() : root;
+
+        const m = out.match(/\/pull\/(\d+)/);
+        let number = m ? parseInt(m[1], 10) : null;
+        if (!number) {
+          try {
+            const pv = await exec("gh", ["pr", "view", "--json", "number"], { cwd: root, on });
+            if (pv.code === 0) {
+              const pvd = JSON.parse(pv.stdout || "{}");
+              if (pvd.number) number = pvd.number;
+            }
+          } catch {}
+        }
+        if (number) {
+          recordReview(repo, branch, { number, state: draft ? "draft" : "open" });
+        } else {
+          invalidateReview(repo, branch);
+        }
       } catch (e) {
         this.note = String(e.message || e).trim();
       } finally {
@@ -431,12 +448,14 @@ export default class Changes extends View {
   // the file itself for added/untracked markdown, and the conflicted file for conflicts. Herdr's
   // editor holds one buffer and has no diff model, so the diff half has no primitive; the
   // open-file half is ported through orca-files' `props.file` (a tab whose only pane is that mod),
-  // which resolves it against the same focus-derived cwd. The conflict merge view has no
-  // equivalent either, so a conflicted file opens as plain text.
+  // which resolves it against space.folder. The conflict merge view has no equivalent either,
+  // so a conflicted file opens as plain text.
   openEntry(f) {
     const root = this.root, cwd = location().cwd;
     if (!root || !cwd) return;
-    run("tab.new", { mod: "orca-files", props: { file: relPath(cwd, `${root}/${f.path}`) } });
+    // Status paths are relative to the git toplevel; `props.file` is read against space.folder.
+    const file = relPath(cwd, `${root.replace(/\/+$/, "")}/${f.path}`);
+    run("tab.new", { mod: "orca-files", props: { file } });
   }
 
   resolveConflict(f, resolution, cx) {

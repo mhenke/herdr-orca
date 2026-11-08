@@ -1,23 +1,21 @@
-// A lazy file browser for the focused pane's folder, with bounded read-only previews.
+// Derived from Herdr App's defaults/mods/files/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
+// A lazy file browser for the active space's folder, with bounded read-only previews.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, Input, InputState, Editor, EditorState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, openOverlay, closeOverlay, shared, setShared, nextCommand } from "herdr";
+import { spaces, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, openOverlay, closeOverlay, shared, setShared, nextCommand } from "herdr";
 import { copyText, reveal } from "./clip.js";
 
 // Reads write nothing under .git (no index refresh or lock, no fsmonitor cookie):
 // the folder watch would see it, and every refresh would start the next one.
 const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false"];
 
-// Orca scopes the panel to the project, not to whatever folder the focused
-// terminal happens to sit in: a terminal in /tmp must not empty the tree.
+// Orca scopes the panel to the project/workspace folder (FileExplorer.tsx:93,
+// GLOSSARY.md: "The space is the scope; the terminal is only where keystrokes go").
+// The file tree stays rooted in space.folder; terminal cwd changes never re-root the explorer.
 function location() {
-  const space = (spaces() ?? []).find(s => s.active), f = focused();
-  const pane = f?.pane ? (panes() ?? []).find(p => p.pane === f.pane) : null;
-  const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
-  const live = pane?.cwd || f?.cwd;
-  const project = space?.folder || live;
-  const cwd = live && project && !(live.startsWith(project + "/") || live === project) ? project : live || project;
-  return { cwd, on, space: space?.id };
+  const space = (spaces() ?? []).find(s => s.active);
+  return { cwd: space?.folder ?? null, on: space?.machine ?? null, space: space?.id };
 }
 const key = () => JSON.stringify(location());
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
@@ -296,7 +294,7 @@ export default class Files extends View {
         }
         const top = await exec("git", [...READ, "rev-parse", "--show-toplevel"], { cwd, on }).catch(() => null);
         // Status keys are relative to `this.root`, as Orca looks them up by `relativePath`
-        // (FileExplorerVirtualRows.tsx:198-232): the tree root is the focused pane's folder,
+        // (FileExplorerVirtualRows.tsx:198-232): the tree root is the space folder,
         // which can sit below the repo root `git rev-parse` reports.
         const posix = p => p.replace(/\\/g, "/").replace(/\/+$/, "");
         const root = posix(this.root ?? ""), base = top?.stdout.trim() ? posix(top.stdout.trim()) : "";
