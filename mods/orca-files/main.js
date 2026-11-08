@@ -614,7 +614,7 @@ export default class Files extends View {
     if (!this.useRegex) args.push("--fixed-strings");          // text-search.ts:62-64
     for (const pat of splitGlobs(this.include.value())) args.push("--glob", pat);       // :65-69
     for (const pat of splitGlobs(this.exclude.value())) args.push("--glob", `!${pat}`); // :70-74
-    args.push("--max-count", "20", "--", query);              // :75 — `--` ends option parsing
+    args.push("--", query);                                   // :75 — `--` ends option parsing; Orca sets no per-file cap
     const r = await exec("rg", args, { cwd: this.root, on: this.on }).catch(() => null);
     // Same as the listing: rg exits 2 after an unreadable directory and still printed
     // the hits; only a run that produced nothing is a failure.
@@ -905,7 +905,7 @@ export default class Files extends View {
     const results = `${hits.totalMatches} ${hits.totalMatches === 1 ? "result" : "results"}`;
     const files = `${hits.fileCount} ${hits.fileCount === 1 ? "file" : "files"}`;
     return h_flex().id("files-search-summary").flex_none().px(8).py(4).border_b(1).border_color(t.border)
-      .text_size(10).text_color(t.muted)
+      .text_size(11).text_color(t.muted) // `text-2xs` = 0.6875rem = 11px (SearchResultsPane.tsx:89)
       .child(`${results} in ${files}${hits.truncated ? " (results truncated)" : ""}`);
   }
 
@@ -946,12 +946,19 @@ export default class Files extends View {
 
   // SearchResultItems.tsx:134-199 MatchResultRow — pl-7 (28px) indent, py-px, a 10px
   // tabular line number (:187-189), then the 12px line; search-rows.ts:40-47 renders one
-  // per match under its file and SearchResultsPane.tsx:126-131 opens it. rg --vimgrep
+  // per match under its file and SearchResultsPane.tsx:126-131 opens it via `openMatchResult`
+  // (search-match-open.ts:52-82): open the file, then apply `pendingEditorReveal {line,
+  // column, matchLength}` so the editor scrolls to the line and selects the match. rg --vimgrep
   // carries `column` but no match length, so the exact submatch span Orca highlights from
   // its --json submatches (:143-170) cannot be split out here.
+  // The reveal half has no Herdr primitive: `EditorState` binds only value / set_value / on /
+  // release to JS (typings.rs:3144-3147, entity_api.rs:485-502), while base's line and scroll
+  // setters — `InputBaseState::set_cursor_position` (state.rs:1392) and `set_scroll_offset`
+  // (state.rs:3121) — stop at the Rust API. So the click opens the file at its top, which is
+  // the closest the primitives allow; no padding pretends otherwise.
   // SearchResultsPane.tsx:68-69 sizes a match row 20px.
   searchMatch(path, match, i, t) {
-    return h_flex().id(`files-hit-${path}-${i}`).w_full().h(20).flex_none().pl(28).pr(8).gap(6).items_center()
+    return h_flex().id(`files-hit-${path}-${i}`).w_full().h(20).flex_none().pl(28).pr(8).gap(4).items_center()
       .cursor_pointer().hover(s => s.bg(t.hover))
       .on_click((_e, cx) => this.show(path, cx))
       .child(div().flex_none().text_size(10).text_color(t.muted).child(String(match.line)))
