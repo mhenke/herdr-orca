@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-08
+
+### Documentation
+
+- Add ADRs 0006-0008, domain glossary definitions, and project doc update
+
+### Features
+
+- **release:** Add scan, domain-modeling, and graphify preflight checks to release skill and script
+- **orca-files:** Support opening file directly from props
+- **orca-handoff,orca-split-menu:** Add agent handoff dialog and pane split menu mods
+- **orca-agents:** Add transcript session history and resume support
+- **orca-changes:** Add conflict resolution, batch discard, and sync actions
+- **orca-nav,orca-spaces:** Add workspace options menu and unread bell toggle
+- **orca-pane,orca-menu:** Add header drag grip, transcript capture, and terminal menu integration
 ## [0.4.0] - 2026-11-08
 
 ### Bug Fixes
@@ -174,6 +189,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stroke width, and the group header's missing plus
 - The palette was invented; the drop indicator was the wrong shape
 - Refresh the raster after the row-order fix
+[0.5.0]: https://github.com/mhenke/herdr-orca/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/mhenke/herdr-orca/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/mhenke/herdr-orca/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mhenke/herdr-orca/compare/v0.1.0...v0.2.0
