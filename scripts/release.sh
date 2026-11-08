@@ -93,6 +93,12 @@ if [[ "$SKIP_CHECKS" = false ]]; then
   else
     echo "    herdr-app not found in PATH, skipping mod check."
   fi
+
+  if command -v graphify >/dev/null 2>&1 && [[ -d "graphify-out" ]]; then
+    echo "==> Updating code graph (graphify update .)..."
+    graphify update .
+    echo "    Code graph updated."
+  fi
 fi
 
 # 2. Check git status

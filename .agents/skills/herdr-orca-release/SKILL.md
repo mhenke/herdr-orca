@@ -19,11 +19,14 @@ Distribution combines two independent mechanisms:
 
 | Task | Command | Completion Check |
 |---|---|---|
+| **Codebase Scan** | `/scan` | `.claude/pipeline/project-doc.md` updated, architecture reviewed |
+| **Domain Modeling** | `/domain-modeling` | `GLOSSARY.md` sharpened, ADRs recorded in `docs/adr/` if needed |
+| **Update Graph** | `graphify update .` | `./graphify-out/graph.json` refreshed (deterministic, AST offline) |
+| **Syntax Check** | `for f in mods/*/main.js; do node --check "$f"; done` | Exit code 0 across all files |
+| **Mod Check** | `for m in mods/*; do [ -d "$m" ] && herdr-app check "$m"; done` | All mods output `check passed` |
 | **Dry Run** | `./scripts/release.sh --dry-run <version>` | Exit code 0, preview prints valid categories |
 | **Cut Local Release** | `./scripts/release.sh <version>` | Tag `v<version>` created, `CHANGELOG.md` committed |
 | **Publish Release** | `./scripts/release.sh <version> --push --github-release` | GitHub release live, assets attached |
-| **Mod Check** | `for m in mods/*; do [ -d "$m" ] && herdr-app check "$m"; done` | All mods output `check passed` |
-| **Syntax Check** | `for f in mods/*/main.js; do node --check "$f"; done` | Exit code 0 across all files |
 | **Direct Changelog** | `uvx git-cliff --offline --tag v<version> -o CHANGELOG.md` | `CHANGELOG.md` updated |
 
 ---
@@ -34,10 +37,10 @@ Follow these five steps in exact order. Do not skip or reorder steps.
 
 ### Step 1: Pre-Flight Verification
 
-Run the full verification suite against all mod entrypoints and repository state:
+Execute the pre-flight verification suite across code integrity, documentation drift, domain model precision, and code graph indexing:
 
 ```sh
-# 1. Validate JavaScript syntax
+# 1. Validate JavaScript syntax across all mod entrypoints
 for f in mods/*/main.js; do
   node --check "$f"
 done
@@ -47,11 +50,43 @@ for m in mods/*; do
   [ -d "$m" ] && herdr-app check "$m"
 done
 
-# 3. Check for uncommitted changes
+# 3. Update Knowledge Graph (graphify)
+# Re-extract changed AST nodes into ./graphify-out/ (offline, code-only, no API key)
+if command -v graphify >/dev/null 2>&1 && [ -d "graphify-out" ]; then
+  graphify update .
+fi
+
+# 4. Check for uncommitted changes
 git status --porcelain
 ```
 
-**Completion criterion:** `node --check` and `herdr-app check` exit 0 on all mod entrypoints; `git status --porcelain` is clean (or contains only dirty `CHANGELOG.md`/`cliff.toml` to be committed by the release runner).
+#### Pre-Flight Skill Checks
+
+Before finalizing the release commit, invoke and verify the following three disciplines:
+
+1. **Codebase Scan (`/scan`)**:
+   - Run a delta scan (or full scan on bootstrapping) to update `.claude/pipeline/project-doc.md`.
+   - Update LOC counts, mod responsibilities, cross-cutting concerns, and citation verifications.
+   - If architectural drift occurred, review and align `AGENTS.md` before proceeding.
+
+2. **Domain Modeling (`/domain-modeling`)**:
+   - Audit all terminology, UI boundaries, and concepts introduced or altered in this release cycle.
+   - Sharpen `GLOSSARY.md`: confirm every concept has a canonical definition, explicit anti-terms ("Avoid: ..."), and zero implementation details.
+   - Review architectural trade-offs: if a change was hard to reverse, surprising without context, and involved real trade-offs, ensure an ADR is recorded under `docs/adr/`.
+
+3. **Code Graph Refresh (`graphify update .`)**:
+   - Run `graphify update .` in the project root to ensure the local knowledge graph at `./graphify-out/graph.json` reflects the exact commit state.
+   - Ensures subsequent agent queries (`graphify query`, `graphify path`, `graphify explain`) resolve all newly added symbols, dependencies, and calls without staleness.
+
+4. **Commit Documentation & Alignment**:
+   - Stage and commit all doc updates (`project-doc.md`, `GLOSSARY.md`, `AGENTS.md`, `docs/adr/`) under Conventional Commits (`docs(...)` or `docs: ...`) and push to `master`.
+
+**Completion criterion:**
+- `node --check` and `herdr-app check` exit 0 on all mod entrypoints.
+- `.claude/pipeline/project-doc.md` reflects current LOC, architecture, and re-scanned files.
+- `GLOSSARY.md` and `docs/adr/` accurately define all release domain terms and decisions.
+- `graphify update .` exits 0 with `./graphify-out/graph.json` up to date.
+- `git status --porcelain` is clean (or contains only dirty `CHANGELOG.md`/`cliff.toml` to be committed by the release runner).
 
 ---
 
