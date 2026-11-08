@@ -1,0 +1,10 @@
+{
+  "place": "none",
+  "title": "Split Terminal",
+  "overlay": {
+    "kind": "popup",
+    "at": "center",
+    "width": 380,
+    "height": 420
+  }
+}

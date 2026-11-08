@@ -21,6 +21,7 @@
   },
   "preview": "layouts/orca.svg",
   "theme": "orca-dark",
+  "terminal_menu": "orca-menu",
   "children": [
     {
       "id": "body",
