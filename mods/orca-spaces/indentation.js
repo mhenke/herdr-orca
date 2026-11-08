@@ -10,8 +10,8 @@ export const FLUSH_CARD_MIN_CONTENT_INSET = 2;
 export const WORKTREE_CARD_SURFACE_MARGIN = 4;
 // The legacy status lane's box is its unread button, `size-4` = 16px
 // (`surface/WorktreeCardStatusSlot.tsx:246-247`); the lane div itself has no width
-// (`surface/worktree-card-status-lane.tsx:19-23`). Ours is a bare 12px mark, so the slot has to
-// make up the other 4px or every title sits 4px left of its group-header label.
+// (`surface/worktree-card-status-lane.tsx:19-23`). The lane draws that same 16px button, so
+// the slot matches Orca's width and the title keeps its group-header label's anchor.
 export const LEGACY_STATUS_LANE_WIDTH = 16;
 // The card always draws `border border-transparent` (`surface/worktree-card-surface.tsx:71-76`),
 // so the active border never shifts the title by 1px.

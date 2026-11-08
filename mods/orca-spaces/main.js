@@ -27,6 +27,96 @@ function stored(key, fallback) {
     return Array.isArray(fallback) === Array.isArray(v) && v !== null && typeof v === "object" ? v : fallback;
   } catch { return fallback; }
 }
+
+// Workspace options written by orca-nav's options popup (SidebarWorkspaceOptionsMenu.tsx:23-100).
+// Orca persists these in PersistedUIState (`persisted-ui-state-types.ts:39-89`); Herdr mods have
+// no shared store, so this is the same read-only handoff as `projects.saved.v1`: orca-nav writes
+// "workspace.options.v1", this projection reads it. Defaults are NO_WORKSPACE_ROW_FILTERS
+// (`workspace-row-filters.ts:45-56`) plus repo grouping and manual sort.
+const WORKSPACE_OPTIONS_KEY = "workspace.options.v1";
+const WORKSPACE_OPTIONS_DEFAULTS = {
+  groupBy: "repo",              // none | workspace-status | repo
+  sortBy: "manual",             // name | smart | recent | repo | manual
+  projectOrderBy: "manual",     // manual | recent
+  filterRepoIds: [],
+  visibleWorkspaceHostIds: null,
+  hideSleepingWorkspaces: false,
+  alwaysShowDefaultBranchWorkspace: true,
+  hideDefaultBranchWorkspace: false,
+  hideAutomationGeneratedWorkspaces: false,
+  hideCliCreatedWorkspaces: false,
+  hideWorkspacesFromOtherDevices: false,
+  hideDetachedHeadWorkspaces: false,
+};
+function workspaceOptions() {
+  const saved = stored(WORKSPACE_OPTIONS_KEY, null);
+  return saved && !Array.isArray(saved) ? { ...WORKSPACE_OPTIONS_DEFAULTS, ...saved } : { ...WORKSPACE_OPTIONS_DEFAULTS };
+}
+
+// Recent = the newest tab change of the card (`smart-sort.ts:31` reads `lastActivityAt`; Herdr's
+// tab carries `changed_at`), so the timestamp the panes already report is the sort key.
+function recentOf(r) {
+  return Math.max(0, ...(r.w.tabs ?? []).map((tab) => tab.changed_at ?? 0));
+}
+function optionTitle(r) {
+  const branch = r.g?.branch ?? r.w.branch ?? null;
+  return !r.w.named && branch ? branch : r.w.name;
+}
+// Smart order: blocked outranks working, then completion, then idle (`smart-sort.ts:126-138`
+// reads attention class, then latest attention, then recency). Herdr has no attention timestamps,
+// so tab recency is the tiebreak.
+const SMART_RANK = { blocked: 0, working: 1, done: 2, idle: 3 };
+
+// `buildWorkspaceRowPredicate` (workspace-row-filters.ts:99-130) over the plan's rows. The host
+// scope filters every row; folder workspaces then skip the kind/repo/sleeping filters (:119-121),
+// which is why a project filter never hides a folder workspace.
+// The kind filters Herdr cannot evaluate stay menu-only (sleeping, automation/CLI provenance,
+// other-client provenance): Model::status has no sleep state and a space carries no provenance.
+function applyWorkspaceOptions(rows, o) {
+  const hosts = Array.isArray(o.visibleWorkspaceHostIds) ? new Set(o.visibleWorkspaceHostIds) : null;
+  const repos = Array.isArray(o.filterRepoIds) && o.filterRepoIds.length ? new Set(o.filterRepoIds) : null;
+  const kept = rows.filter((r) => {
+    if (hosts && !hosts.has(r.w.machine ?? null)) return false;
+    if (!r.g) return true;
+    // Herdr's git cache stores no default-branch name, so "default branch" is the repo's main
+    // checkout (`!linked`), the row Orca's scan marks `isMainWorktree`.
+    if (o.hideDefaultBranchWorkspace && !r.g.linked) return false;
+    if (o.hideDetachedHeadWorkspaces && r.g.branch === "(detached)") return false;
+    if (repos && !repos.has(r.g.repo)) return false;
+    return true;
+  });
+  if (o.groupBy !== "repo") return sortRows(kept, o.sortBy);
+  // The plan emits one project's rows consecutively, so consecutive runs are the groups.
+  const blocks = [];
+  for (const r of kept) {
+    const k = r.g ? `repo:${r.g.repo}` : `space:${r.w.id}`;
+    const last = blocks[blocks.length - 1];
+    if (last?.key === k) last.rows.push(r); else blocks.push({ key: k, rows: [r] });
+  }
+  if (o.projectOrderBy === "recent") blocks.sort((a, b) => recentOf(b.rows[0]) - recentOf(a.rows[0]));
+  const out = [];
+  for (const b of blocks) {
+    // Only the block's first row heads it, so filtering the head row promotes the next one.
+    sortRows(b.rows, o.sortBy).forEach((r, i) => out.push({ ...r, head: i === 0 }));
+  }
+  return out;
+}
+
+// `sidebar-row-plan.ts:185` sorts inside a project group and keeps the main worktree first for
+// every sort but manual (`section-order.ts:3-16`).
+function sortRows(rows, sortBy) {
+  if (sortBy === "manual") return rows;
+  const main = rows.filter((r) => r.g && !r.g.linked);
+  const rest = rows.filter((r) => !(r.g && !r.g.linked));
+  const cmp = {
+    name: (a, b) => optionTitle(a).localeCompare(optionTitle(b)),
+    smart: (a, b) => (SMART_RANK[a.w.status] ?? 9) - (SMART_RANK[b.w.status] ?? 9)
+      || recentOf(b) - recentOf(a) || optionTitle(a).localeCompare(optionTitle(b)),
+    recent: (a, b) => recentOf(b) - recentOf(a) || optionTitle(a).localeCompare(optionTitle(b)),
+    repo: (a, b) => (a.g?.name ?? "").localeCompare(b.g?.name ?? "") || optionTitle(a).localeCompare(optionTitle(b)),
+  }[sortBy];
+  return cmp ? [...main, ...rest.sort(cmp)] : rows;
+}
 export default class Spaces extends View {
   init(_props, cx) {
     stopsInit(this, cx, "entry");
@@ -58,6 +148,9 @@ export default class Spaces extends View {
           localStorage.setItem("repos.folded", JSON.stringify([...this.foldedRepos]));
           cx.notify();
         }
+        // The options menu writes "workspace.options.v1" and pings this loop; ordered() re-reads
+        // the key on the next render. setShared alone does not wake another mod (AGENTS.md rule 9).
+        else if (cmd === "options-changed") cx.notify();
       }
     });
     // where() -> { name, branch, owner, repo, linked }, null: not a repo.
@@ -108,6 +201,14 @@ export default class Spaces extends View {
     // `worktree-card-agents-expansion-state.ts:12-16`: a card's compact agent list starts
     // collapsed (`compactRootListExpanded: false`), so the stored set is the expanded ones.
     this.expandedAgents = new Set(stored("agents.expanded", []));
+
+    // Herdr has no unread state: `Model::status` (model.rs:528-536) only ever returns
+    // working | blocked | done | idle. Orca's card reads `worktree.isUnread` and writes it
+    // through `setWorkspaceUnreadByUser` (`use-worktree-card-activation-actions.ts:200-206`);
+    // no host field can hold that here, so the mod persists the toggled worktree ids.
+    this.unread = new Set(stored("spaces.unread.v1", []));
+    // The lane whose bell the pointer reveals; GPUI has no `group-hover`, so one id marks it.
+    this.laneHot = null;
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     cx.timer.every(15000, cx => { void this.checkSaved(cx); });
@@ -480,8 +581,12 @@ export default class Spaces extends View {
       loaded: this.loaded,
       whereFn: where,
     });
-    this.rowIndex = plan.rowIndex;
-    return plan.visibleRows;
+    // Workspace options narrow and order the plan (SidebarWorkspaceOptionsMenu.tsx:23-100,
+    // workspace-view-options.ts:120-141). rowIndex follows the drawn rows so a drag indexes
+    // what is on screen.
+    const rows = applyWorkspaceOptions(plan.visibleRows, workspaceOptions());
+    this.rowIndex = new Map(rows.map((r, i) => [r.w.id, i]));
+    return rows;
   }
 
   // Everything that must happen in the task phase, once per tick: ask for the reviews of rows
@@ -516,6 +621,14 @@ export default class Spaces extends View {
     cx.notify();
   }
 
+  // `WorktreeCardStatusSlot.tsx:230-252`'s click flips the worktree's read/unread. Mod-owned
+  // because Herdr's model has no unread state; nothing is written to the host.
+  toggleUnread(id, cx) {
+    this.unread.has(id) ? this.unread.delete(id) : this.unread.add(id);
+    localStorage.setItem("spaces.unread.v1", JSON.stringify([...this.unread]));
+    cx.notify();
+  }
+
   toggleRepo(repo, cx) {
     this.foldedRepos.has(repo) ? this.foldedRepos.delete(repo) : this.foldedRepos.add(repo);
     localStorage.setItem("repos.folded", JSON.stringify([...this.foldedRepos]));
@@ -539,8 +652,13 @@ export default class Spaces extends View {
     // has rows (`row.count > 0`). The count is every card of the group, folded or not.
     const counts = new Map();
     for (const r of rows) { const k = this.foldKey(r); counts.set(k, (counts.get(k) ?? 0) + 1); }
-    const draw = (r) => this.row({ ...r, count: counts.get(this.foldKey(r)) ?? 0 }, t, ps);
-    const flat = (r) => draw(r);
+    // Group by None draws cards only; Status adds its own section heads; only Project (repo)
+    // draws the project header row (`group-sections.ts:119-130`; WORKSPACE_GROUP_BY_CHOICES).
+    const groupBy = workspaceOptions().groupBy;
+    const draw = (r) => groupBy === "repo"
+      ? this.row({ ...r, count: counts.get(this.foldKey(r)) ?? 0 }, t, ps)
+      : this.card(r, t, ps);
+    const flat = (list) => this.groupRows(list, groupBy, draw, t);
     // `host-section-rows.ts:236-246`: a host header exists only for a host that has rows.
     // With one such host Orca draws no headers at all (`:135-136`); an empty registered host
     // stays in the host picker, never in the list. A machine being repaired keeps its header
@@ -550,7 +668,7 @@ export default class Spaces extends View {
     const machineNames = [null, ...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...repairing])]
       .filter((m) => hasRows(m) || repairing.has(m));
     if (machineNames.filter(hasRows).length <= 1 && !machineNames.some((m) => repairing.has(m))) {
-      return rows.flatMap(flat);
+      return flat(rows);
     }
     return machineNames.flatMap((m, i) => {
       const mine = rows.filter((r) => (r.w.machine ?? null) === m);
@@ -613,8 +731,26 @@ export default class Spaces extends View {
       // host with no rows draws no section — and no placeholder beneath it.
       const heading = stop(this, t, `machine-${m ?? "local"}`, head, 8);
       if (rebuilt) return [heading];
-      return [heading, ...(folded ? [] : mine.flatMap(flat))];
+      return [heading, ...(folded ? [] : flat(mine))];
     });
+  }
+
+  // Group by None: cards under the host section. Group by Status: one section per status, in the
+  // order the status lane uses (`workspace-statuses.ts`; Herdr fixes the labels to Model::status).
+  groupRows(rows, groupBy, draw, t) {
+    if (groupBy !== "workspace-status") return rows.flatMap(draw);
+    const sections = [["blocked", "Blocked"], ["working", "Working"], ["done", "Done"], ["idle", "Idle"]];
+    return sections.flatMap(([status, label]) => {
+      const group = rows.filter((r) => r.w.status === status);
+      return group.length ? [this.statusHead(label, group.length, t), ...group.flatMap(draw)] : [];
+    });
+  }
+
+  statusHead(label, count, t) {
+    // SectionHeader.tsx project-header geometry: 28px row, 8px left inset, 12px semibold muted.
+    return h_flex().h(28).pl(8).pr(2).gap(6).items_center().text_size(12).font_semibold().text_color(t.muted)
+      .child(div().child(label))
+      .child(div().h(16).px(6).flex().items_center().justify_center().rounded_full().border_1().border_color(t.border).bg(t.hover).text_size(9).line_height("9px").child(String(count)));
   }
 
   // `ReviewIcon` (worktree-review-presentation.tsx:74-94): the glyph is state-specific —
@@ -776,6 +912,12 @@ export default class Spaces extends View {
     // is the most urgent of its sessions (STATUS order: blocked > done > working > idle).
     const rank = { blocked: 4, done: 3, working: 2, idle: 1 };
     const dot = group.map(s => s.status).reduce((b, s) => ((rank[s] ?? -1) > (rank[b] ?? -1) ? s : b), null);
+    // `unreadActionEnabled = showUnreadAction && !newCardStyle` (`WorktreeCardStatusSlot.tsx:220`):
+    // the legacy card always draws the unread button, and `isUnread` is the mod's flag.
+    const unread = this.unread.has(w.id);
+    const hot = this.laneHot === w.id;
+    // Herdr has no sleep state (`Model::status`, model.rs:528-536) and Orca dims only the new
+    // card style (`worktree-card-surface.tsx:115-120`), so there is no sleeping dim to port.
     // `primary` marks the worktree git itself lists first — its own checkout, not a linked
     // one (`worktree-card-header.tsx:115`: `!compactCards && worktree.isMainWorktree && !isFolder`).
     // Orca's parser sets `isMainWorktree: worktrees.length === 0`; ours marks `linked` when the
@@ -1000,7 +1142,30 @@ export default class Spaces extends View {
         // card is not the new style, so the LANE is 16px wide while StatusIndicator's own box
         // stays `h-3 w-3` (12px) holding an 8px dot.
         .child(div().flex_none().w(LEGACY_STATUS_LANE_WIDTH).flex().items_start().justify_center().pt(2)
-          .child(statusMark(dot, 12)))
+          // The button itself (`WorktreeCardStatusSlot.tsx:240-252`): `size-4`, centered,
+          // `rounded`, `hover:bg-accent/80`; `aria-label` names the action it performs.
+          .child(div().id(`space-unread-${w.id}`).size(16).flex_none().flex().items_center().justify_center()
+            .rounded(4).cursor_pointer().role("button")
+            .accessibility_label(unread ? "Mark as read" : "Mark as unread")
+            .tooltip(unread ? "Mark as read" : "Mark as unread")
+            .hover(s => s.bg(t.hover))
+            // GPUI has no `group-hover`, so the pointer state that reveals the bell is mod state.
+            .on_hover((on, cx) => {
+              if (on === (this.laneHot === w.id)) return;
+              this.laneHot = on ? w.id : null;
+              cx.notify();
+            })
+            // `onClick={onToggleUnread}` and `onPointerDown` both stop before the card's own
+            // handlers (`WorktreeCardStatusSlot.tsx:242-244`); the card selects on mouse-up, so
+            // the release is stopped too (`use-worktree-card-activation-actions.ts:200-206`).
+            .on_click((_e, cx) => { cx.stop_propagation(); this.toggleUnread(w.id, cx); })
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
+            // `isUnread` draws the filled amber bell; otherwise the status mark, which the muted
+            // bell replaces on hover (`WorktreeCardStatusSlot.tsx:275-285`).
+            .when(unread, el => el.child(svg("mods/orca-spaces/bell-filled.svg").size(13).flex_none().text_color("#f59e0b")))
+            .when(!unread && hot, el => el.child(svg("mods/orca-spaces/bell.svg").size(12).flex_none().text_color(t.muted)))
+            .when(!unread && !hot, el => el.child(statusMark(dot, 12)))))
         // `worktree-card-parent-content.tsx:66` — `flex min-w-0 flex-1 flex-col gap-1.5`, so
         // title row to meta row to agent summary is 6px. Herdr's gap() is pixels; 6 is 6.
         .child(v_flex().flex_1().min_w(0).gap(6)
