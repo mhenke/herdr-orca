@@ -1,20 +1,20 @@
 // A pane's header, for layouts that frame their panes:
 //   { "tab": "active", "pane": { "header": { "content": { "mod": "pane" } } } }
-// Shows the pane's title, and on hover buttons that split and close this pane.
-// Props from the app: { pane, terminal }. Click: focus the pane.
+// Shows the pane's title, a drag grip that swaps with a neighbor, and on hover buttons
+// that split and close this pane. Props from the app: { pane, terminal }. Click: focus the pane.
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { panes, props, run, openOverlay, spaces } from "herdr";
 
 export default class Pane extends View {
-  init() { this.hovered = false; }
+  init() { this.hovered = false; this.press = null; }
 
   me() {
     return panes().find((p) => p.pane === props()?.pane);
   }
 
-  button(id, icon, command, args) {
+  button(id, icon, action, args) {
     return div()
       .id(id)
       .size(24)
@@ -27,9 +27,39 @@ export default class Pane extends View {
       .hover((s) => s.text_color("#ffffffcc"))
       .on_click((_e, cx) => {
         cx.stop_propagation();
-        run(command, args);
+        if (typeof action === "function") action(cx);
+        else run(action, args);
       })
       .child(svg(`mods/orca-pane/${icon}.svg`).size(12));
+  }
+
+  // TerminalPaneHeaderOverlay.tsx:186-196 — a 32px grip centered in the header begins Orca's
+  // pane drag; the drop lands on another pane's outer quarter. The mod DSL has no drag/drop
+  // primitive (only on_mouse_down/up/move) and `pane.swap` takes only a direction
+  // (`herdr-app commands`), so the port reads the released drag's dominant axis as that
+  // direction. Gap: mods see no other pane's bounds, so the direction comes from this
+  // header's own drag (released over it), not from the pane under the pointer.
+  grip(pane) {
+    return div()
+      .id(`ph-grip-${pane}`)
+      .w(32)
+      .h_full()
+      .flex()
+      .items_center()
+      .justify_center()
+      // terminal.css:275-307 — 32px wide, `::after` is "..." at 10px, opacity 0 until the
+      // grip itself is hovered. Two tokens decide the colours: `--orca-pane-title-fg` is
+      // `rgb(255 255 255 / .52)` (main.css:282), mixed 36% → 18.8% = 0x30; `::after` uses
+      // `--orca-pane-title-button-hover-fg`, which is plain white (main.css:286).
+      .text_size(10)
+      .text_color("#ffffff00")
+      .hover((s) => s.text_color("#ffffff").bg("#ffffff30"))
+      .on_mouse_down("left", (e, cx) => {
+        this.press = { x: e.position.x, y: e.position.y };
+        run("pane.focus", { pane });
+        cx.notify();
+      })
+      .child("...");
   }
 
   render(cx) {
@@ -50,6 +80,7 @@ export default class Pane extends View {
       .px(8)
       .gap(8)
       .items_center()
+      .relative()
       // `terminal.css:266-271` — the bar is `font-size: 13px`, `font-family: var(--font-mono)`,
       // `color: rgb(255 255 255 / 0.52)`, `background: #000`, `border-bottom: 1px solid
       // rgb(255 255 255 / 0.06)`. Geometry (px-8, height) comes from the layout; the rest is
@@ -61,6 +92,20 @@ export default class Pane extends View {
       .font_family("JetBrains Mono")
       .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
       .on_click(() => run("pane.focus", { pane }))
+      // TerminalPaneHeaderOverlay.tsx:186-196 — the press began on the grip; the release's
+      // travel becomes the swap direction. Orca drops onto the target pane's outer quarter,
+      // but mods see no other pane's bounds and `pane.swap` takes only a direction, so 4px
+      // (Herdr's own drag slop, pane_drag.rs) stands in for leaving the source.
+      .on_mouse_up("left", (e) => {
+        const from = this.press;
+        this.press = null;
+        if (!from) return;
+        const dx = e.position.x - from.x, dy = e.position.y - from.y;
+        if (Math.max(Math.abs(dx), Math.abs(dy)) < 4) return;
+        const direction = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
+        run("pane.swap", { direction });
+      })
+      .on_mouse_down_out(() => { this.press = null; })
       // TerminalPaneHeaderOverlay.tsx:149 `onContextMenuCapture={(e) => onPaneTitleContextMenu(e, pane.id)}`
       // — the pane title bar opens the pane menu on right-click. `orca-menu` already implements
       // the `pane` case (split right/down, zoom, right-click routing, close), so this is the
@@ -74,6 +119,11 @@ export default class Pane extends View {
       // (`font: inherit` → the bar's 13px mono, `color: inherit` → /0.52 white, flex 1,
       // truncated; terminal.css:330-347). No program icon, folder or status mark: the
       // header draws title (:263) then `.pane-title-actions` (:277-342) and nothing else.
+      // TerminalPaneHeaderOverlay.tsx:197-210,218-236 make the title a button that starts an
+      // inline rename (Enter/Tab submit, Escape cancels), and :293-320 add an X to remove the
+      // title. Herdr has no `pane.rename` — only `space.rename` and `tab.rename`
+      // (`herdr-app commands`) — and the title shown here is derived (tab name or terminal
+      // title), so both actions are omitted, not faked.
       .when(Boolean(tabTitle), el => el.child(div().flex_1().min_w(0).truncate().text_color("#ffffff85").child(tabTitle)))
       // Orca's TerminalPaneHeaderOverlay header actions (TerminalPaneHeaderOverlay.tsx:285,334):
       // SquareSplitVertical (split) then X (close), size-3 glyphs in size-6 icon-xs boxes.
@@ -86,15 +136,24 @@ export default class Pane extends View {
       // parent h_flex gap(8) would space them otherwise.
       .when(this.hovered, el => el
         .child(div().ml_auto().flex().flex_shrink_0().items_center().gap(0)
-          // TerminalPaneHeaderOverlay.tsx:277-330 — `.pane-title-actions`, left to right:
-          // Hand Off to Another Agent (MessageSquarePlus, `isTuiAgent` of the pane's agent),
-          // Show terminal (SquareTerminal, chat view only), Split Terminal Right, X.
-          // `canShowTerminal` is `activePaneIsChatLeaf` (TerminalPaneSurface.tsx:373) and
-          // `activePaneCanContinueInNewSession` is `isTuiAgent` (terminal-agent-session-continuation.ts:23-27);
-          // both also require `isActivePane`, which the layout supplies by mounting one header
-          // per pane in a focused tab. Herdr has no chat-view leaf and no session handoff
-          // command (`herdr-app commands`), so only the split and close rows have a backend.
+          // TerminalPaneHeaderOverlay.tsx:212-238,277-330 — `.pane-title-actions`, left to right:
+          // Hand Off to Another Agent (MessageSquarePlus, `isTuiAgent` / active terminal agent),
+          // Split Terminal Right (SquareSplitVertical), and Close Pane (X).
+          .when(Boolean(p.terminal), h => h
+            .child(this.button(`ph-h-${pane}`, "message-square-plus", () => {
+              openOverlay({
+                mod: "orca-handoff",
+                kind: "dialog",
+                width: 480,
+                height: 380,
+                props: { action: "handoff", terminal: p.terminal, pane }
+              });
+            }).accessibility_label("Hand off to another agent").tooltip("Hand off to another agent")))
           .child(this.button(`ph-r-${pane}`, "square-split-vertical", "pane.split", { direction: "right", pane }).accessibility_label("Split terminal").tooltip("Split terminal"))
           .child(this.button(`ph-x-${pane}`, "x", "pane.close", { pane }).accessibility_label("Close pane").tooltip("Close pane"))))
+      // TerminalPaneHeaderOverlay.tsx:186-196 — the grip is absolutely centered over the bar
+      // (`position: absolute; left: 50%; width: 32px`; terminal.css:275-282), not a flex item.
+      .when(Boolean(p.movable), el => el
+        .child(div().absolute().inset_0().flex().justify_center().child(this.grip(pane))))
   }
 }

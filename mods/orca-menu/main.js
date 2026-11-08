@@ -7,6 +7,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, hc } from "herdr";
 import { copyText } from "./clip.js";
+import { buildBoundedSessionTranscript } from "./transcript.js";
 
 // Orca's palette (`SortableTabContextMenu.tsx:15-80`), in its order; `null` is "None".
 const TAB_COLORS = [["None", null], ["Blue", "#3b82f6"], ["Purple", "#a855f7"], ["Pink", "#ec4899"],
@@ -53,7 +54,7 @@ function items(p, git) {
       return [
         // Orca's order (TerminalContextMenu.tsx:204-370): Copy, Add to chat, Select All, Paste,
         // Quick Commands, agent rows, split section, title/ID block, close, clear, reset.
-        // Add to chat (:209) and the agent rows (:236-262) stay out: Herdr has no chat.
+        // Add to chat (:209) stays out: Herdr has no chat.
         ["Copy", "terminal.copy", {}],
         // Orca selects the whole buffer (:217); Herdr cannot select, so the closest thing is
         // the buffer in the clipboard (`hc read` prints the screen and scrollback).
@@ -61,6 +62,15 @@ function items(p, git) {
         ["Paste", "terminal.paste", {}],
         // Orca's Quick Commands menu (:227) is its command surface; Herdr's is the palette.
         ["Quick Commands", "app.palette", {}],
+        // Orca's agent rows (TerminalContextMenu.tsx:236-246):
+        // Hand Off to Another Agent (:236), Fork Agent Session… (:239), Copy Context (:246).
+        ...(term
+          ? [
+              ["Hand Off to Another Agent…", "orca-menu.handoff", { terminal: term.address, pane: tg.pane }],
+              ["Fork Agent Session…", "orca-menu.fork", { terminal: term.address, pane: tg.pane }],
+              ["Copy Context", "orca-menu.copy-context", { terminal: term.address }],
+            ]
+          : []),
         // Orca's split section (TerminalContextMenu.tsx:265-302). Equalize Pane Sizes (:281)
         // has no equivalent: panes are content inside one layout node, not nodes themselves,
         // and `layout.resize` only sizes layout nodes (`commands.rs:80`, window.rs:3248).
@@ -115,10 +125,12 @@ function items(p, git) {
       return [
         ...(pane
           ? [
+              ["Split Terminal…", "mod.open", { name: "orca-split-menu" }],
               ["Split Terminal Right", "pane.split", { direction: "right", pane }],
               ["Split Terminal Down", "pane.split", { direction: "down", pane }],
             ]
           : []),
+        ["Move Tab…", "mod.open", { name: "orca-tab-move" }],
         // Herdr-only, in Orca's first slot: Orca reorders tabs by drag (SortableTab.tsx:213) and
         // has no move rows; `tab.move` backs these.
         ...(tab?.index > 1 ? [["Move Left", "tab.move", { id: tg.id, index: tab.index - 1 }]] : []),
@@ -203,12 +215,17 @@ function items(p, git) {
 // Orca's lucide glyph for each row, taken from the component named in the citation.
 function menuIcon(it, zoomed) {
   const [, command, args] = it;
+  if (command === "mod.open" && args?.name === "orca-tab-move") return "mods/orca-menu/arrow-right.svg";
+  if (command === "mod.open" && args?.name === "orca-split-menu") return "mods/orca-menu/panel-right-close.svg";
   if (command === "pane.split") return `mods/orca-menu/${args?.direction === "down" ? "panel-bottom-close" : "panel-right-close"}.svg`;
   if (command === "pane.zoom") return `mods/orca-menu/${zoomed ? "minimize-2" : "maximize-2"}.svg`;
   if (command === "worktree") return `mods/orca-menu/${args?.action === "new" ? "git-branch-plus" : args?.action === "open" ? "workflow" : "unlink"}.svg`;
   if (command === "tab.move") return `mods/orca-menu/${it[0] === "Move Left" ? "arrow-left" : "arrow-right"}.svg`;
   if (command === "orca-menu.close-others") return "mods/orca-menu/x.svg";
   if (command === "tab.settle" || command === "tab.unsettle") return `mods/orca-menu/${command === "tab.unsettle" ? "pin-off" : "pin"}.svg`;
+  if (command === "orca-menu.handoff") return "mods/orca-menu/message-square-plus.svg";
+  if (command === "orca-menu.fork") return "mods/orca-menu/git-fork.svg";
+  if (command === "orca-menu.copy-context") return "mods/orca-menu/copy.svg";
   const name = command === "orca-menu.copy-path" || command === "orca-menu.copy-name" || command === "terminal.copy" ? "copy"
     : command === "terminal.paste" ? "clipboard"
     : command === "terminal.open" ? "folder-open"
@@ -317,6 +334,35 @@ export default class Menu extends View {
         localStorage.setItem("tab.colors.v1", JSON.stringify(all));
       }
       if (it[1] === "orca-menu.copy-terminal" || it[1] === "orca-menu.copy-pane-id") void copyText(it[2].id ?? "");
+      // Copy Context (terminal-pane-menu-agent-session-actions.ts:58-65): clean bounded transcript to clipboard
+      if (it[1] === "orca-menu.copy-context" && it[2].terminal) void (async () => {
+        const r = await hc(["read", it[2].terminal]).catch(() => null);
+        if (!r?.stdout) return;
+        const clean = buildBoundedSessionTranscript(r.stdout);
+        if (clean) await copyText(clean);
+      })();
+      // Hand Off to Another Agent (AgentSessionContinuationDialog.tsx:59)
+      if (it[1] === "orca-menu.handoff") {
+        openOverlay({
+          mod: "orca-handoff",
+          kind: "dialog",
+          width: 480,
+          height: 380,
+          props: { action: "handoff", terminal: it[2].terminal, pane: it[2].pane }
+        });
+        return;
+      }
+      // Fork Agent Session (TerminalAgentSessionForkDialog.tsx:25)
+      if (it[1] === "orca-menu.fork") {
+        openOverlay({
+          mod: "orca-handoff",
+          kind: "dialog",
+          width: 480,
+          height: 320,
+          props: { action: "fork", terminal: it[2].terminal, pane: it[2].pane }
+        });
+        return;
+      }
       // Select All: Herdr cannot select, so the whole buffer goes to the clipboard.
       if (it[1] === "orca-menu.select-all" && it[2].terminal) void (async () => {
         const r = await hc(["read", it[2].terminal]).catch(() => null);
