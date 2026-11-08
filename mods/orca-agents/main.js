@@ -1,14 +1,20 @@
 // The vault panel: Orca's "Agents" activity entry, drawn from live Herdr agents.
 //
 // Orca's vault scans agent transcripts on disk, then offers search, group/sort, host scope,
-// session details and resume (`AiVaultPanel.tsx`, `AiVaultPanelHeader.tsx`). Herdr has no
+// session details and resume (AiVaultPanel.tsx, AiVaultPanelHeader.tsx). Herdr has no
 // transcript scanner, so this port lists the agents that are live now (`agents()`,
-// herdr.d.ts:183) — a real list from the host model, not a stub. Named divergences: no
-// history, search, sort menu, host scope, refresh control or resume; a row focuses its agent
-// instead (`agent.focus`, herdr.d.ts:68).
+// herdr.d.ts:183) — a real list from the host model, not a stub.
+// Scope switch (Workspace / Project / All) ports `VaultScopeSwitch` (AiVaultPanelControls.tsx:87-160),
+// search filter ports `AiVaultPanelHeader.tsx:161-202`, and session count bar ports `AiVaultSessionListBar.tsx:50-54`.
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
-import { agents, run, theme } from "herdr";
+import { v_flex, h_flex, Input, InputState } from "gpui-base";
+import { agents, spaces, run, theme } from "herdr";
+
+function fade(color, factor) {
+  if (!color || typeof color !== "string") return "#00000000";
+  const alpha = color.length === 9 ? parseInt(color.slice(7), 16) : 255;
+  return color.slice(0, 7) + Math.round(alpha * factor).toString(16).padStart(2, "0");
+}
 
 // The identity glyph comes from the app's program table (`Program.icon`, herdr.d.ts:150):
 // tinted glyphs are SVGs, others are pictures — the same pair the shipped agents mod uses.
@@ -42,11 +48,15 @@ function stateDot(status, t) {
 
 export default class AgentsPanel extends View {
   init(_props, cx) {
+    this.seen = "";
+    this.scope = "workspace"; // "workspace" | "project" | "all" (AiVaultPanelControls.tsx:87-160)
+    this.search = InputState.new({ placeholder: "Search agents…" });
+    this.search.on("change", (_e, cx) => cx.notify());
+
     // `agents()` is live but a status change does not notify a mod; orca-spaces repaints from
     // a timer for exactly this reason (main.js:123-133). One second is enough for a label.
-    this.seen = "";
     cx.timer.every(1000, (cx) => {
-      const now = agents().map((a) => `${a.address}:${a.status}`).join(",");
+      const now = (agents() ?? []).map((a) => `${a.address}:${a.status}`).join(",");
       if (now === this.seen) return;
       this.seen = now;
       cx.notify();
@@ -81,31 +91,114 @@ export default class AgentsPanel extends View {
           .child(div().min_w(0).truncate().child(a.tab_name || `tab ${a.tab_index}`))));
   }
 
-  render() {
+  // Ports Orca's `VaultScopeSwitch` (AiVaultPanelControls.tsx:87-160): ToggleGroup outline variant,
+  // h-7 rounded-md border border-sidebar-border bg-sidebar-accent/35 shadow-xs (VAULT_SCOPE_TOGGLE_ITEM_CLASS:55).
+  scopeSwitch(scope, workspaceAvailable, projectAvailable, t, cx) {
+    const seg = (key, label, available) => {
+      const active = scope === key;
+      return div().id(`vault-scope-${key}`).flex_1().min_w(0).h(24).flex().items_center().justify_center()
+        .rounded(4).px(6).text_size(11).font_medium()
+        .when(active, (e) => e.bg(fade(t.foreground, 0.1)).text_color(t.foreground).border_1().border_color(t.border))
+        .when(!active && available, (e) => e.text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)))
+        .when(!available, (e) => e.text_color(t.dim).opacity(0.4))
+        .on_click((_e, cx) => {
+          if (!available || this.scope === key) return;
+          this.scope = key;
+          cx.notify();
+        })
+        .child(label);
+    };
+
+    return h_flex().w_full().p(2).gap(2).rounded(6).border_1().border_color(t.border).bg(fade(t.raised, 0.4))
+      .child(seg("workspace", "Workspace", workspaceAvailable))
+      .child(seg("project", "Project", projectAvailable))
+      .child(seg("all", "All", true));
+  }
+
+  // Ports Orca's search bar in `AiVaultPanelHeader.tsx:161-202`: h-8 rounded-md border border-sidebar-border
+  // bg-input/50 px-2 with Search glyph and clear button.
+  searchBar(t, cx) {
+    const q = this.search.value();
+    return h_flex().w_full().h(30).px(8).gap(6).items_center().rounded(6)
+      .border_1().border_color(t.border).bg(fade(t.input, 0.4))
+      .child(svg("mods/orca-agents/search.svg").size(13).flex_none().text_color(t.muted))
+      .child(Input.new(this.search).flex_1().min_w(0).text_size(12).text_color(t.foreground).bg("#00000000"))
+      .when(Boolean(q), (e) => e.child(
+        div().id("agents-search-clear").size(18).flex_none().flex().items_center().justify_center()
+          .rounded(4).cursor_pointer().text_color(t.muted).hover((s) => s.text_color(t.foreground).bg(t.hover))
+          .on_click((_e, cx) => {
+            this.search.set_value("");
+            cx.notify();
+          })
+          .child(svg("mods/orca-agents/x.svg").size(12))
+      ));
+  }
+
+  render(cx) {
     const t = theme();
-    const list = agents() ?? [];
+    const rawList = agents() ?? [];
+    const sp = spaces() ?? [];
+    const activeSpace = sp.find((s) => s.active);
+    const workspaceAvailable = Boolean(activeSpace);
+    const projectFolder = activeSpace?.folder;
+    const projectAvailable = Boolean(projectFolder);
+
+    let effectiveScope = this.scope;
+    if (effectiveScope === "workspace" && !workspaceAvailable) {
+      effectiveScope = projectAvailable ? "project" : "all";
+    } else if (effectiveScope === "project" && !projectAvailable) {
+      effectiveScope = "all";
+    }
+
+    // Filter by scope (AiVaultPanel.tsx:140-148)
+    let filtered = rawList;
+    if (effectiveScope === "workspace" && activeSpace) {
+      filtered = filtered.filter((a) => a.space === activeSpace.id);
+    } else if (effectiveScope === "project" && projectFolder) {
+      filtered = filtered.filter((a) => {
+        const s = sp.find((x) => x.id === a.space);
+        const folder = s?.folder;
+        return folder && (folder === projectFolder || folder.startsWith(projectFolder + "/") || projectFolder.startsWith(folder + "/"));
+      });
+    }
+
+    // Filter by search query (AiVaultPanel.tsx:168-170, AiVaultPanelSearch.tsx:75-140)
+    const q = this.search.value().trim().toLowerCase();
+    if (q) {
+      filtered = filtered.filter((a) => {
+        const name = title(a).toLowerCase();
+        const app = (a.app || a.program?.name || "").toLowerCase();
+        const spName = (a.space_name || a.space || "").toLowerCase();
+        const tabName = (a.tab_name || "").toLowerCase();
+        return name.includes(q) || app.includes(q) || spName.includes(q) || tabName.includes(q);
+      });
+    }
+
     return v_flex().id("agents").size_full().min_h(0).overflow_hidden().text_color(t.foreground)
-      // `AiVaultPanelHeader.tsx:97-119`: `border-b border-sidebar-border px-2.5 py-2` (10px/8px),
-      // a 12px semibold title and an 11px muted subtitle. Orca's title is "Agent Session
-      // History" and its subtitle "Resume past sessions"; this list has no history to resume.
-      .child(h_flex().flex_none().px(10).py(8).gap(6).items_center().border_b(1).border_color(t.border)
-        .child(v_flex().flex_1().min_w(0)
+      // `AiVaultPanelHeader.tsx:97-119`: Header with title, subtitle, scope switch, and search
+      .child(v_flex().flex_none().px(10).py(8).gap(8).border_b(1).border_color(t.border)
+        .child(v_flex().w_full().min_w(0)
           .child(div().truncate().text_size(12).font_semibold().child("Agents"))
-          .child(div().truncate().text_size(11).text_color(t.muted).child("Live agent sessions"))))
-      // `AiVaultSessionListBar.tsx:59-62`: `flex h-8 shrink-0 items-center gap-2 border-y
+          .child(div().truncate().text_size(11).text_color(t.muted).child("Live agent sessions")))
+        .child(this.scopeSwitch(effectiveScope, workspaceAvailable, projectAvailable, t, cx))
+        .child(this.searchBar(t, cx)))
+      // `AiVaultSessionListBar.tsx:50-54`: `flex h-8 shrink-0 items-center gap-2 border-y
       // border-sidebar-border bg-sidebar-accent/60 pl-3 pr-1.5`, 12px semibold count.
-      // Orca's sort dropdown (`AiVaultPanelHeader.tsx:121-125`) has no Herdr equivalent:
-      // agents() is in model order.
-      .child(h_flex().h(32).flex_none().items_center().pl(12).pr(6).border_t(1).border_b(1)
-        .border_color(t.border).bg(t.raised + "99")
+      .child(h_flex().h(32).flex_none().items_center().pl(12).pr(6).border_b(1)
+        .border_color(t.border).bg(fade(t.raised, 0.6))
         .child(div().flex_1().min_w(0).truncate().text_size(12).font_semibold()
-          .child(`${list.length} agent${list.length === 1 ? "" : "s"}`)))
+          .child(`${filtered.length} agent${filtered.length === 1 ? "" : "s"}`)))
       .child(v_flex().id("agents-list").flex_1().min_h(0).overflow_y_scrollbar()
-        .children(list.map((a) => this.row(a, t)))
-        // `AiVaultSessionListStates.tsx:39-42`: centered, `px-4`, `text-muted-foreground`,
-        // a 28px glyph at 50% opacity, then `text-sm font-medium`.
-        .when(!list.length, (el) => el.child(v_flex().size_full().items_center().justify_center().px(16).text_color(t.muted)
-          .child(div().mb(12).opacity(0.5).child(svg("mods/orca-agents/archive-restore.svg").size(28)))
-          .child(div().text_size(14).font_medium().child("No live agents")))));
+        .children(filtered.map((a) => this.row(a, t)))
+        // `AiVaultSessionListStates.tsx:39-42`: centered empty state with icon and contextual copy
+        .when(!filtered.length, (el) => {
+          let msg = "No live agents";
+          if (q) msg = `No agents match "${this.search.value().trim()}"`;
+          else if (effectiveScope === "workspace") msg = "No live agents in current workspace";
+          else if (effectiveScope === "project") msg = "No live agents in current project";
+          return el.child(v_flex().size_full().items_center().justify_center().px(16).text_color(t.muted)
+            .child(div().mb(12).opacity(0.5).child(svg("mods/orca-agents/archive-restore.svg").size(28)))
+            .child(div().text_size(14).font_medium().text_center().child(msg)));
+        }));
   }
 }
