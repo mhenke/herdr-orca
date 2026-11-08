@@ -1,3 +1,5 @@
+// Derived from Herdr App's defaults/mods/new-menu/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 // A hover label as T3's (its ui/tooltip.tsx): small and dark, the label with its key, and under it a dim hint if there is one.
 // `.tooltip()` takes only a string, in the shell's own style, hence a HoverCard. scripts/sync.sh copies this to the mods that use it.
 import { div } from "gpui-kit";

@@ -1,3 +1,5 @@
+// Derived from Herdr App's defaults/mods/agents/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 // The status mark for a card or an agent row.
 //
 // Herdr's model already rolls status up: `Model::rollup` (model.rs:554) reduces an agent set to

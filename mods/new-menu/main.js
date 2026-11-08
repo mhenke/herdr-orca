@@ -1,3 +1,5 @@
+// Derived from Herdr App's defaults/mods/new-menu/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 // Orca's tab-bar `+` menu: a 288px dropdown (tab-bar-surface.tsx:224-240) with an omnibox
 // (TabBarCreateEntry.tsx:317-350) and static create rows (tab-bar-static-create-menu.tsx).
 // Opened by orca-tabs, orca-landing and orca-nav.

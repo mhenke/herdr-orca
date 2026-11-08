@@ -1,3 +1,5 @@
+// Derived from Herdr App's defaults/mods/spaces/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 // Orca's bottom bar (StatusBarSurface.tsx:121,136,308-370): provider usage on the
 // left (flex-1), maintenance segments right-aligned with 12px gaps, an invisible
 // visibility-menu trigger last. Herdr cannot back most of it, and nothing is faked.

@@ -2,6 +2,7 @@
 // Ported directly from Orca:
 //   - src/renderer/src/lib/agent-session-fork-context.ts:1-160
 //   - src/renderer/src/lib/agent-session-continuation.ts:57-140
+// Portions ported from Orca (MIT, Copyright (c) 2026 Lovecast Inc.); see NOTICE.
 
 const MAX_FORK_CONTEXT_CHARS = 36000;
 const MAX_FORK_CAPTURE_SANITIZE_CHARS = MAX_FORK_CONTEXT_CHARS * 4;

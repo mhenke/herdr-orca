@@ -1,3 +1,5 @@
+// Derived from Herdr App's defaults/mods/pane/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 // A pane's agent status, for layouts that frame their panes at the bottom edge:
 //   { "pane": { "header": { "position": "bottom", "height": 16, "content": { "mod": "pane-status" } } } }
 // Draws only the state mark of the pane's agent, hard right — the same glyph

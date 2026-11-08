@@ -1,0 +1,47 @@
+herdr-orca
+Copyright (c) 2026 mhenke. Licensed under Apache-2.0 (see LICENSE).
+
+This package contains material derived from three sources. Each file derived
+from a source carries a header naming that source.
+
+1. Herdr App (Apache-2.0)
+   Mods under mods/ are derived from Herdr App's shipped mods in
+   defaults/mods/. Each derived file is marked as modified. Those files are
+   Apache-2.0, with the copyright of the Herdr App authors. The Apache-2.0
+   license text is in LICENSE.
+
+2. Orca (MIT)
+   These files port code from Orca, Copyright (c) 2026 Lovecast Inc.:
+     mods/orca-menu/transcript.js
+     mods/orca-handoff/transcript.js
+     mods/orca-spaces/indentation.js
+   They are distributed under the MIT License below.
+
+   MIT License
+
+   Copyright (c) 2026 Lovecast Inc.
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in all
+   copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+3. Third-party assets
+   Lucide icons (https://lucide.dev), used under mods/*/*.svg
+   ISC License, Copyright (c) Lucide Contributors.
+   Permission to use, copy, modify, and/or distribute this software for any
+   purpose with or without fee is hereby granted, provided that the above
+   copyright notice and this permission notice appear in all copies.

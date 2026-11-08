@@ -1,3 +1,5 @@
+// Derived from Herdr App's defaults/mods/spaces/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 // The empty-canvas welcome page: the screen behind the sidebar when no workspace is open.
 //
 // GEOMETRY is a faithful port of Orca's `Landing.tsx` (component :216, JSX :255-323; shown by

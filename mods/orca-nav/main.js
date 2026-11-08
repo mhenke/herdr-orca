@@ -60,7 +60,7 @@ function writeOptions(patch) {
   localStorage.setItem(OPTIONS_KEY, JSON.stringify(next));
   // orca-spaces re-reads the key inside ordered(), so nothing has to be sent to it. An
   // invented cross-mod command is not a notification: an unregistered name is a warn and an
-  // error (`window.rs:2763`), and `setShared` does not notify (AGENTS.md rule 9). The sidebar
+  // error (`window.rs:2763`), and `setShared` does not notify (AGENTS.md rule 10). The sidebar
   // repaints when this popup closes, because removing an overlay notifies the window
   // (`window.rs:3642-3664`), and the reopened popup always re-reads the stored options.
   return next;

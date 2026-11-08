@@ -1,3 +1,5 @@
+// Derived from Herdr App's defaults/mods/changes/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 // Agent Session Handoff & Fork Dialog.
 // Ports Orca's:
 //   - AgentSessionContinuationDialog.tsx:1-415 ("Hand Off to Another Agent")

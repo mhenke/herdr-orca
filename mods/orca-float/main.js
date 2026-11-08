@@ -1,3 +1,5 @@
+// Derived from Herdr App's defaults/mods/agents/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 // Orca's Floating Workspace: `floatingTerminal.toggle`, Ctrl+Alt+A on Linux
 // (`Mod+Alt+A`: keybindings/definitions-core-1.ts:280-286). It opens a bottom-right
 // panel anchored right/bottom 24/84 px at 920x560
