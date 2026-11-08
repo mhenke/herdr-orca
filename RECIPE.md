@@ -105,7 +105,7 @@ A missing token paints **magenta** (`hsla(0.83, 1.0, 0.5, 1.0)` by design; `sett
   - Clicking the Collapse All button (`ProjectsCollapseAllButton.tsx:51`) toggles folding across all project groups: glyph alternates between `chevrons-up-down` and `chevrons-down-up`.
   - Clicking an individual project header toggles fold state for that repository.
   - Clicking Search opens Herdr's workspace command palette (`openOverlay` with `palette`).
-  - Clicking `+` in the projects header opens the 288px `new-menu` dropdown: New Terminal, New Agent Session, Open Folder, Create Worktree.
+  - Clicking `+` in the projects header opens the 288px `new-menu` dropdown: New Terminal, New File Browser, New Terminal in Folder…, New worktree…, Open worktree…, then Start an agent — every installed agent, plus the first two this machine could install. An agent with a model list opens that list in place (Esc goes back); a model row launches with the agent's own flag (`--model`, or `-m` for Codex, Gemini and Grok), and Default launches with none.
 
 - **Tabs Interaction**:
   - Clicking a tab selects it (`tab.select`).

@@ -1,5 +1,5 @@
 # Project Documentation
-> Generated: 2026-11-08T01:54:00Z | Mode: DELTA (updated from 2026-11-08T00:54:45Z)
+> Generated: 2026-11-08T03:08:00Z | Mode: DELTA (updated from 2026-11-08T01:54:00Z)
 
 ## Tech Stack
 
@@ -42,9 +42,9 @@ Eighteen mods, all `"place": "none"` (composed into blocks rather than floated):
 |---|---|---|
 | `orca-chrome` | titlebar strip and the sidebar footer | 68 |
 | `orca-nav` | Search, Tasks/Automations/Orca Mobile rows, history arrows, Projects header and its options menu | 429 |
-| `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, saved folders | 1282 |
-| `orca-tabs` | the tab rail, window controls, right-sidebar toggle | 376 |
-| `orca-pane` | the terminal pane header, its drag grip, and its right-click | 115 |
+| `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, saved folders | 1297 |
+| `orca-tabs` | the tab rail, window controls, right-sidebar toggle, close guards, drag reorder | 606 |
+| `orca-pane` | the terminal pane header, move/split grip, and split controls | 168 |
 | `orca-pane-status` | the agent mark drawn in a pane header | 37 |
 | `orca-panel-head` | the right panel's activity switcher | 118 |
 | `orca-panel-gap` | the honest body for a panel or page Herdr has no backend for | 61 |
@@ -52,8 +52,8 @@ Eighteen mods, all `"place": "none"` (composed into blocks rather than floated):
 | `orca-changes` | the source-control list, split commit actions, conflict resolution, and PR creation | 715 |
 | `orca-agents` | the agents panel: live scopes, search, and session history with resume | 546 |
 | `orca-status` | the bottom status bar | 70 |
-| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global`, plus the transcript capture shared with handoff | 510 |
-| `new-menu` | the create popup behind `+` | 121 |
+| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global`, plus the transcript capture shared with handoff | 598 |
+| `new-menu` | the create popup behind `+`: agent launch and model list drilldown | 338 |
 | `orca-landing` | the empty-workspace page | 111 |
 | `orca-float` | the floating agent-session panel | 162 |
 | `orca-handoff` | the hand off / fork agent-session dialog | 366 |
@@ -161,18 +161,16 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 ## Changed Files
 
 `.claude/pipeline/project-doc.md` is a DELTA patch over the previous delta. Re-scanned files:
-- `mods/orca-files/main.js` & `mods/orca-changes/main.js`: Updated `location()` to strictly return `{ cwd: space?.folder ?? null, on: space?.machine ?? null, space: space?.id }`, enforcing the `GLOSSARY.md` domain invariant that space folder is the immutable anchor ("The space is the scope; the terminal is only where keystrokes go"). File explorer tree re-rooting on terminal `cd` is eliminated. In `openEntry`, paths are normalized to workspace-relative without `../` distortions.
-- `mods/orca-spaces/worktree-plan.js` & `mods/orca-menu/main.js`: Updated `place(s)` to return `s?.folder ?? null`, preventing terminal `cd` from ejecting space cards from their repo groups or hijacking them into other repositories.
-- `mods/orca-agents/main.js`: Added `resolveProjectScope()` to match spaces sharing the repository git common directory, fixing linked worktree exclusion under `Project` vault scope.
-- `mods/orca-spaces/indentation.js`: Deepened geometry calculation by adding `resolveRowGeometry` (`getFolderWorkspaceRowGeometry` from `indentation.ts:68-121`), eliminating caller-side arithmetic in `main.js`. Deleted unused `getNewCardStyleParentContentMarginLeft`.
-- `mods/orca-spaces/worktree-plan.js`: Deepened projection to incorporate `options`, `sortRows`, `applyWorkspaceOptions`, and `projectKeys`. Fixed detached HEAD worktrees (`branch: wt.branch || ""`) to prevent inheriting the main branch review badge.
-- `mods/orca-spaces/main.js`: Unified status priority to `STATUS_RANK = { blocked: 4, done: 3, working: 2, idle: 1 }` matching `herdr-app/src/model.rs:92-97`. Fixed ghost `pos` drag indicator bug by passing `pos: i` in `draw` and `row` to `card()`. Removed pass-through `foldKey` wrapper.
-- `mods/orca-spaces/review-store.js` & `mods/orca-changes/review-store.js` (new): Implemented Orca review cache TTLs (`FOUND_REVIEW_TTL_MS = 60s`, `NO_REVIEW_REFRESH_INTERVAL_MS = 15m`). Added `isReviewFresh`, eliminating the permanent negative cache trap. Added `recordReview` and `invalidateReview` in `orca-changes` on `gh pr create` with `setShared("pr.cache.v2", cache)` broadcast. Added concurrency limit (`MAX_INFLIGHT_PR_LOOKUPS = 2`) in `settleRows`.
-- `mods/orca-spaces/project.js`: Ported `parseRemote` from Orca's `remote-repo.ts:138-192`, correctly handling port numbers in git remote URLs.
-- `GLOSSARY.md`: Sharpened `Review` definition with TTL rules and added canonical `Review store` term.
-- `docs/adr/0009-invariant-space-folder-and-review-store-ttl.md` (new): Recorded ADR 0009.
-- `docs/adr/0010-per-file-provenance-and-mixed-licensing.md` (new): Recorded ADR 0010.
+- `mods/new-menu/main.js` & `mods/new-menu/models.js` (new): Interactive agent launch with dynamic agent discovery via `knownAgents()`, model list drilldown with universal aliases (`MODELS`), filter search input, and account-scoped model probes.
+- `mods/orca-tabs/main.js`: Tab drag reordering with Orca's 2px blue insertion indicator line (`overSide` left/right) and insertion index offset math, middle-click tab closure, active process close guard dialog (`CloseTerminalDialog.tsx`), settled tab close confirmation (`PinnedTabCloseDialog.tsx`), and bulk tab close dialogs.
+- `mods/orca-pane/main.js`: Added 6-dot grip affordance (`.pane-title-drag-handle`) centered on hover when multiple panes exist to open move/split layout menu, and added split-down header button.
+- `mods/orca-menu/main.js`: Added 4-quadrant pane swap actions (`Swap with Left/Right/Above/Below`), split left/up actions, and bulk tab close actions (`close-others`, `close-right`, `close-left`).
+- `mods/orca-spaces/main.js` & `status.js`: Bundled agent icons for OpenCode (`omp.svg`), Droid, Kilo, Aider (`.svg`), and Gemini, Cursor, Grok, Qoder, Hermes, DSH (`.png`). Removed unneeded remote avatar fetches in favor of bundled Folder marks. Updated `statusMark` so idle tabs share the emerald quiet-terminal dot with done per `StatusIndicator.tsx:105-110`.
+- `GLOSSARY.md`: Added canonical domain terms for `Startable agent`, `Create menu`, `Model list`, `Settled tab`, `Close guard`, `Bulk tab close`, and sharpened `Drop quadrant` and `Drop indicator`.
+- `NOTICE`: Added `models.js` and Orca agent icon assets under MIT.
+- `docs/adr/0006-tab-surface-and-actions-port.md` & `docs/adr/0007-terminal-panel-capabilities-and-actions.md`: Updated to document drag reordering, drop boundaries, close guards, and pane grip affordances.
+- `README.md` & `RECIPE.md`: Documented create menu agent model list and key interactions.
 
 ## Last Scanned
 
-2026-11-08T01:54:00Z
+2026-11-08T03:08:00Z

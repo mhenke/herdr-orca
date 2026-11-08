@@ -43,12 +43,21 @@ Port the behavior and visual output to Herdr's primitives following Iron Rule 1 
 transcribe, never invent), bridging host model gaps through honest equivalents.
 
 ### 1. Move Tab
-- **Drag Reorder**: Implemented in `mods/orca-tabs/main.js:180-245` by measuring release displacement
-  `dx` against Orca's activation threshold `TAB_DRAG_ACTIVATION_DISTANCE_PX = 12` (`useTabDragSplit.ts:42`)
-  and issuing `tab.move` (`{ id: source.id, index: targetIndex }`).
-- **Terminal Drop (4 Quadrants)**: Dragging downward across the tab bar boundary into the terminal
-  viewport (`dy > tabHeight + 10`) triggers directional splits across 4 drop quadrants (`Right`, `Left`,
-  `Down`, `Up`), porting Orca's `useTabDragSplit.ts:74` and `resolvePaneColumnEdgeZone` (`tab-drop-zone.ts:38-80`).
+- **Drag Reorder**: Implemented in `mods/orca-tabs/main.js` using Orca's hover insertion model
+  (`SortableTab.tsx:213`, `tab-drag-drop-commit.ts:116-126`, and `drop-indicator.ts:4-12`). When dragging
+  a tab along the strip, `on_mouse_move` evaluates pointer position against tab width to determine the
+  insertion side (`left` vs `right`) and renders Orca's 2px blue insertion bar (`#3b82f6`). On release,
+  index offsets are computed via Orca's insertion formula:
+  `rawInsertIndex = i + (overSide === "right" ? 1 : 0)`,
+  `nextIndex = oldIndex < rawInsertIndex ? rawInsertIndex - 1 : rawInsertIndex`,
+  dispatching `run("tab.move", { id, index: nextIndex + 1 })`.
+- **Terminal Drop Boundary**: In GPUI, `on_mouse_up` and `on_mouse_move` only fire while the pointer
+  is within an element's hitbox (`vendor/gpui-pre/src/elements/div.rs:219`). Because layout blocks enforce
+  `overflow_hidden` (`herdr-app/src/window.rs:3988`), dragging a tab down past the 36px tab bar into the
+  terminal area leaves the mod's element tree. Because QuickJS does not expose pointer capture (`capture_pointer`)
+  to mods, inter-block tab drop-to-split cannot be intercepted by the tab mod. Splitting is instead provided
+  via the native pane grip (`pane_drag.rs`, which captures window events in Rust), the tab context menu
+  (`"Split Terminal Left/Right/Up/Down"` in `orca-menu`), and the header split menu (`orca-split-menu`).
 - **Menu Reorder**: Implemented in `mods/orca-menu/main.js:134-135` as explicit `"Move Left"` and
   `"Move Right"` rows when the tab is not at the boundary.
 
@@ -96,8 +105,17 @@ transcribe, never invent), bridging host model gaps through honest equivalents.
 - **Pin / Settle**: Orca's `isPinned` maps to Herdr's `settled` state (`TabInfo.settled`). Settled tabs
   hide the close button (`orca-tabs/main.js:226-235`), and `orca-menu/main.js:129` surfaces this as
   `"Put Tab Away"` / `"Bring Tab Back"`.
-- **Close & Close Others**: Implemented in `orca-tabs/main.js:230-235` (revealed on tab hover or when active)
-  and `orca-menu/main.js:134, 303-307` (looping over sibling tabs in the space and calling `tab.close`).
+- **Close & Close Others**: Implemented in `orca-tabs/main.js` and `orca-menu/main.js`.
+  Closing a tab (via strip `X`, middle-click, or context menu) evaluates Orca's close guard
+  (`running-terminal-close-guard.ts:22-34`, `terminal-tab-actions.ts:121-131`):
+  - **Idle shells**: Close immediately with no modal friction.
+  - **Active work & agents**: Closing a tab with an active agent (`working` or `blocked`) or a running
+    command opens Orca's `CloseTerminalDialog.tsx` modal (384px, destructive confirm, checkbox to persist
+    `orca.skipCloseTerminalWithRunningProcessConfirm`).
+  - **Settled tabs**: Closing a settled tab opens `PinnedTabCloseDialog.tsx` modal, persisting
+    `orca.confirmClosePinnedTab`.
+  - **Close Others**: Prompts Orca's bulk close confirmation (`bulk-tab-close-confirmation.ts:5-15`)
+    and closes unpinned sibling tabs in the space upon confirmation.
 - **New Tab Menu**: The `+` button in `orca-tabs/main.js:282` opens `new-menu` (width 288, height 512),
   porting Orca's `tab-bar-surface.tsx:221-232` static create actions.
 

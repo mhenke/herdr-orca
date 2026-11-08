@@ -122,15 +122,21 @@ transcribe, never invent), and route all terminal right-clicks through `orca-men
 
 ### 6. Pane Header Overlay Affordances
 - **Title Display**:
-  Ported in `mods/orca-pane/main.js:73, 124`. Displays the named tab title or terminal title. Inline
+  Ported in `mods/orca-pane/main.js:50, 89`. Displays the named tab title or terminal title. Inline
   renaming in the header is omitted because Herdr lacks inline input controls in pane headers; renaming
   is handled via the `"Set Title…"` context menu action (`tab.rename`).
-- **Drag Swap Handle**:
-  Ported in `mods/orca-pane/main.js:41-60, 146-149`. A centered 32px grip matching `terminal.css:275-307`
-  initiates pane drag; mouse release travel triggers `pane.swap` in the dominant axis.
+- **Drag Grip Handle**:
+  Ported in `mods/orca-pane/main.js:90-143`. Centered 32px grip handle (`.pane-title-drag-handle` from
+  `TerminalPaneHeaderOverlay.tsx:188-196`, `terminal.css:275-306`) rendered when `paneCount > 1` on hover,
+  with `cursor_grab()`, `active(s => s.cursor_grabbing())`, and a 6-dot grip affordance. Clicking it
+  opens the pane layout & move/split popup menu.
 - **Split & Close Buttons**:
-  Ported in `mods/orca-pane/main.js:144-145`. Hovering the header reveals `SquareSplitVertical`
-  (`pane.split:right`) and `X` (`pane.close`).
+  Ported in `mods/orca-pane/main.js:145-166`. Hovering the header reveals `SquareSplitVertical`
+  (`pane.split:right`), `split-down` (`pane.split:down`), and `X` (`pane.close`).
+- **Full Quadrant Split & Swap Menus**:
+  Ported in `mods/orca-menu/main.js:76-89`. Context menu provides 4-direction splits (`Split Terminal Right`,
+  `Split Terminal Left`, `Split Terminal Down`, `Split Terminal Up`) and 4-direction swaps (`Swap with Left`,
+  `Swap with Right`, `Swap with Above`, `Swap with Below`) when multiple panes exist.
 
 ## Consequences
 

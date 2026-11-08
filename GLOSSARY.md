@@ -8,7 +8,8 @@ exactly one thing here.
 - **Space** — a Herdr space (`space.new`): one folder with tabs. A space is not a repo; several spaces can
   belong to one repo, a space can belong to none, and two spaces on one checkout share one card.
 - **Main checkout** — a repo's own working copy, the one holding `.git`. Orca marks it
-  `isMain`.
+  `isMainWorktree` (`src/shared/sidebar-list/workspace-rows.ts:40`). The badge word is
+  `primary`; the term is *Main checkout*.
 - **Linked worktree** — a `git worktree` of a repo, living in its own folder with a `.git` *file*
   pointing back. Secondary to its repo's main checkout by definition.
 - **Project group** — the sidebar unit Orca heads with one header: a repo on one machine
@@ -16,7 +17,7 @@ exactly one thing here.
 - **Project key** — the string a project group folds on: the repo identity
   repo identity (machine and common dir), or `space:<id>` for a folder with no repo. The header
   and collapse-all use the same key, so they cannot disagree.
-- **Top branch** — the branch the project group treats as primary: the main checkout's own
+- **Main branch** — the branch the project group treats as its main: the main checkout's own
   branch. Only the main checkout can carry the `primary` badge; a linked worktree and a plain
   folder workspace carry none.
 - **Card** — the clickable row for one worktree inside a project group, identified by its machine
@@ -31,10 +32,25 @@ exactly one thing here.
   opposed to a worktree action, which needs only the checkout's facts. `Update` and `Close` are
   space-born; everything else on a card is worktree-born.
   _Avoid_: space-only, tab action.
-- **Agent** — a terminal Herdr recognises as running a known program. Its status word is one of
+- **Agent** — a terminal that reports status (`AgentInfo`). Its `program` may be the generic
+  `agent` entry (`programs.json`, key `agent`) when Herdr has no entry for what it runs. Its status word is one of
   `working | blocked | done | idle`
   vocabulary: Herdr folds `error` into `blocked` before a mod sees it, and Orca's other
   states (`monitoring`, `permission`, `unconfirmed`, `interrupted`) do not exist here.
+- **Startable agent** — a program the program table can start as an agent (`knownAgents()`): a
+  `run` argv plus an installed check. It is not an **Agent** yet — an Agent is a running
+  terminal that reports status — and one startable agent can be running as several Agents at
+  once.
+  _Avoid_: harness, agent type, available agent.
+- **Create menu** — the `+` menu at the end of the tab rail: the create rows (terminal, file
+  browser, worktree) and, under them, every startable agent this machine has, then the first
+  two it could install. One popup, one list.
+  _Avoid_: new-tab dialog, plus menu, omnibox.
+- **Model list** — the models a startable agent offers, shown as a second step of the create
+  menu: Orca's alias seed where the set is universal, otherwise what the agent itself reports,
+  because an account scopes it. The first row is **Default**: launch with no model flag at all.
+  A model is picked for a launch and never changes a running agent.
+  _Avoid_: model picker, provider list, model family.
 - **Tab** — one space's set of panes, drawn in the tab rail. A tab belongs to exactly one space,
   and a pane to exactly one tab; moving a tab to another space is not `space.move`.
   _Avoid_: workspace, window, session.
@@ -50,14 +66,18 @@ exactly one thing here.
 - **Split direction** — the orientation of a new pane relative to an existing one: `Right`, `Left`,
   `Down`, or `Up`.
   _Avoid_: split orientation, layout direction, axis.
-- **Drop quadrant** — one of four peripheral zones on a terminal pane (`left`, `right`, `bottom`,
-  `top`) where releasing a dragged tab or pane grip splits the viewport in that direction.
+- **Drop quadrant** — one of four peripheral zones on a target pane (`Left`, `Right`, `Bottom`,
+  `Top`) where releasing a dragged pane grip moves or splits the pane into that quadrant. Belongs
+  strictly to pane drag operations within the workspace canvas; tabs in the tab strip cannot drop into
+  pane quadrants.
   _Avoid_: drop zone, pane quadrant, split area.
-- **Drop indicator** — the accent-colored preview overlay highlighting the target quadrant where
-  a dragged pane or tab will land.
+- **Drop indicator** — the accent-colored preview overlay highlighting where an item will land.
+  For tab reordering, it is a 2px vertical blue line at the insertion edge (`SortableTab.tsx:213`).
+  For pane dragging, it is a blue bounding box highlighting the target quadrant or center swap area (`pane_drag.rs:157`).
   _Avoid_: drop outline, blue box, split preview.
-- **Pane grip** — the top-center affordance on a pane header that initiates moving or splitting
-  the pane by dragging.
+- **Pane grip** — the top-center affordance on a pane header (`.pane-title-drag-handle` in
+  `TerminalPaneHeaderOverlay.tsx:190`, `grip-{pane}` in `pane_drag.rs:56`) that initiates moving,
+  splitting, or swapping the pane by dragging. Rendered when multiple panes exist (`paneCount > 1`).
   _Avoid_: header handle, drag bar, move grip.
 - **Tab reordering** — changing the position of a tab within its current space's tab strip by
   dragging horizontally or using move menu actions.
@@ -70,6 +90,17 @@ exactly one thing here.
 - **Tab color swatch** — the compact circular color button in the tab context menu used to select
   an accent tint from Orca's 10-color palette.
   _Avoid_: color picker, color button, tint row.
+- **Settled tab** — a tab put away on the current screen (`tab.settle`). It keeps running in the background
+  and returns when selected or when an agent inside it needs attention. Functions as Orca's pin analogue,
+  hiding the tab's close button and requiring confirmation to close.
+  _Avoid_: pinned tab, stashed tab, hidden tab, parked tab.
+- **Close guard** — the confirmation prompt that intercepts tab or session closure when active work
+  (a running command or active agent) or a settled tab would be terminated. Idle shells bypass the guard
+  and close immediately.
+  _Avoid_: close dialog, exit modal, kill prompt, confirm dialog.
+- **Bulk tab close** — closing multiple tabs relative to a target tab (`others`, `right`, or `left`) in
+  one action, while preserving settled tabs.
+  _Avoid_: batch close, mass close, close-all.
 - **Tab group** — Orca's multi-column container allowing multiple parallel tab strips in one workspace.
   Not a Herdr construct: Herdr maintains strictly one tab strip per space.
   _Avoid_: split tab bar, tab column, workspace column.

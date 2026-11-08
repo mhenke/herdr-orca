@@ -15,6 +15,7 @@ from a source carries a header naming that source.
      mods/orca-menu/transcript.js
      mods/orca-handoff/transcript.js
      mods/orca-spaces/indentation.js
+     mods/new-menu/models.js
    They are distributed under the MIT License below.
 
    MIT License
@@ -45,3 +46,9 @@ from a source carries a header naming that source.
    Permission to use, copy, modify, and/or distribute this software for any
    purpose with or without fee is hereby granted, provided that the above
    copyright notice and this permission notice appear in all copies.
+
+4. Orca-derived icon assets (MIT, Copyright (c) 2026 Lovecast Inc.)
+   Copied from Orca's agent icons; each file names its Orca source in its header or the
+   mods/orca-spaces/main.js comment that uses it.
+   mods/orca-spaces/omp.svg, mods/orca-spaces/agent-icons/{droid,kilo,aider}.svg,
+   mods/orca-spaces/agent-icons/{gemini,cursor,grok,qoder,hermes,dsh}.png

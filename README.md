@@ -21,7 +21,7 @@ The layout brings together 16 self-contained mods under `mods/`:
 - **Flat tab strip (`orca-tabs`)**: Tabs sit flat with a full-width 2px bottom underline on the active tab, program icons, close buttons, and tab color dots that stay in sync with the menu store. We also put the sidebar toggle button right in the tab bar so you can always bring the sidebar back.
 - **Hover pane headers (`orca-pane`)**: Hovering over a terminal reveals a slim 24px header with custom tab names, split buttons, zoom toggle, and close.
 - **Full-span status bar (`orca-status`)**: A 24px bar running across the full window bottom showing your Git branch, dirty file counter, ahead/behind sync stats, and overall agent status.
-- **Quick create dropdown (`new-menu`)**: A 288px dropdown for quickly launching agents (OpenCode, Antigravity, Claude Code, Codex), opening folders, or creating new Git worktrees.
+- **Quick create dropdown (`new-menu`)**: A 288px dropdown for quickly launching agents — every agent this machine has installed, then its model list (Claude, Codex, Gemini, Grok aliases; `omp models` and `agy models` for the account-scoped ones) — opening folders, or creating new Git worktrees.
 - **Context menus (`orca-menu`)**: Right-click menus for worktrees, project headers, and tabs with full mouse and keyboard navigation (arrow keys, Enter, Space, Home, End, Esc).
 - **Palettes that match Orca**: `orca-dark` (Ghostty Default Style Dark) and `orca-light` (Tango Light), plus Orca's grey panel tones.
 
