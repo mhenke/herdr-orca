@@ -1,8 +1,8 @@
 // Derived from Herdr App's defaults/mods/tabs/main.js (Apache-2.0, Copyright Herdr App authors).
 // Modified for herdr-orca; see LICENSE and NOTICE.
 import { View, div, svg, image } from "gpui-kit";
-import { h_flex } from "gpui-base";
-import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, setShared } from "herdr";
+import { h_flex, v_flex } from "gpui-base";
+import { spaces, panes, run, openOverlay, closeOverlay, props, theme, window, shared, layout, settings, setShared } from "herdr";
 
 // `src/shared/agent-status/title/agent-title-decoration.ts`: the tab already shows the
 // provider icon, so a known agent's own leading status glyph is dropped. Glyph-only titles
@@ -27,9 +27,17 @@ function find(node, id) {
 
 export default class Tabs extends View {
   init(_props, cx) {
+    const p = _props?.confirmClose ? _props : props();
+    if (p?.confirmClose) {
+      this.isDialog = true;
+      this.dontAskAgain = false;
+      this.handle = cx.focus_handle();
+      this.handle.focus();
+      return;
+    }
     this.pressed = null;
-    this.pressX = 0;
-    this.pressY = 0;
+    this.overTab = null;
+    this.overSide = null;
     // Which tab is under the pointer. Orca's close/collapse reveal is `group-hover` on the
     // tab (SortableTab.tsx:317,323); gpui-kit has no group-hover, so the id is tracked here.
     this.hoveredTab = null;
@@ -97,7 +105,230 @@ export default class Tabs extends View {
     localStorage.setItem("panels", JSON.stringify(this.panels));
   }
 
+  // Resolves tab display title matching SortableTab.tsx:130-131 & terminal-tab-actions.ts:111.
+  getTabLabel(c) {
+    const pane = (panes() ?? []).find(p => p.tab === c.id && p.program?.agent) ?? (panes() ?? []).find(p => p.tab === c.id);
+    const program = pane?.program;
+    const raw = c.name ?? "Terminal";
+    const name = c.named ? raw : (pane?.title || program?.name || raw || "Terminal");
+    return program?.agent ? stripLeadingAgentTitleDecoration(name) : name;
+  }
+
+  // Close confirmation logic ported from Orca:
+  // - `src/renderer/src/components/terminal/terminal-tab-actions.ts:121-131` (shouldConfirmRunningTerminalClose)
+  // - `src/renderer/src/components/terminal/running-terminal-close-guard.ts:22-34,56-97` (guardRunningTerminalClose)
+  // - `src/renderer/src/components/terminal-pane/CloseTerminalDialog.tsx:15-184` (CloseTerminalDialog)
+  // - `src/renderer/src/store/pinned-tab-close-guard.ts:27-57` (guardPinnedTabClose)
+  // - `src/renderer/src/components/terminal-pane/PinnedTabCloseDialog.tsx:17-96` (PinnedTabCloseDialog)
+  requestCloseTab(c) {
+    if (!c) return;
+    const label = this.getTabLabel(c);
+
+    // 1. Pinned tab check: PinnedTabCloseDialog.tsx & pinned-tab-close-guard.ts:27-57.
+    // In Herdr, `settled` represents pinned tabs. Orca confirms pinned tab closes unless confirmClosePinnedTab is disabled.
+    if (c.settled) {
+      let skipPinned = false;
+      try { skipPinned = localStorage.getItem("orca.confirmClosePinnedTab") === "false"; } catch {}
+      if (!skipPinned) {
+        openOverlay({
+          mod: "orca-tabs",
+          kind: "dialog",
+          modal: true,
+          width: 384,
+          height: 200,
+          props: {
+            confirmClose: {
+              kind: "pinned",
+              tabId: c.id,
+              tabLabel: label,
+            }
+          }
+        });
+        return;
+      }
+      run("tab.close", { id: c.id });
+      return;
+    }
+
+    // 2. Active agent or running command check: CloseTerminalDialog.tsx & running-terminal-close-guard.ts:56-97.
+    // Orca's shouldConfirmRunningTerminalClose checks if an agent or child process is active.
+    const tabPanes = (panes() ?? []).filter(p => p.tab === c.id);
+    const isAgent = tabPanes.some(p => p.program?.agent || p.status === "working" || p.status === "blocked") ||
+                    c.status === "working" || c.status === "blocked";
+    const isRunningCommand = tabPanes.some(p => p.program && !p.program.shell && !p.program.agent);
+
+    let skipRunning = false;
+    try { skipRunning = localStorage.getItem("orca.skipCloseTerminalWithRunningProcessConfirm") === "true"; } catch {}
+
+    if (!skipRunning && (isAgent || isRunningCommand)) {
+      openOverlay({
+        mod: "orca-tabs",
+        kind: "dialog",
+        modal: true,
+        width: 384,
+        height: isAgent ? 240 : 208,
+        props: {
+          confirmClose: {
+            kind: isAgent ? "agent" : "command",
+            tabId: c.id,
+            tabLabel: label,
+          }
+        }
+      });
+      return;
+    }
+
+    // 3. Idle shell or opt-out -> close immediately.
+    run("tab.close", { id: c.id });
+  }
+
+  // Close confirmation dialog ported from Orca:
+  // - `src/renderer/src/components/terminal-pane/CloseTerminalDialog.tsx:101-184`
+  // - `src/renderer/src/components/terminal-pane/PinnedTabCloseDialog.tsx:52-94`
+  // - `src/shared/bulk-tab-close-confirmation.ts:5-15` (BULK_TAB_CLOSE_COPY)
+  // Matches Orca's max-w-sm (384px) dialog-surface container, text-sm title, text-xs muted description,
+  // checkbox with don't-ask-again persistence, outline cancel button and destructive confirm button.
+  renderConfirmDialog(cx) {
+    const t = theme();
+    const p = props() ?? {};
+    const cfg = p.confirmClose ?? {};
+    const kind = cfg.kind ?? "command";
+    const isAgent = kind === "agent";
+    const isPinned = kind === "pinned";
+    const isBulk = kind === "bulk";
+
+    if (!this.handle) {
+      this.handle = cx.focus_handle();
+      this.handle.focus();
+    }
+
+    let title = "Stop running command?";
+    let desc = "Closing this terminal will stop the command running inside it.";
+    if (isAgent) {
+      title = "Stop this agent?";
+      desc = "Closing this terminal will stop the agent's current work.";
+    } else if (isPinned) {
+      title = "Close pinned tab?";
+      desc = "This tab is pinned. Are you sure you want to close it?";
+    } else if (isBulk) {
+      if (cfg.scope === "others") title = "Close other tabs?";
+      else if (cfg.scope === "right") title = "Close tabs to the right?";
+      else if (cfg.scope === "left") title = "Close tabs to the left?";
+      else title = "Close tabs?";
+      desc = "The selected tabs will be closed. Pinned tabs will stay open.";
+    }
+
+    let confirmLabel = "Stop and Close";
+    if (isAgent) confirmLabel = "Stop Agent";
+    else if (isPinned) confirmLabel = "Close";
+    else if (isBulk) confirmLabel = "Close tabs";
+
+    const confirm = () => {
+      if (this.dontAskAgain) {
+        try {
+          if (isPinned) {
+            localStorage.setItem("orca.confirmClosePinnedTab", "false");
+          } else if (isAgent || kind === "command") {
+            localStorage.setItem("orca.skipCloseTerminalWithRunningProcessConfirm", "true");
+          }
+        } catch {}
+      }
+      closeOverlay(p.overlay);
+      if (cfg.tabId) {
+        run("tab.close", { id: cfg.tabId });
+      } else if (cfg.tabIds) {
+        for (const id of cfg.tabIds) run("tab.close", { id });
+      }
+    };
+
+    const cancel = () => {
+      closeOverlay(p.overlay);
+    };
+
+    const checkboxLabel = isPinned ? "Don't ask again for pinned tabs" : "Don't ask again for running terminals";
+
+    return v_flex()
+      .id("orca-close-dialog")
+      .track_focus(this.handle)
+      .on_key_down((e, cx) => {
+        if (e.key === "enter") {
+          cx.stop_propagation();
+          confirm();
+        } else if (e.key === "escape") {
+          cx.stop_propagation();
+          cancel();
+        }
+      })
+      .size_full()
+      .p(24)
+      .gap(16)
+      .rounded(8)
+      .bg(t.popover)
+      .border_1()
+      .border_color(t.border)
+      // Header: DialogHeader (dialog.tsx:139-147)
+      .child(
+        v_flex().gap(4)
+          .child(div().text_size(14).font_semibold().text_color(t.foreground).child(title))
+          .child(div().text_size(12).text_color(t.muted).child(desc))
+      )
+      // Warning for agent: CloseTerminalDialog.tsx:132-139
+      .when(isAgent, el =>
+        el.child(div().text_size(12).text_color(t.muted).child("This terminal will not resume automatically. Cancel and put the workspace to sleep to resume it later."))
+      )
+      // Tab label: CloseTerminalDialog.tsx:140-144
+      .when(Boolean(cfg.tabLabel), el =>
+        el.child(div().truncate().text_size(12).font_medium().text_color(t.foreground).child(cfg.tabLabel))
+      )
+      // Checkbox: CloseTerminalDialog.tsx:145-159 & PinnedTabCloseDialog.tsx:72-84
+      .when(!isBulk, el =>
+        el.child(
+          h_flex().items_center().gap(8).cursor_pointer()
+            .on_click((_e, cx) => {
+              this.dontAskAgain = !this.dontAskAgain;
+              cx.notify();
+            })
+            .child(
+              div().size(16).flex_none().rounded(4).border_1()
+                .border_color(this.dontAskAgain ? t.solid : t.input)
+                .bg(this.dontAskAgain ? t.solid : "#00000000")
+                .flex().items_center().justify_center()
+                .when(this.dontAskAgain, checkEl =>
+                  checkEl.child(svg("mods/orca-tabs/check.svg").size(12).text_color(t.solid_foreground))
+                )
+            )
+            .child(div().text_size(12).text_color(t.muted).child(checkboxLabel))
+        )
+      )
+      // Footer: DialogFooter (dialog.tsx:149-163)
+      .child(
+        h_flex().justify_end().gap(8)
+          // Cancel button: Button variant="outline" size="sm"
+          .child(
+            h_flex().id("close-cancel").h(32).px(12).items_center().justify_center().rounded(6)
+              .border_1().border_color(t.border).bg(t.raised).text_color(t.foreground)
+              .text_size(12).font_medium().cursor_pointer()
+              .hover(s => s.bg(t.hover))
+              .on_click((_e, _cx) => cancel())
+              .child("Cancel")
+          )
+          // Confirm button: Button variant="destructive" size="sm" (red)
+          .child(
+            h_flex().id("close-confirm").h(32).px(12).items_center().justify_center().rounded(6)
+              .bg("#dc2626").text_color("#ffffff")
+              .text_size(12).font_medium().cursor_pointer()
+              .hover(s => s.bg("#b91c1c"))
+              .on_click((_e, _cx) => confirm())
+              .child(confirmLabel)
+          )
+      );
+  }
+
   render(cx) {
+    const p = props();
+    if (this.isDialog || p?.confirmClose) {
+      return this.renderConfirmDialog(cx);
+    }
     const t = theme();
     const space = (spaces() ?? []).find(p => p.active);
     const shown = space?.tabs ?? [];
@@ -150,12 +381,21 @@ export default class Tabs extends View {
       .on_mouse_down("left", stop).on_click(action)
       .child(svg("mods/orca-tabs/panel-right.svg").size(16));
     const item = (c, i) => {
-      const program = (panes() ?? []).find(p => p.tab === c.id && p.program?.agent)?.program ?? (panes() ?? []).find(p => p.tab === c.id)?.program;
-      const raw = c.name ?? "Terminal";
-      const name = /^tb\d+$/.test(raw) ? program?.name ?? "Terminal" : raw;
+      const pane = (panes() ?? []).find(p => p.tab === c.id && p.program?.agent) ?? (panes() ?? []).find(p => p.tab === c.id);
+      const program = pane?.program;
       // SortableTab.tsx:130 — displayTitle = customTitle ?? (tabAgent ? strip(title) : title).
-      const label = program?.agent ? stripLeadingAgentTitleDecoration(name) : name;
+      const label = this.getTabLabel(c);
       const tabColour = tabColorStore[c.id] ?? null;
+      // TerminalTabLeadingIcon.tsx:100-108 — the agent's identity mark, `opacity-70` while the
+      // tab is inactive. The program table names most agents; `omp` has no entry, and Orca draws
+      // OmpIcon's gradient for it (`agent-icon-glyphs.tsx:30-62`), copied into this mod. A mark
+      // in the agent's own colors is an image: `svg()` is a one-color mask
+      // (gpui-kit.d.ts:20273-20281).
+      const identity = pane?.app === "omp"
+        ? image("mods/orca-tabs/omp.svg").size(12)
+        : !program?.icon ? null
+        : program.tint ? svg(program.icon).size(12).text_color(t.muted)
+        : image(program.icon).size(12);
       // Orca's tab: flat, full height, no pill. SortableTab.tsx:214 — h-full px-1.5 text-xs plus
       // getTabStripBorderClasses (border-t border-r border-border). The slot clamps the tab to
       // `w-[300px] max-w-[300px] min-w-[144px] flex-1` (tab-width-rules.ts:2, applied at
@@ -175,66 +415,61 @@ export default class Tabs extends View {
           this.hoveredTab = next;
           cx.notify();
         })
-        .cursor_grab()
+        // SortableTab.tsx:214 — cursor-pointer: tab rest hover is a pointer hand, not grab.
+        .cursor_pointer()
         .when(this.pressed === i, el => el.cursor_grabbing().opacity(0.8))
-        // Tab reordering & pane split drag — SortableTab.tsx:213 and useTabDragSplit.ts:74.
-        // Dragging along the strip reorders via `tab.move` (TAB_DRAG_ACTIVATION_DISTANCE_PX = 12 in useTabDragSplit.ts:42).
-        // Dragging down onto the terminal area drops into 4 quadrants (resolvePaneColumnEdgeZone in tab-drop-zone.ts:38-80):
-        //   - Left: pane.split right + pane.swap left
-        //   - Right: pane.split right
-        //   - Bottom: pane.split down
-        //   - Top: pane.split down + pane.swap up
+        // SortableTab.tsx:231-243 — onAuxClick button === 1 (middle-click) closes tab.
+        .on_mouse_down("middle", (_e, cx) => {
+          cx.stop_propagation();
+          this.requestCloseTab(c);
+        })
+        // Blue drop insertion line — Orca drop-indicator.ts:4-12 (w-[2px] bg-blue-500).
+        .when(this.pressed !== null && this.overTab === c.id && this.pressed !== i, el =>
+          el.child(
+            div().absolute().top(0).bottom(0).w(2).bg("#3b82f6")
+              .when(this.overSide === "left", line => line.left(0))
+              .when(this.overSide === "right", line => line.right(0))
+          )
+        )
+        // Tab reordering — SortableTab.tsx:213 and tab-drag-drop-commit.ts:116-126.
+        // Dragging along the strip reorders via `tab.move`.
+        // Dropping tabs onto the terminal is not capturable across mod boundaries in GPUI
+        // because layout blocks enforce overflow_hidden and quickjs does not expose pointer capture;
+        // Orca's split actions in orca-menu and orca-split-menu provide the functional bridge.
         .on_mouse_down("left", (e, cx) => {
           cx.stop_propagation();
           this.pressed = i;
-          this.pressX = e.position?.x ?? 0;
-          this.pressY = e.position?.y ?? 0;
+          this.overTab = c.id;
+          this.overSide = null;
           if (e.click_count === 2) run("tab.rename", { id: c.id });
           cx.notify();
         })
-        .on_mouse_up("left", (e, cx) => {
-          const from = this.pressed;
-          this.pressed = null;
-          const source = from === null ? null : shown[from];
-          if (!source) return;
-
-          const releaseX = e.position?.x ?? this.pressX ?? 0;
-          const releaseY = e.position?.y ?? this.pressY ?? 0;
-          const dx = releaseX - (this.pressX || releaseX);
-          const dy = releaseY - (this.pressY || releaseY);
-          const tabHeight = e.bounds?.height || 36;
-
-          // Dragged down onto the terminal area into 4 quadrants (useTabDragSplit.ts:74 & resolvePaneColumnEdgeZone).
-          if (dy > tabHeight + 10) {
-            const targetPane = panes().find((p) => p.focused) ?? panes()[0];
-            const paneArg = targetPane?.pane ? { pane: targetPane.pane } : {};
-            if (Math.abs(dx) > Math.abs(dy) * 0.7) {
-              if (dx > 0) {
-                run("pane.split", { direction: "right", ...paneArg });
-              } else {
-                run("pane.split", { direction: "right", ...paneArg });
-                run("pane.swap", { direction: "left" });
-              }
-            } else {
-              if (dy > 200) {
-                run("pane.split", { direction: "down", ...paneArg });
-              } else {
-                run("pane.split", { direction: "down", ...paneArg });
-                run("pane.swap", { direction: "up" });
-              }
+        .on_mouse_move((e, cx) => {
+          if (this.pressed !== null) {
+            const width = e.bounds?.width ?? 144;
+            const localX = e.local_position?.x ?? (width / 2);
+            const side = localX < width / 2 ? "left" : "right";
+            if (this.overTab !== c.id || this.overSide !== side) {
+              this.overTab = c.id;
+              this.overSide = side;
+              cx.notify();
             }
-            cx.notify();
-            return;
           }
+        })
+        .on_mouse_up("left", (_e, cx) => {
+          const from = this.pressed;
+          const overSide = this.overSide;
+          this.pressed = null;
+          this.overTab = null;
+          this.overSide = null;
 
-          // Horizontal drag along tab bar — SortableTab.tsx:213 (TAB_DRAG_ACTIVATION_DISTANCE_PX = 12 in useTabDragSplit.ts:42).
-          if (Math.abs(dx) >= 12) {
-            const tabWidth = e.bounds?.width || 144;
-            const startX = (e.bounds?.x || 0) - i * tabWidth;
-            const rawTarget = Math.floor((releaseX - startX) / tabWidth);
-            const targetIndex = Math.max(0, Math.min(shown.length - 1, rawTarget));
-            if (targetIndex !== i) {
-              run("tab.move", { id: source.id, index: targetIndex + 1 });
+          if (from !== null && from !== i) {
+            // Orca tab-drag-drop-commit.ts:116-126 insertion algorithm
+            const oldIndex = from;
+            const rawInsertIndex = i + (overSide === "right" ? 1 : 0);
+            const nextIndex = oldIndex < rawInsertIndex ? rawInsertIndex - 1 : rawInsertIndex;
+            if (oldIndex !== nextIndex) {
+              run("tab.move", { id: shown[from].id, index: nextIndex + 1 });
               cx.notify();
               return;
             }
@@ -256,17 +491,15 @@ export default class Tabs extends View {
         //   colour dot (size-2, mr-1.5)                    :291-296  [only when the tab has a colour]
         //   Minimize2 collapse (w-4 box, w-3 glyph)        :298-316  [expanded tabs]
         //   X close (w-4 box, w-3 glyph)                   :317-349
-        // The status mark is NOT a separate leading element in Orca: it is part of
-        // TerminalTabLeadingIcon, so it goes BEFORE the label, not after. We had it after.
-        .when(Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(12).text_color(t.muted) : image(program.icon).size(12)))
-        // TerminalTabLeadingIcon -> AgentStateDot (`TerminalTabLeadingIcon.tsx:38`: the wrapper
-        // is `inline-flex` and is `opacity-70` while the tab is inactive). working = the
-        // agent-working spinner, done = CircleCheck in emerald-500, blocked — Herdr's word for
-        // a waiting agent — = AgentQuestionIcon, a MessageCircleQuestion in --agent-question.
-        // A bare dot is Orca's idle mark only.
-        .when(c.status === "working", el => el.child(svg("mods/orca-tabs/spinner.svg").size(12).flex_none().text_color("#eab308").spin(1000)).when(!c.active, w => w.opacity(0.7)))
-        .when(c.status === "done", el => el.child(svg("mods/orca-tabs/circle-check.svg").size(12).flex_none().text_color("#10b981")).when(!c.active, w => w.opacity(0.7)))
-        .when(c.status === "blocked", el => el.child(svg("mods/orca-tabs/message-circle-question.svg").size(12).flex_none().text_color("#ea580c")).when(!c.active, w => w.opacity(0.7)))
+        // TerminalTabLeadingIcon.tsx:55-115 — the activity mark (`AgentStateDot`) comes first,
+        // then the agent's identity, and only the identity is `opacity-70` on an inactive tab
+        // (:44-50). working = the agent-working spinner, done = CircleCheck in emerald-500,
+        // blocked — Herdr's word for a waiting agent — = AgentQuestionIcon, a
+        // MessageCircleQuestion in --agent-question. A bare dot is Orca's idle mark only.
+        .when(c.status === "working", el => el.child(svg("mods/orca-tabs/spinner.svg").size(12).flex_none().text_color("#eab308").spin(1000)))
+        .when(c.status === "done", el => el.child(svg("mods/orca-tabs/circle-check.svg").size(12).flex_none().text_color("#10b981")))
+        .when(c.status === "blocked", el => el.child(svg("mods/orca-tabs/message-circle-question.svg").size(12).flex_none().text_color("#ea580c")))
+        .when(Boolean(identity), el => el.child(c.active ? identity : identity.opacity(0.7)))
         // `TAB_LABEL_WIDTH_CLASSES` (tab-width-rules.ts:4) — `tab-label min-w-0 flex-1 truncate`.
         // Orca never marks an expanded pane in the title (SortableTab.tsx:130-131); the
         // Minimize2 button below is the only indicator.
@@ -296,7 +529,7 @@ export default class Tabs extends View {
           .text_color(c.active || this.hoveredTab === c.id ? t.muted : "#00000000")
           .hover(s => s.text_color(t.foreground).bg(t.raised))
           .on_mouse_down("left", stop).accessibility_label("Close").tooltip("Close")
-          .on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); })
+          .on_click((_e, cx) => { cx.stop_propagation(); this.requestCloseTab(c); })
           .child(svg("mods/orca-tabs/close.svg").size(12))));
     };
     const root = layout();
@@ -323,7 +556,12 @@ export default class Tabs extends View {
     // bar only inside the right sidebar (`right-sidebar-top-activity-bar.tsx:40`), which
     // `orca-panel-head` owns. Drawing them twice put two strip icons in the titlebar corner.
     return h_flex().size_full().min_w(0).pl(leftPad).gap(0).items_center().bg(t.surface).border_b(1).border_color(t.border)
-      .on_mouse_up("left", () => { this.pressed = null; })
+      .on_mouse_up("left", (_e, cx) => {
+        this.pressed = null;
+        this.overTab = null;
+        this.overSide = null;
+        cx.notify();
+      })
       // TitlebarLeftControls.tsx:74-88 — ONE sidebar toggle, at the LEFT; `orca-chrome` draws it
       // inside the sidebar column. This copy appears only while that column is hidden, since
       // Herdr skips a hidden node's content (layout.rs:551); Orca keeps the control at the same
