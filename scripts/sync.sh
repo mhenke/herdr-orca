@@ -4,10 +4,14 @@
 set -eu
 src=$(cd "$(dirname "$0")/.." && pwd)
 app=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
-mkdir -p "$app/layouts" "$app/mods" "$app/themes"
+mkdir -p "$app/layouts" "$app/mods" "$app/themes" "$app/icons"
 
 cp "$src"/layouts/orca.json "$src"/layouts/orca.svg "$app/layouts/"
 cp "$src"/extras/themes/*.json "$app/themes/"
+# The mark `extras/programs.json` names. The person's program table is settings, so it is
+# documented there and never written here.
+cp "$src"/extras/icons/*.svg "$app/icons/"
+
 for m in "$src"/mods/*/; do
   [ -d "$m" ] || continue
   n=$(basename "$m")
