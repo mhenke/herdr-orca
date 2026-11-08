@@ -62,8 +62,7 @@ export function parseRemote(remoteUrl) {
   return null;
 }
 
-// Orca's RepoIconGlyph uses a repo-owned image when present, otherwise lucide Folder
-// (`src/renderer/src/components/repo/repo-icon.tsx:145-177`). Herdr has no per-repo image.
+// Orca uses a repo-owned image or Folder (`src/renderer/src/components/repo/repo-icon.tsx:145-177`); Herdr has no per-repo image.
 export function repoMark(size) {
   return h_flex().size(size).flex_none().items_center().justify_center().rounded(4).overflow_hidden()
     .child(svg("mods/orca-spaces/folder.svg").size(14).text_color(REPO_BADGE_COLOR));

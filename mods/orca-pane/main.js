@@ -48,8 +48,7 @@ export default class Pane extends View {
     // (`PaneInfo.title`, herdr.d.ts:193 — "what the program set, or the mod's name").
     const tab = spaces().flatMap((s) => s.tabs).find((t) => t.id === p.tab);
     const tabTitle = tab && tab.named ? tab.name : p.title;
-    const siblingPanes = panes().filter((x) => x.tab === p.tab);
-    const paneCount = siblingPanes.length;
+    const paneCount = panes().filter((x) => x.tab === p.tab).length;
     return h_flex()
       .id(`pane-head-${pane}`)
       .size_full()
@@ -87,10 +86,8 @@ export default class Pane extends View {
       // (`herdr-app commands`) — and the title shown here is derived (tab name or terminal
       // title), so both actions are omitted, not faked.
       .when(Boolean(tabTitle), el => el.child(div().flex_1().min_w(0).truncate().text_color("#ffffff85").child(tabTitle)))
-      // TerminalPaneHeaderOverlay.tsx:188-196, terminal.css:275-306:
-      // `.pane-title-drag-handle`: rendered when `paneCount > 1`. Centered at `left: 50%`,
-      // `width: 32px`, `height: 100%`, cursor: grab. Displays the 6-dot grip affordance.
-      // Click: opens the pane layout & split/swap popup menu.
+      // Orca's multi-pane drag handle opens layout actions (TerminalPaneHeaderOverlay.tsx:188-196,
+      // terminal.css:275-306).
       .when(paneCount > 1 && this.hovered, (el) =>
         el.child(
           div()

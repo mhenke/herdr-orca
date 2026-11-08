@@ -76,10 +76,7 @@ export function statusMark(status, size = 12, colors = STATUS_COLORS) {
         .text_color(c.working ?? STATUS_COLORS.working).spin(1000),
     );
   }
-  // `StatusIndicator.tsx:105-110`: `done` and `active` share emerald, the quiet-terminal dot
-  // ("Quiet active terminals share the completed-session dot"). Herdr `idle` on an open space
-  // is that quiet terminal. An unopened worktree (`null`) has no terminal, so it stays grey
-  // (`bg-neutral-500/40`, `StatusIndicator.tsx:111`).
+  // `StatusIndicator.tsx:105-111`: idle open spaces share done's emerald; unopened worktrees stay grey.
   const emerald = status === "done" || status === "idle";
   return dot(size, 8, emerald ? c.done ?? STATUS_COLORS.done : STATUS_COLORS.idle);
 }

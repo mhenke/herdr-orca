@@ -8,9 +8,7 @@ import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { theme, spaces, panes, knownAgents, run, props, closeOverlay, openOverlay, pickFolder, keys, window } from "herdr";
 import { MODELS } from "./models.js";
 
-// The agents this machine can start, kept across opens so the menu paints at once while
-// `knownAgents()` checks again. Module memory, not `shared()`: a `setShared` write only shows
-// after an unrelated re-render, and this popup is the only reader (AGENTS.md rule 10).
+// Cache agents so the menu paints immediately on reopen; shared() needs another render (AGENTS.md rule 10).
 let agentsCache = null;
 let agentsFailed = false;
 let agentsLoading = false;
@@ -18,9 +16,7 @@ let agentsLoading = false;
 // serves every open.
 const modelCache = new Map();
 
-// Rows fit, not rows shown: the popup is 288x512 (orca-tabs/main.js:343), a row is 32, the
-// content pads 4 a side, and a divider adds 11. The rest of the height goes to one heading
-// (30) plus, in the model list, the filter row (36) and the Back row (43).
+// Visible row counts follow the 288x512 popup and its 32px rows (orca-tabs/main.js:343).
 const FIT = { list: 13, models: 11 };
 
 // Herdr keys are dash-joined (herdr's own keys.json ships "ctrl-shift-t"); Orca's menu shows
@@ -46,9 +42,7 @@ export default class NewMenu extends View {
   init(_props, cx) {
     this.at = 0;
     this.backAt = 0;
-    // The agent whose models are showing, or null for the create list.
     this.picking = null;
-    // That agent's models once they arrive; null while loading or when the probe failed.
     this.models = null;
     this.modelsFailed = false;
     this.filter = "";
@@ -80,12 +74,8 @@ export default class NewMenu extends View {
       // tab-bar-static-create-menu.tsx:213-225 — New Terminal (TerminalSquare).
       { label: "New Terminal", icon: "square-terminal", hint: shortcut("tab.new"),
         run: () => run("tab.new", space ? { space: space.id } : {}) },
-      // Omitted for lack of a Herdr backend: the omnibox (TabBarCreateEntry.tsx:317-350 — no
-      // unified tab/history/file search command and no text input in this popup), New Browser
-      // Tab (:227), New Markdown (:239), plugin new files, Open Markdown... (:283) and New
-      // Mobile Emulator (:266) — Herdr has no browser, editor or emulator. Of Orca's
-      // non-terminal tabs, the file browser is Herdr's one real mod pane, so it opens beside
-      // the terminal through pane.split (commands.md).
+      // Unsupported: omnibox (TabBarCreateEntry.tsx:317-350), browser and Markdown rows
+      // (tab-bar-static-create-menu.tsx:227,239,283), plugins, and emulator (:266).
       ...(pane ? [{ label: "New File Browser", icon: "folder-open",
         run: () => run("pane.split", { direction: "right", pane: pane.pane, mod: "orca-files" }) }] : []),
       // Orca's "Open Markdown..." (:283) opens a file; Herdr opens folders as terminals.
@@ -99,32 +89,26 @@ export default class NewMenu extends View {
     ];
   }
 
-  // Orca's `+` lists its picker entries above the static create rows
-  // (`TabBarAgentPickerEntry.tsx:19-25`); Herdr's one agent list is the program table's
-  // `knownAgents()` (herdr.d.ts), the same table that draws an agent's icon and runs it.
+  // Orca lists agent pickers above static rows (`TabBarAgentPickerEntry.tsx:19-25`); Herdr uses knownAgents().
   agentRows() {
     if (!agentsCache) {
       return [{ label: agentsFailed ? "Could not load agents" : "Checking installed agents…", disabled: true }];
     }
-    // Every installed agent, then the first two it could install — the stock menu's split,
-    // so an agent whose binary detection misses it is still one row away.
+    // Show installed agents and up to two installable suggestions.
     const installed = agentsCache.filter((a) => a.installed);
     return [...installed, ...agentsCache.filter((a) => !a.installed).slice(0, 2)].map((a) => ({
       label: a.name,
       program: a,
       disabled: !a.installed,
       hint: a.installed ? "" : "not installed",
-      // Orca hangs a setup button off the agent row that opens its model list
-      // (`AgentLaunchSetupButton.tsx:27-84`, `AgentLaunchSetupPanel.tsx:180-283`). A popup here
-      // has no submenu (`orca-menu/main.js:418`), so the model list takes the menu's place and
-      // Esc comes back.
+      // Orca opens model setup from the agent row (`AgentLaunchSetupButton.tsx:27-84`,
+      // `AgentLaunchSetupPanel.tsx:180-283`); this popup has no submenu (`orca-menu/main.js:418`).
       ...(MODELS[a.key] ? { stay: (cx) => this.pickModel(a, cx) } : { run: () => this.launch(a) }),
     }));
   }
 
-  // One seed per agent, or what the agent reported. The default row comes first with no model
-  // flag at all: Orca only adds `--model` once a model is picked
-  // (`AgentLaunchTextModelDefault.tsx:23-33`, `agent-session-option-launch.ts:194-203`).
+  // Orca only adds `--model` after selection (`AgentLaunchTextModelDefault.tsx:23-33`,
+  // `agent-session-option-launch.ts:194-203`).
   modelRows() {
     const agent = this.picking;
     const seed = MODELS[agent.key];
@@ -147,9 +131,7 @@ export default class NewMenu extends View {
     return this.picking ? this.modelRows() : [...this.createRows(), ...this.agentRows()];
   }
 
-  // Only the window around the selection is built, so a 511-model list costs eleven rows and
-  // the popup keeps its size. The wheel moves the selection rather than a separate scroll
-  // offset, so nothing can drift out of step with `at`.
+  // Window the list to keep large model results within the popup; wheel position follows selection.
   wheel(rows) {
     const list = this.list();
     const start = Math.max(0, Math.min(this.at - rows + 1, list.length - rows));
@@ -179,9 +161,7 @@ export default class NewMenu extends View {
     this.models = modelCache.get(agent.key) ?? null;
     this.modelsFailed = false;
     this.input.focus();
-    // The filter is mounted by the next frame; focusing a handle that isn't in the tree can be
-    // dropped, so ask again once it paints (the stock picker's own retry,
-    // defaults/mods/picker/main.js:44).
+    // The filter mounts next frame, so retry focus after paint (defaults/mods/picker/main.js:44).
     cx.timer.after(0, () => this.input.focus());
     const seed = MODELS[agent.key];
     if (this.models || !seed.probe) return;
@@ -216,7 +196,6 @@ export default class NewMenu extends View {
     const row = this.list()[i];
     if (!row || row.disabled) return;
     if (row.stay) {
-      // A step inside this menu: change the rows, keep the popup open.
       row.stay(cx);
       cx.notify();
       return;
@@ -292,7 +271,6 @@ export default class NewMenu extends View {
   render(cx) {
     const t = theme();
     const picking = this.picking;
-    // The section label, which is not a row: navigation and clicks count rows only.
     const headingAt = this.createRows().length;
     const page = this.wheel(picking ? FIT.models : FIT.list);
     return v_flex()
@@ -312,7 +290,6 @@ export default class NewMenu extends View {
         else if (e.key === "end") this.edge(true);
         else if (e.key === "enter" || e.key === "space") this.choose(this.at, cx);
         else if (e.key === "escape") {
-          // Esc leaves the model list first, then the menu.
           if (!picking) return closeOverlay(props()?.overlay);
           this.back();
         } else return;
@@ -331,7 +308,6 @@ export default class NewMenu extends View {
           ? [this.heading("Start an agent", t), node]
           : [node];
       }))
-      // A back row stays put below the window, under the list it returns from.
       .when(picking, (el) => el.child(this.row({ label: "Back", icon: "chevron-left", sep: true }, -1, t,
         (cx) => { this.back(); cx.notify(); })));
   }

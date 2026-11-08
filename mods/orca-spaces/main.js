@@ -342,9 +342,9 @@ export default class Spaces extends View {
       const common = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, on });
       const repo = common.stdout.trim();
       const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
-      // Orca's PR query needs the base repo and origin head owner (`pr-branch-lookup.ts:41-48`;
-      // `github-api-repository.ts:127-133`); repo icons use a repo-owned image or Folder instead
-      // (`src/renderer/src/components/repo/repo-icon.tsx:145-177`), so no remote-derived icon is stored.
+      // Orca queries PRs by base repo and origin head (`pr-branch-lookup.ts:41-48`,
+      // `github-api-repository.ts:127-133`); repo icons use a repo image or Folder
+      // (`src/renderer/src/components/repo/repo-icon.tsx:145-177`).
       let baseRepo = null; // the repo PRs are filed in: upstream when there is one
       let head = null; // origin's owner: who the branch must belong to
       try {
@@ -874,17 +874,10 @@ export default class Spaces extends View {
     // Herdr's `AgentInfo` has no parent/lineage, child count, timestamp or turn text, so Orca's
     // `+N` child disclosure, `text-[10px]` timestamp, `" - "` secondary line and `.75rem`
     // lineage indent (`worktree-card-compact-agent-row.tsx:226-297`) have no data here.
-    // `AgentTypeIcon` size={13} (`worktree-card-compact-agent-row.tsx:241-242`) is Orca's
-    // `AgentIcon` (`agent-catalog.tsx:50-122`): every agent has its own mark, chosen from the
-    // catalog and glyph files (`status-bar/icons.tsx:4-22,343-366`,
-    // `agent-icon-glyphs.tsx:61-109`) with `agent-favicon-assets.ts:1-31,36-65` for the rest;
-    // where Orca names none, the program table's own icon is drawn.
-    // What changes for drawing is whether the mark brings its own fills: omp's gradient
-    // (`OmpIcon`, `agent-icon-glyphs.tsx:30-62`), Droid's white-on-black
-    // (`status-bar/icons.tsx:343-366`) and Kilo's yellow/black keep theirs, so they are images —
-    // `svg()` is a one-color mask (gpui-kit.d.ts:20273-20281) and greys them. Aider's is
-    // currentColor, so it takes the tint, and the bundled favicons are images whatever their
-    // extension.
+    // Orca's AgentIcon uses catalog marks/favicons (`worktree-card-compact-agent-row.tsx:241-242`,
+    // `agent-catalog.tsx:50-122`, `status-bar/icons.tsx:4-22,343-366`,
+    // `agent-icon-glyphs.tsx:30-62,61-109`, `agent-favicon-assets.ts:1-31,36-65`). Preserve
+    // colored marks as images because svg() is a one-color mask (gpui-kit.d.ts:20273-20281).
     const ownFills = new Set(["omp", "droid", "kilo"]);
     const agentIconOverrides = {
       codex: "mono",
@@ -902,8 +895,7 @@ export default class Spaces extends View {
     const agentIcon = (a, size) => {
       const p = a.program;
       const override = agentIconOverrides[a.app];
-      // `mono` reuses the program table's own glyph; everything else in the map is a mark this
-      // mod carries, in the agent's colors or in the text color.
+      // `mono` uses the program glyph; other overrides are bundled marks.
       if (override === "mono") return p?.icon ? svg(p.icon).size(size).flex_none().text_color(t.muted) : null;
       if (override) return ownFills.has(a.app) || !override.endsWith(".svg")
         ? image(override).w(size).h(size).flex_none()
