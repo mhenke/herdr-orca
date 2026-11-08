@@ -172,6 +172,10 @@ export default class Files extends View {
     this.ignored = new Set(); this.git = false; this.folderMarks = {}; this.folderErrors = {};
     this.inputHandle = cx.focus_handle();
     this.hits = null; this.searching = false; this.qFocused = false; this.view = "files";
+    // `tab.new { mod: "orca-files", props: { file } }` / `pane.split { …, props: { file } }`
+    // open the pane already showing that file — the Herdr stand-in for Orca's `openFile`
+    // (open-uncommitted-entry.ts:6-36). Consumed once in `refresh`, below.
+    this.propFile = props()?.file ?? null;
     // SearchResultsPane.tsx:22-23 — collapsedFiles is per-worktree search state; the
     // collapsed file rows stay collapsed until the query or worktree changes.
     this.collapsedSearch = new Set();
@@ -276,6 +280,7 @@ export default class Files extends View {
       this.show(null); this.watched = null; this.error = null; this.limited = false;
       this.loading = false;
       if (saved?.file) this.show(saved.file, cx);
+      if (this.propFile) { this.show(this.propFile, cx); this.propFile = null; }
     }
     if (!cwd || this.loading) return;
     const context = this.context;
