@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-08
+
+### Documentation
+
+- Add ADRs 0009-0010, agent guides, glossary sharpening, and project doc update
+
+### Features
+
+- **orca-spaces,orca-changes:** Add decoupled review store with TTL and invariant space scoping
+- **orca-tabs,orca-split-menu,orca-menu:** Add 4-quadrant drag split drops and circular tab colors
+- **orca-agents:** Resolve project scope across linked worktrees in git cache
+
+### Miscellaneous
+
+- Add license headers, Apache-2.0 LICENSE, and NOTICE per ADR 0010
+
+### Refactoring
+
+- **orca-pane:** Rely on native pane_grip for pane drag and swap
+
+### Styling
+
+- **theme:** Set accent color in orca-dark theme
 ## [0.5.0] - 2026-11-08
 
 ### Documentation
@@ -189,6 +212,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stroke width, and the group header's missing plus
 - The palette was invented; the drop indicator was the wrong shape
 - Refresh the raster after the row-order fix
+[0.6.0]: https://github.com/mhenke/herdr-orca/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mhenke/herdr-orca/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/mhenke/herdr-orca/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/mhenke/herdr-orca/compare/v0.2.0...v0.3.0
