@@ -175,3 +175,15 @@ exactly one thing here.
 - **Hosted review creation** — the workflow of drafting, configuring, and publishing a pull request
   on the remote host directly from the Changes panel.
   _Avoid_: PR dialog, review modal, make PR.
+- **Jump palette** — the modal dialog opened by the top-left Search button (`SidebarNav.tsx:90`) or `worktree.palette` (`ctrl-p` / `cmd-p`). It searches across open tabs, workspaces, quick actions, and offers inline workspace creation. Distinct from Herdr's stock `picker` (which is a dropdown of spaces) and `app.palette` (which lists raw commands).
+  _Avoid_: search bar, omnibox, quick open, command bar.
+- **Jump target** — any addressable result row inside the jump palette: a **Tab target**, **Worktree target**, **Action target**, or **Create target**.
+  _Avoid_: palette item, search hit, result entry.
+- **Tab target** — a jump target pointing to a specific tab within an open space, displaying the owning workspace name, tab title, and agent status or terminal icon.
+  _Avoid_: open tab result, tab entry.
+- **Worktree target** — a jump target pointing to a workspace card on disk, displaying its rollup status dot, repository badge, and branch name. Unopened checkouts open a new space upon selection.
+  _Avoid_: workspace result, space target.
+- **Action target** — a jump target representing an executable application command (such as split pane, open terminal, toggle layout) with its bound keyboard shortcut.
+  _Avoid_: command result, quick action row.
+- **Create target** — a fallback jump target offering to create a new workspace from the typed query when no exact workspace matches.
+  _Avoid_: new workspace row, create action.

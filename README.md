@@ -1,6 +1,6 @@
 # Herdr Orca
 
-An Orca-like workspace for Herdr App. It brings Orca's three-column layout straight into Herdr: a 280px left sidebar, a flat terminal work area, a 350px right utility panel, and a 24px status bar across the bottom. Projects organize into collapsible groups with worktree cards for your branches, live agent status marks, and primary checkout badges. Tabs sit flat with full-bleed active underline bars routing into Ghostty-dark terminal panes (or a clean landing view when you close your spaces), while the right activity bar switches between a full file explorer and your Git changes.
+An Orca-like workspace for Herdr App. It brings Orca's three-column layout straight into Herdr: a 280px left sidebar, a flat terminal work area, a 350px right utility panel, and a 24px status bar across the bottom. Projects organize into collapsible groups with worktree cards for your branches, live agent status marks, and primary checkout badges. Tabs sit flat with full-bleed active underline bars routing into Ghostty-dark terminal panes (or a clean landing view when you close your spaces), while the right activity bar switches between a full file explorer, your Git changes, and your agent sessions.
 
 ![Herdr Orca](preview.png)
 
@@ -12,16 +12,17 @@ Herdr can draw that entire workspace natively. We built it using a layout defini
 
 ## What's in the box
 
-The layout brings together 16 self-contained mods under `mods/`:
+The layout brings together 18 self-contained mods under `mods/`:
 
 - **Three columns at Orca's geometry**: 280px left sidebar (resizes from 220px to 500px), flexible center work area, and 350px right panel (resizes from 220px to 900px), separated by 1px borders with square pane corners (radius 0).
 - **Project cards in the sidebar (`orca-spaces`)**: Repositories group into collapsible folders. Worktrees show up as cards titled by branch, with a `primary` badge on the main checkout. Even if you only open a linked worktree, Herdr discovers the main checkout and keeps it at the top of the group. Linked worktrees indent 18px underneath, and the scrollbar sits in Orca's dedicated gutter so card alignment stays steady.
 - **Live agent status rollup**: Herdr tracks four core agent states (working, blocked, done, idle). You'll see turning spinners when an agent is busy, red alert marks when it needs approval or input, and green checkmarks when a run finishes.
-- **Activity rail and right panel (`orca-panel-head`)**: A 36px activity bar switches between a full-bleed Files explorer (`orca-files`) with 30+ language icons plus a Names/Contents search filter, and a Changes panel (`orca-changes`) with Git staging, diff views, and an inline commit composer.
-- **Flat tab strip (`orca-tabs`)**: Tabs sit flat with a full-width 2px bottom underline on the active tab, program icons, close buttons, and tab color dots that stay in sync with the menu store. We also put the sidebar toggle button right in the tab bar so you can always bring the sidebar back.
-- **Hover pane headers (`orca-pane`)**: Hovering over a terminal reveals a slim 24px header with custom tab names, split buttons, zoom toggle, and close.
+- **Activity rail and right panel (`orca-panel-head`)**: A 36px activity bar switches between a full-bleed Files explorer (`orca-files`) with 30+ language icons plus a Names/Contents search filter, a Changes panel (`orca-changes`) with Git staging, diff views, and an inline commit composer, and an Agents panel (`orca-agents`) that lists your live agents above the OMP session history it reads from disk. Click a past session there and it resumes in a new terminal.
+- **Flat tab strip (`orca-tabs`)**: Tabs sit flat with a full-width 2px bottom underline on the active tab, program icons, close buttons, and tab color dots that stay in sync with the menu store. Drag a tab along the strip to reorder it, middle-click one to close it, and Herdr asks before it closes a tab that has a live agent or a running command. We also put the sidebar toggle button right in the tab bar so you can always bring the sidebar back.
+- **Hover pane headers (`orca-pane`)**: Hovering over a terminal reveals a slim 24px header with custom tab names, split buttons, zoom toggle, and close. When a tab holds more than one pane, a 6-dot grip sits in the middle of that header and opens the pane menu for moving or swapping panes. `ctrl-shift-s` opens the same split choices on their own, including splits for the file browser and the changes panel.
 - **Full-span status bar (`orca-status`)**: A 24px bar running across the full window bottom showing your Git branch, dirty file counter, ahead/behind sync stats, and overall agent status.
-- **Quick create dropdown (`new-menu`)**: A 288px dropdown for quickly launching agents — every agent this machine has installed, then its model list (Claude, Codex, Gemini, Grok aliases; `omp models` and `agy models` for the account-scoped ones) — opening folders, or creating new Git worktrees.
+- **Quick create dropdown (`new-menu`)**: A 288px dropdown for quickly launching agents. It lists the agents Herdr's program table knows about, then opens that agent's model list for the ones that report models (Claude, Codex, Gemini and Grok aliases, plus `omp models` and `agy models` for the account-scoped ones). It also opens folders and creates new Git worktrees. OMP needs one entry in your program table before it shows up in this list; `extras/programs.json` holds it.
+- **Floating agent panel (`orca-float`)**: `ctrl-alt-a` drops a 920x560 panel in the bottom right that lists every live agent with its status, space and tab. Click a row and it jumps to that agent. Orca floats a whole terminal workspace there, which Herdr cannot do inside a float, so the panel shows the agent sessions Herdr tracks instead.
 - **Context menus (`orca-menu`)**: Right-click menus for worktrees, project headers, and tabs with full mouse and keyboard navigation (arrow keys, Enter, Space, Home, End, Esc).
 - **Palettes that match Orca**: `orca-dark` (Ghostty Default Style Dark) and `orca-light` (Tango Light), plus Orca's grey panel tones.
 
@@ -37,7 +38,10 @@ If you're cloning this repo locally, you can copy the files right into your Herd
 - `layouts/orca.json` and `layouts/orca.svg` go into `~/.config/herdr-app/layouts/`
 - Every folder in `mods/` goes into `~/.config/herdr-app/mods/`
 - Theme files in `extras/themes/*.json` go into `~/.config/herdr-app/themes/`
+- Icon files in `extras/icons/*.svg` go into `~/.config/herdr-app/icons/`
 - Merge `keys.json` into your `~/.config/herdr-app/keys.json`
+
+There is one step the script cannot do for you. `extras/programs.json` adds `omp` to Herdr's program table, and that table is your settings, so nothing writes it. Merge the entry into `~/.config/herdr-app/programs.json` by hand. Without it OMP is missing from the create menu, because that list is built from the program table. The tab strip and the sidebar still draw OMP's bundled mark, since those files live inside the mods.
 
 Or run the sync script to handle all of it:
 
@@ -56,6 +60,10 @@ These are defined in the `layout:orca` section of `keys.json` and activate whene
 | --- | --- | --- |
 | `ctrl-shift-b` | `layout.toggle:sidebar` | Toggle the left sidebar on or off |
 | `ctrl-shift-e` | `layout.toggle:panel` | Toggle the right utility panel on or off |
+| `ctrl-alt-a` | `orca-float.toggle` | Show or hide the floating agent panel |
+| `ctrl-shift-s` | `mod.open:orca-split-menu` | Open the split menu |
+
+`ctrl-shift-s` opens the split menu as a popup. The pane header's 6-dot grip and the right-click menus reach the same splits without a key.
 
 All of Herdr's default shortcuts still work as expected (`alt-1` through `alt-9` for spaces, `ctrl-1` through `ctrl-9` for tabs, and `alt-h/j/k/l` to move between panes).
 
@@ -85,6 +93,7 @@ We keep things lightweight and local:
 - `orca-spaces`: Runs read-only `git status`, `git rev-parse`, and `git worktree list --porcelain` to discover worktrees concurrently. It probes `gh` for pull request review numbers and caches what it finds in `localStorage`.
 - `orca-files`: Watches folders with `watchFolder` and handles basic file actions (create, rename, delete, reveal). Runs `rg --vimgrep` for content searches.
 - `orca-changes`: Handles Git status, diff views, staging, and commits (`git status`, `git diff`, `git add`, `git restore`, `git commit`).
+- `orca-agents`: Runs `sh` through `exec` in your own environment to list and read OMP's JSONL sessions under `$HOME`, and resumes one with `omp --resume=<path>` in the folder that session recorded. It is the only panel that reads files outside a repository.
 - `orca-status`: Periodically checks branch name and dirty status.
 - `orca-menu`: Clipboard support (`wl-copy`, `xclip`, `pbcopy`) and system file reveals (`xdg-open`, `open`, `explorer.exe`).
 

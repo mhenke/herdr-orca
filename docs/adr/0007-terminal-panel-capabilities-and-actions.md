@@ -138,6 +138,25 @@ transcribe, never invent), and route all terminal right-clicks through `orca-men
   `Split Terminal Left`, `Split Terminal Down`, `Split Terminal Up`) and 4-direction swaps (`Swap with Left`,
   `Swap with Right`, `Swap with Above`, `Swap with Below`) when multiple panes exist.
 
+### 7. Tab Drop-To-Split (`orca-tabs`)
+- **The zone is Orca's function**: `resolvePaneColumnEdgeZone` (`tab-drop-zone.ts:38-88`) reserves the
+  32px tab strip for reordering and answers only in the outer 20% of the panel width, or the outer 20%
+  of the pane body's height; the middle of the panel is no split at all. `mods/orca-tabs/main.js` ports
+  it verbatim, and `TabPaneColumnSplitDragOverlay.tsx:11-54` supplies the shape: half the panel — a
+  column half for left/right, a row half for up/down.
+- **The pointer is carried by an overlay window**: a mod's own element stops receiving the pointer as
+  soon as it leaves the tab strip, because the terminal block clips it (`herdr-app src/window.rs:3988`).
+  At Orca's 12px activation distance (`useTabDragSplit.ts:42`) the strip opens a frame-less overlay
+  spanning the whole app (`openOverlay { kind: "window", frame: "none", width: 1, height: 1 }`; a window
+  sits above a terminal, unlike a mod element). That window paints `.tab-drop-overlay` as Orca does —
+  an `rgba(59,130,246,0.2)` fill, a 2px `rgba(59,130,246,0.5)` border, 4px radius (`terminal.css:205-213`)
+  — and it is where the release arrives, so the drop is resolved by the same pointer that drew it.
+- **The drop**: Herdr splits right and down only, so a left or up drop splits right/down and then
+  `pane.swap`s the new pane into place — the pair `orca-split-menu` already uses for its four
+  directions. The dragged tab's terminal is then shown in that pane with `terminal.show`, because a
+  Herdr tab *is* its panes and cannot be moved inside another tab; the source tab keeps running. That
+  last step is the one place this port maps a behaviour instead of reproducing it.
+
 ## Consequences
 
 ### Positive

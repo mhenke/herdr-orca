@@ -77,8 +77,10 @@ Mods are isolated by rule: **a mod cannot import or read outside its own folder*
 
 ```
 layouts/            orca.json (the layout), orca.svg (its preview)
-mods/               sixteen self-contained mod folders, each with mod.json + main.js + assets
+mods/               eighteen self-contained mod folders, each with mod.json + main.js + assets
 extras/themes/      orca-dark.json, orca-light.json
+extras/icons/       the marks extras/programs.json names (omp.svg)
+extras/programs.json  program-table entry for `omp`, merged into the target's programs.json by hand
 scripts/            sync.sh (install), verify.py (audit)
 docs/               superpowers plans/specs (historical)
 .agents/skills/     graphify, project-scoped
@@ -152,25 +154,25 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 | Path | Role |
 |---|---|
 | `layouts/orca.json` | the layout root: geometry, theme name, block→mod mapping |
-| `scripts/sync.sh` | installs layouts, themes, mods and merges the `layout:herdr-orca` key section |
+| `scripts/sync.sh` | installs layouts, themes, `extras/icons/` and mods, then merges the `layout:orca` key section (the program table is left alone) |
 | `scripts/verify.py` | the audit gate (`--smoke` for a restart check) |
 | `mods/orca-spaces/main.js` | the largest behaviour surface: grouping, cards, probes, reviews |
-| `keys.json` | `ctrl-shift-b` toggles the sidebar, `ctrl-shift-e` the panel |
+| `keys.json` | `ctrl-shift-b` toggles the sidebar, `ctrl-shift-e` the panel, `ctrl-alt-a` the floating agent panel, `ctrl-shift-s` the split menu; `ctrl-shift-m` names `orca-tab-move`, a mod the package does not ship |
 | `AGENTS.md` | the rules; read before any edit |
 
 ## Changed Files
 
 `.claude/pipeline/project-doc.md` is a DELTA patch over the previous delta. Re-scanned files:
-- `mods/new-menu/main.js` & `mods/new-menu/models.js` (new): Interactive agent launch with dynamic agent discovery via `knownAgents()`, model list drilldown with universal aliases (`MODELS`), filter search input, and account-scoped model probes.
-- `mods/orca-tabs/main.js`: Tab drag reordering with Orca's 2px blue insertion indicator line (`overSide` left/right) and insertion index offset math, middle-click tab closure, active process close guard dialog (`CloseTerminalDialog.tsx`), settled tab close confirmation (`PinnedTabCloseDialog.tsx`), and bulk tab close dialogs.
-- `mods/orca-pane/main.js`: Added 6-dot grip affordance (`.pane-title-drag-handle`) centered on hover when multiple panes exist to open move/split layout menu, and added split-down header button.
-- `mods/orca-menu/main.js`: Added 4-quadrant pane swap actions (`Swap with Left/Right/Above/Below`), split left/up actions, and bulk tab close actions (`close-others`, `close-right`, `close-left`).
-- `mods/orca-spaces/main.js` & `status.js`: Bundled agent icons for OpenCode (`omp.svg`), Droid, Kilo, Aider (`.svg`), and Gemini, Cursor, Grok, Qoder, Hermes, DSH (`.png`). Removed unneeded remote avatar fetches in favor of bundled Folder marks. Updated `statusMark` so idle tabs share the emerald quiet-terminal dot with done per `StatusIndicator.tsx:105-110`.
-- `GLOSSARY.md`: Added canonical domain terms for `Startable agent`, `Create menu`, `Model list`, `Settled tab`, `Close guard`, `Bulk tab close`, and sharpened `Drop quadrant` and `Drop indicator`.
-- `NOTICE`: Added `models.js` and Orca agent icon assets under MIT.
-- `docs/adr/0006-tab-surface-and-actions-port.md` & `docs/adr/0007-terminal-panel-capabilities-and-actions.md`: Updated to document drag reordering, drop boundaries, close guards, and pane grip affordances.
-- `README.md` & `RECIPE.md`: Documented create menu agent model list and key interactions.
+- `extras/programs.json` & `extras/icons/omp.svg` (new): the program-table entry that registers `omp` (name, icon, `run`, tile and colour). A program table is settings, so `sync.sh` copies the icon into `$app/icons/` but never writes the table; the entry is merged by hand. Without it `omp` is absent from `knownAgents()` and so from the create menu; the bundled marks in the tab strip and sidebar are mod-local files and still draw.
+- `scripts/sync.sh`: creates `$app/icons` and copies `extras/icons/*.svg`; comment states why the program table is not written.
+- `mods/orca-tabs/main.js`: `omp`'s tab mark moved to `agent-icons/omp.svg`; identity selection now goes through an `agentMarks` table keyed by `pane.app` (`mono` = the program table's glyph, image marks keep their own fills, a currentColor glyph takes the text tint); idle now draws `AgentStateDot.tsx:186-195`'s plain 8px dot; the tab drop-to-split comment cites `window.rs:3988` and `pane_drag.rs:147-181` and points at ADR 0007.
+- `mods/orca-tabs/omp.svg`: deleted, replaced by `mods/orca-tabs/agent-icons/omp.svg`.
+- `mods/orca-spaces/main.js`, `project.js`, `status.js`, `mods/orca-pane/main.js`, `mods/new-menu/main.js`: comment reduction only, no behaviour change.
+- `RECIPE.md`: mod isolation corrected (the build calls resolve against `appHome`, not the mod folder, `gpui-kit.d.ts:20273-20289`) while the package still copies each mark per mod; new program-table section; tab drop-to-split recorded as a deliberate omission.
+- `docs/adr/0011-jump-palette-vs-picker-and-command-palette.md` (new): why a dedicated `orca-palette` beats Herdr's stock `picker` and `app.palette`.
+- `docs/superpowers/plans/2026-11-07-orca-palette.md`, `docs/superpowers/specs/2026-11-07-orca-palette-design.md` (new): the jump-palette plan. `mods/orca-palette` is not created yet.
+- `README.md`: mod count corrected to 18; activity rail lists the Agents panel; tab drag-reorder, middle-click close and close guard documented; 6-dot grip and `ctrl-shift-s` split menu documented; floating agent panel documented; create menu now says it follows the program table; `extras/icons` and the manual `programs.json` merge added to the install steps; shortcuts table gains `ctrl-alt-a` and `ctrl-shift-s`.
 
 ## Last Scanned
 
-2026-11-08T03:08:00Z
+2026-11-08T04:10:00Z
