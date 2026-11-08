@@ -3,7 +3,6 @@
     "ctrl-shift-b": "layout.toggle:sidebar",
     "ctrl-shift-e": "layout.toggle:panel",
     "ctrl-alt-a": "orca-float.toggle",
-    "ctrl-shift-m": "mod.open:orca-tab-move",
     "ctrl-shift-s": "mod.open:orca-split-menu"
   }
 }

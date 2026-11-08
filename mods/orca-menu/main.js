@@ -218,7 +218,6 @@ function items(p, git) {
 // Orca's lucide glyph for each row, taken from the component named in the citation.
 function menuIcon(it, zoomed) {
   const [, command, args] = it;
-  if (command === "mod.open" && args?.name === "orca-tab-move") return "mods/orca-menu/arrow-right.svg";
   if (command === "mod.open" && args?.name === "orca-split-menu") return "mods/orca-menu/panel-right-close.svg";
   if (command === "pane.split") return `mods/orca-menu/${args?.direction === "down" ? "panel-bottom-close" : "panel-right-close"}.svg`;
   if (command === "orca-menu.split-left") return "mods/orca-menu/arrow-left.svg";
