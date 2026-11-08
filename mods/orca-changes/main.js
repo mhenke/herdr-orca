@@ -1,6 +1,12 @@
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, TextareaState, Textarea } from "gpui-base";
-import { spaces, panes, focused, exec, watchFolder, theme } from "herdr";
+import { v_flex, h_flex, TextareaState, Textarea, Input, InputState } from "gpui-base";
+import { spaces, panes, focused, exec, watchFolder, theme, window } from "herdr";
+
+function fade(color, factor) {
+  if (!color || typeof color !== "string") return "#00000000";
+  const alpha = color.length === 9 ? parseInt(color.slice(7), 16) : 255;
+  return color.slice(0, 7) + Math.round(alpha * factor).toString(16).padStart(2, "0");
+}
 
 // Orca scopes the panel to the project, not to whatever folder the focused
 // terminal happens to sit in: a terminal in /tmp must not empty the tree.
@@ -36,6 +42,7 @@ export default class Changes extends View {
   init(_props, cx) {
     this.files = []; this.message = ""; this.handle = cx.focus_handle();
     this.hovered = null; this.collapsed = {}; this.busy = false; this.busyReason = null; this.typing = false;
+    this.menuOpen = false;
     this.input = TextareaState.new({ placeholder: "Message", rows: 2 });
     this.input.set_auto_grow(2, 12);
     this.input.on("change", (_e, cx) => {
@@ -135,6 +142,131 @@ export default class Changes extends View {
     // Stage All stages only; Commit never stages (src/main/git/source-control/staging.ts:131-153, commit-changes.ts).
     if (action.kind === "stage") this.apply([["add", "--all", "--", "."]], cx);
     else this.apply([["commit", "-m", this.message.trim()]], cx, () => { this.message = ""; this.input.set_value(""); });
+  }
+
+  runCommitAndPush(cx) {
+    if (!this.message.trim() || !this.root || this.busy || this.loading) return;
+    this.apply([["commit", "-m", this.message.trim()], ["push"]], cx, () => { this.message = ""; this.input.set_value(""); });
+  }
+
+  runPush(cx) {
+    if (!this.root || this.busy || this.loading) return;
+    this.apply([["push"]], cx);
+  }
+
+  runSync(cx) {
+    if (!this.root || this.busy || this.loading) return;
+    this.apply([["pull", "--rebase"], ["push"]], cx);
+  }
+
+  // Opens Orca's PR creation composer (use-hosted-review-creation.ts:80-150, review-animated-visual-ship-styles.tsx:7)
+  openCreatePrDialog(cx, options = {}) {
+    const root = this.root, on = this.on;
+    if (!root || this.busy) return;
+    cx.spawn(async (cx) => {
+      try {
+        const br = await exec("git", [...READ, "branch", "--show-current"], { cwd: root, on });
+        const branch = br.code === 0 ? br.stdout.trim() : "";
+        if (!branch) {
+          this.note = "Cannot create PR from detached HEAD";
+          cx.notify();
+          return;
+        }
+
+        const sym = await exec("git", [...READ, "symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: root, on }).catch(() => null);
+        let base = "main";
+        if (sym && sym.code === 0) {
+          const parts = sym.stdout.trim().split("/");
+          base = parts[parts.length - 1] || "main";
+        }
+
+        const last = await exec("git", [...READ, "log", "-1", "--pretty=%s"], { cwd: root, on }).catch(() => null);
+        const defaultTitle = this.message.trim() || (last && last.code === 0 ? last.stdout.trim() : branch);
+
+        const titleInput = InputState.new({ placeholder: "Title" });
+        titleInput.set_value(defaultTitle);
+        const bodyInput = InputState.new({ placeholder: "Description (optional)" });
+        let isDraft = false;
+
+        const t = theme();
+        // review-animated-visual-ship-styles.tsx:7 ravs-pr-dialog chrome
+        window.open_dialog(() => v_flex().w(380).p(16).gap(12).rounded(8).bg(t.popover).border_1().border_color(t.border)
+          .child(h_flex().items_center().justify_between()
+            .child(h_flex().items_center().gap(6)
+              .child(svg("mods/orca-changes/git-pull-request.svg").size(14).text_color(t.foreground))
+              .child(div().text_size(13).font_weight(500).text_color(t.foreground).child("Create Pull Request")))
+            .child(div().text_size(11).font_mono().px(6).py(1).rounded(4).bg(fade(t.input, 0.4)).text_color(t.muted)
+              .child(`${branch} → ${base}`)))
+          .child(v_flex().gap(8)
+            .child(v_flex().gap(4)
+              .child(div().text_size(10).font_semibold().text_color(t.muted).child("TITLE"))
+              .child(h_flex().h(30).px(8).rounded(6).border_1().border_color(t.border).bg(fade(t.input, 0.4)).items_center()
+                .child(Input.new(titleInput).flex_1().min_w(0).text_size(12).text_color(t.foreground).bg("#00000000"))))
+            .child(v_flex().gap(4)
+              .child(div().text_size(10).font_semibold().text_color(t.muted).child("BODY"))
+              .child(h_flex().h(56).px(8).py(6).rounded(6).border_1().border_color(t.border).bg(fade(t.input, 0.4)).items_start()
+                .child(Input.new(bodyInput).flex_1().min_w(0).text_size(12).text_color(t.foreground).bg("#00000000"))))
+            .child(h_flex().items_center().gap(6).cursor_pointer()
+              .on_click((_e, cx) => { isDraft = !isDraft; cx.notify(); })
+              .child(div().size(14).rounded(3).border_1().border_color(isDraft ? t.accent : t.border)
+                .bg(isDraft ? t.accent : "#00000000").flex().items_center().justify_center()
+                .when(isDraft, (e) => e.child(svg("mods/orca-changes/plus.svg").size(10).text_color(t.canvas))))
+              .child(div().text_size(11).text_color(t.muted).child("Create as draft PR"))))
+          .child(h_flex().justify_end().gap(8)
+            .child(div().h(24).px(12).flex().items_center().rounded(6).border_1().border_color(t.border)
+              .text_size(11).text_color(t.muted).cursor_pointer().hover((s) => s.bg(t.hover))
+              .on_click(() => window.close_dialog()).child("Cancel"))
+            .child(div().h(24).px(12).flex().items_center().rounded(6).bg(t.done)
+              .text_color(t.canvas).text_size(11).cursor_pointer()
+              .on_click((_e, cx) => {
+                const titleVal = titleInput.value().trim();
+                const bodyVal = bodyInput.value().trim();
+                window.close_dialog();
+                this.runCreatePr(branch, base, titleVal || defaultTitle, bodyVal, isDraft, options.pushFirst, cx);
+              }).child(options.pushFirst ? "Push & Create PR" : "Create PR"))));
+      } catch (e) {
+        this.note = "Failed to prepare PR: " + String(e);
+        cx.notify();
+      }
+    });
+  }
+
+  // Executes hosted review creation via `gh pr create` (use-hosted-review-creation.ts:80-150)
+  runCreatePr(branch, base, title, body, draft, pushFirst, cx) {
+    const root = this.root, on = this.on;
+    if (!root) return;
+    this.busy = true;
+    this.busyReason = pushFirst ? "Pushing branch and creating pull request…" : "Creating pull request…";
+    this.note = null;
+    cx.notify();
+
+    cx.spawn(async (cx) => {
+      try {
+        if (pushFirst) {
+          const pushRes = await exec("git", [...READ, "push", "-u", "origin", branch], { cwd: root, on });
+          if (pushRes.code !== 0) throw new Error("git push failed: " + (pushRes.stderr || pushRes.stdout).trim());
+        }
+
+        const args = ["pr", "create", "--title", title, "--body", body, "--base", base];
+        if (draft) args.push("--draft");
+        const res = await exec("gh", args, { cwd: root, on });
+        if (res.code !== 0) throw new Error("gh pr create failed: " + (res.stderr || res.stdout).trim());
+
+        const out = res.stdout.trim();
+        this.note = `Created PR: ${out}`;
+
+        // The sidebar badge is orca-spaces' cache, keyed `JSON.stringify([machine, commonDir])`
+        // (worktree-plan.js:52). This mod cannot derive that key, so it does not write it; the
+        // badge appears on the sidebar's next PR probe.
+      } catch (e) {
+        this.note = String(e.message || e).trim();
+      } finally {
+        this.busy = false;
+        this.busyReason = null;
+        this.refresh(cx);
+        cx.notify();
+      }
+    });
   }
 
   apply(commands, cx, done) {
@@ -256,15 +388,49 @@ export default class Changes extends View {
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .child(Textarea.new(this.input).w_full().text_size(12).text_color(t.foreground)))
       .child(h_flex().mt(4).gap(4).items_center()
-        .child(div().id("commit-primary").h(24).px(12).flex().flex_none().items_center().rounded(6)
-          .border_1().border_color(t.border).text_size(11)
-          .text_color(action.disabled ? t.dim : t.foreground)
-          .when(!action.disabled, (e) => e.cursor_pointer().hover((s) => s.bg(t.hover)))
-          .on_click((_e, cx) => { if (!action.disabled) this.runPrimary(cx); })
-          .child(action.label))
-        // commit-action-menu.tsx:57-80's chevron holds Push/Sync/Publish/Create PR; those need the
-        // upstream and hosted-review state this panel does not read, so the chevron would be dead UI.
-        .when(Boolean(action.reason), (e) => e.child(div().text_size(11).text_color(t.dim).child(action.reason))));
+        // commit-action-menu.tsx:34-85: split button pairing primary action with chevron dropdown
+        .child(h_flex().rounded(6).border_1().border_color(t.border).items_stretch()
+          .child(div().id("commit-primary").h(24).px(12).flex().flex_none().items_center().rounded_l(5)
+            .text_size(11)
+            .text_color(action.disabled ? t.dim : t.foreground)
+            .when(!action.disabled, (e) => e.cursor_pointer().hover((s) => s.bg(t.hover)))
+            .on_click((_e, cx) => { if (!action.disabled) this.runPrimary(cx); })
+            .child(action.label))
+          .child(div().id("commit-chevron").h(24).w(22).flex().flex_none().items_center().justify_center().rounded_r(5)
+            .border_l(1).border_color(t.border)
+            .cursor_pointer().hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => {
+              this.menuOpen = !this.menuOpen;
+              cx.notify();
+            })
+            .child(svg("mods/orca-changes/chevron-down.svg").size(12).text_color(t.muted))))
+        .when(Boolean(action.reason), (e) => e.child(div().text_size(11).text_color(t.dim).child(action.reason))))
+      .when(this.menuOpen, (e) => e.child(this.actionMenu(t, action, cx)));
+  }
+
+  actionMenu(t, action, cx) {
+    // commit-action-menu.tsx:34-85 & source-control-dropdown-items.ts:128-143
+    // Entries: Commit, Commit & Push, [separator], Push, Create PR…, Push & Create PR…, Sync
+    const item = (label, enabled, onClick, icon) => div().h(26).px(10).flex().items_center().gap(6).rounded(4)
+      .text_size(11).text_color(enabled ? t.foreground : t.dim)
+      .when(enabled, (e) => e.cursor_pointer().hover((s) => s.bg(t.hover)))
+      .on_click((_e, cx) => {
+        if (!enabled) return;
+        this.menuOpen = false;
+        onClick(cx);
+      })
+      .when(Boolean(icon), (e) => e.child(svg(icon).size(12).text_color(enabled ? t.muted : t.dim)))
+      .child(label);
+
+    const canCommit = !action.disabled && action.kind === "commit";
+    return v_flex().w_full().mt(4).p(4).gap(2).rounded(6).border_1().border_color(t.border).bg(t.popover)
+      .child(item("Commit", canCommit, (cx) => this.runPrimary(cx)))
+      .child(item("Commit & Push", canCommit, (cx) => this.runCommitAndPush(cx)))
+      .child(div().h(1).my(2).bg(t.border))
+      .child(item("Push", Boolean(this.root), (cx) => this.runPush(cx)))
+      .child(item("Create PR…", Boolean(this.root), (cx) => this.openCreatePrDialog(cx, { pushFirst: false }), "mods/orca-changes/git-pull-request.svg"))
+      .child(item("Push & Create PR…", Boolean(this.root), (cx) => this.openCreatePrDialog(cx, { pushFirst: true }), "mods/orca-changes/git-pull-request.svg"))
+      .child(item("Sync", Boolean(this.root), (cx) => this.runSync(cx)));
   }
 
   render(cx) {
@@ -281,7 +447,10 @@ export default class Changes extends View {
     const sections = [["conflicts", "Conflicts"], ["changes", "Changes"], ["staged", "Staged Changes"]];
     return v_flex().id("changes").size_full().min_h(0).overflow_hidden().text_color(t.foreground).text_size(13).track_focus(this.handle)
       .on_key_down((e, cx) => {
-        if (e.key === "escape" && this.typing) { this.typing = false; this.handle.focus(); cx.stop_propagation(); cx.notify(); }
+        if (e.key === "escape") {
+          if (this.menuOpen) { this.menuOpen = false; cx.notify(); return; }
+          if (this.typing) { this.typing = false; this.handle.focus(); cx.stop_propagation(); cx.notify(); return; }
+        }
         // Cmd/Ctrl+Enter commits (src/renderer/src/components/right-sidebar/source-control/commit/commit-shortcut.ts:8-17 -> screen-submit-shortcut.ts:20-27).
         if (e.key === "enter" && !e.modifiers.alt && !e.modifiers.shift && (e.modifiers.platform || e.modifiers.control)) {
           cx.stop_propagation(); this.runPrimary(cx);
