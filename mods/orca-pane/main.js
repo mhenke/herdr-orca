@@ -1,14 +1,17 @@
+// Derived from Herdr App's defaults/mods/pane/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
 // A pane's header, for layouts that frame their panes:
 //   { "tab": "active", "pane": { "header": { "content": { "mod": "pane" } } } }
-// Shows the pane's title, a drag grip that swaps with a neighbor, and on hover buttons
-// that split and close this pane. Props from the app: { pane, terminal }. Click: focus the pane.
+// Shows the pane's title, and on hover buttons that split and close this pane.
+// Pane drag/move is owned by herdr-app's native pane_grip (`pane_drag.rs`).
+// Props from the app: { pane, terminal }. Click: focus the pane.
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { panes, props, run, openOverlay, spaces } from "herdr";
 
 export default class Pane extends View {
-  init() { this.hovered = false; this.press = null; }
+  init() { this.hovered = false; }
 
   me() {
     return panes().find((p) => p.pane === props()?.pane);
@@ -31,35 +34,6 @@ export default class Pane extends View {
         else run(action, args);
       })
       .child(svg(`mods/orca-pane/${icon}.svg`).size(12));
-  }
-
-  // TerminalPaneHeaderOverlay.tsx:186-196 — a 32px grip centered in the header begins Orca's
-  // pane drag; the drop lands on another pane's outer quarter. The mod DSL has no drag/drop
-  // primitive (only on_mouse_down/up/move) and `pane.swap` takes only a direction
-  // (`herdr-app commands`), so the port reads the released drag's dominant axis as that
-  // direction. Gap: mods see no other pane's bounds, so the direction comes from this
-  // header's own drag (released over it), not from the pane under the pointer.
-  grip(pane) {
-    return div()
-      .id(`ph-grip-${pane}`)
-      .w(32)
-      .h_full()
-      .flex()
-      .items_center()
-      .justify_center()
-      // terminal.css:275-307 — 32px wide, `::after` is "..." at 10px, opacity 0 until the
-      // grip itself is hovered. Two tokens decide the colours: `--orca-pane-title-fg` is
-      // `rgb(255 255 255 / .52)` (main.css:282), mixed 36% → 18.8% = 0x30; `::after` uses
-      // `--orca-pane-title-button-hover-fg`, which is plain white (main.css:286).
-      .text_size(10)
-      .text_color("#ffffff00")
-      .hover((s) => s.text_color("#ffffff").bg("#ffffff30"))
-      .on_mouse_down("left", (e, cx) => {
-        this.press = { x: e.position.x, y: e.position.y };
-        run("pane.focus", { pane });
-        cx.notify();
-      })
-      .child("...");
   }
 
   render(cx) {
@@ -92,20 +66,6 @@ export default class Pane extends View {
       .font_family("JetBrains Mono")
       .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
       .on_click(() => run("pane.focus", { pane }))
-      // TerminalPaneHeaderOverlay.tsx:186-196 — the press began on the grip; the release's
-      // travel becomes the swap direction. Orca drops onto the target pane's outer quarter,
-      // but mods see no other pane's bounds and `pane.swap` takes only a direction, so 4px
-      // (Herdr's own drag slop, pane_drag.rs) stands in for leaving the source.
-      .on_mouse_up("left", (e) => {
-        const from = this.press;
-        this.press = null;
-        if (!from) return;
-        const dx = e.position.x - from.x, dy = e.position.y - from.y;
-        if (Math.max(Math.abs(dx), Math.abs(dy)) < 4) return;
-        const direction = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
-        run("pane.swap", { direction });
-      })
-      .on_mouse_down_out(() => { this.press = null; })
       // TerminalPaneHeaderOverlay.tsx:149 `onContextMenuCapture={(e) => onPaneTitleContextMenu(e, pane.id)}`
       // — the pane title bar opens the pane menu on right-click. `orca-menu` already implements
       // the `pane` case (split right/down, zoom, right-click routing, close), so this is the
@@ -150,10 +110,6 @@ export default class Pane extends View {
               });
             }).accessibility_label("Hand off to another agent").tooltip("Hand off to another agent")))
           .child(this.button(`ph-r-${pane}`, "square-split-vertical", "pane.split", { direction: "right", pane }).accessibility_label("Split terminal").tooltip("Split terminal"))
-          .child(this.button(`ph-x-${pane}`, "x", "pane.close", { pane }).accessibility_label("Close pane").tooltip("Close pane"))))
-      // TerminalPaneHeaderOverlay.tsx:186-196 — the grip is absolutely centered over the bar
-      // (`position: absolute; left: 50%; width: 32px`; terminal.css:275-282), not a flex item.
-      .when(Boolean(p.movable), el => el
-        .child(div().absolute().inset_0().flex().justify_center().child(this.grip(pane))))
+          .child(this.button(`ph-x-${pane}`, "x", "pane.close", { pane }).accessibility_label("Close pane").tooltip("Close pane"))));
   }
 }
