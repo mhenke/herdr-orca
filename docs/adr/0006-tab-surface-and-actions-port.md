@@ -43,22 +43,26 @@ Port the behavior and visual output to Herdr's primitives following Iron Rule 1 
 transcribe, never invent), bridging host model gaps through honest equivalents.
 
 ### 1. Move Tab
-- **Drag Reorder**: Implemented in `mods/orca-tabs/main.js:173-178` by tracking pointer press indices
-  (`this.pressed = i`) and issuing `tab.move` (`{ id: source.id, index: targetIndex }`) on mouse-up
-  over another tab.
-- **Menu Reorder**: Implemented in `mods/orca-menu/main.js:124-125` as explicit `"Move Left"` and
+- **Drag Reorder**: Implemented in `mods/orca-tabs/main.js:180-245` by measuring release displacement
+  `dx` against Orca's activation threshold `TAB_DRAG_ACTIVATION_DISTANCE_PX = 12` (`useTabDragSplit.ts:42`)
+  and issuing `tab.move` (`{ id: source.id, index: targetIndex }`).
+- **Terminal Drop (4 Quadrants)**: Dragging downward across the tab bar boundary into the terminal
+  viewport (`dy > tabHeight + 10`) triggers directional splits across 4 drop quadrants (`Right`, `Left`,
+  `Down`, `Up`), porting Orca's `useTabDragSplit.ts:74` and `resolvePaneColumnEdgeZone` (`tab-drop-zone.ts:38-80`).
+- **Menu Reorder**: Implemented in `mods/orca-menu/main.js:134-135` as explicit `"Move Left"` and
   `"Move Right"` rows when the tab is not at the boundary.
-- **Split Column Movement**: Omitted. Herdr spaces cannot have multiple tab bars. Panes split *within*
-  a tab, not across multiple tab groups.
 
 ### 2. Split Terminal
-- **Tab Context Menu**: Exposed as top-level rows `"Split Terminal Right"` and `"Split Terminal Down"`
-  in `mods/orca-menu/main.js:116-121`, backed by `pane.split` (`commands.md:101`).
+- **Tab Context Menu**: Exposed as top-level rows `"Split Terminal Right"`, `"Split Terminal Left"`,
+  `"Split Terminal Down"`, and `"Split Terminal Up"` in `mods/orca-menu/main.js:126-132`, backed by
+  `pane.split` and `pane.swap` (`commands.md:101`).
+- **Split Menu**: `mods/orca-split-menu/main.js:42-66` provides dedicated directional options and
+  hotkeys for all 4 quadrants (`1` right, `2` left, `3` down, `4` up).
 - **Pane Context Menu**: Also available by right-clicking directly inside the terminal pane
   (`orca-menu/main.js:67-68`).
-- **Close Split Pane**: Ported in `orca-menu/main.js:137, 308-312`. When a tab has multiple panes,
+- **Close Split Pane**: Ported in `orca-menu/main.js:148, 319-324`. When a tab has multiple panes,
   `"Close Split Pane"` closes all sibling panes and keeps only the focused pane.
-- **Expand / Collapse Pane**: Ported in `mods/orca-tabs/main.js:214-225`. Zoomed panes display a 16px
+- **Expand / Collapse Pane**: Ported in `mods/orca-tabs/main.js:248-260`. Zoomed panes display a 16px
   `Minimize2` button (`mods/orca-tabs/minimize-2.svg`) that invokes `pane.zoom`. A single-tab workspace
   with a zoomed pane also renders the collapse control in the titlebar (`TitlebarMainStrip.tsx:58-69`).
 
@@ -75,13 +79,14 @@ transcribe, never invent), bridging host model gaps through honest equivalents.
 - **Palette**: Ported Orca's exact 10-color palette (`SortableTabContextMenu.tsx:19-80`): None,
   Blue (`#3b82f6`), Purple (`#a855f7`), Pink (`#ec4899`), Red (`#ef4444`), Orange (`#f97316`),
   Yellow (`#eab308`), Green (`#22c55e`), Teal (`#14b8a6`), and Gray (`#9ca3af`).
-- **Storage**: Persisted out-of-band in `localStorage["tab.colors.v1"]` (`orca-menu/main.js:314-318`).
-  The writer lives in the menu; the reader in the tab strip.
-- **Context Menu Presentation**: Rendered as a list of selectable rows with active radio marks
-  (`● Tab Color: Blue` / `○ Tab Color: Red`), replacing Orca's horizontal swatch row since Herdr's
-  popup menu is a vertical keyboard-navigable list.
+- **Storage & Reactivity**: Persisted out-of-band in `localStorage["tab.colors.v1"]` and shared live
+  via `setShared("tab.colors", ...)` (`orca-menu/main.js:370-380`). The writer in `orca-menu` notifies
+  GPUI views immediately; the reader in `orca-tabs` reads `shared("tab.colors")` reactively.
+- **Context Menu Presentation**: Ported Orca's compact circular swatch palette from
+  `SortableTabContextMenu.tsx:223-250` (10 circular 16px swatches with active selection indicators and
+  tooltips) in `mods/orca-menu/main.js:450-485`.
 - **Tab Rendering**: Rendered as an 8px circular dot (`size(8).rounded(4).mr(6).bg(tabColour)`) in
-  `mods/orca-tabs/main.js:209-210`, positioned before the collapse and close buttons matching
+  `mods/orca-tabs/main.js:250-255`, positioned before the collapse and close buttons matching
   `SortableTab.tsx:293-297`.
 
 ### 5. Tab Lifecycle and Status

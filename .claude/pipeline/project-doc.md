@@ -1,5 +1,5 @@
 # Project Documentation
-> Generated: 2026-11-07T17:45:00Z | Mode: FULL
+> Generated: 2026-11-08T01:54:00Z | Mode: DELTA (updated from 2026-11-08T00:54:45Z)
 
 ## Tech Stack
 
@@ -40,24 +40,24 @@ Eighteen mods, all `"place": "none"` (composed into blocks rather than floated):
 
 | Mod | Owns | LOC |
 |---|---|---|
-| `orca-chrome` | titlebar strip and the sidebar footer | 66 |
+| `orca-chrome` | titlebar strip and the sidebar footer | 68 |
 | `orca-nav` | Search, Tasks/Automations/Orca Mobile rows, history arrows, Projects header and its options menu | 429 |
-| `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, saved folders | 1340 |
-| `orca-tabs` | the tab rail, window controls, right-sidebar toggle | 311 |
-| `orca-pane` | the terminal pane header, its drag grip, and its right-click | 159 |
-| `orca-pane-status` | the agent mark drawn in a pane header | 35 |
-| `orca-panel-head` | the right panel's activity switcher | 115 |
+| `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, saved folders | 1282 |
+| `orca-tabs` | the tab rail, window controls, right-sidebar toggle | 376 |
+| `orca-pane` | the terminal pane header, its drag grip, and its right-click | 115 |
+| `orca-pane-status` | the agent mark drawn in a pane header | 37 |
+| `orca-panel-head` | the right panel's activity switcher | 118 |
 | `orca-panel-gap` | the honest body for a panel or page Herdr has no backend for | 61 |
-| `orca-files` | the file tree (virtualized), preview, name/content search; opens a file from `props.file` | 1026 |
-| `orca-changes` | the source-control list, split commit actions, conflict resolution, and PR creation | 696 |
-| `orca-agents` | the agents panel: live scopes, search, and session history with resume | 479 |
-| `orca-status` | the bottom status bar | 68 |
-| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global`, plus the transcript capture shared with handoff | 451 |
-| `new-menu` | the create popup behind `+` | 119 |
-| `orca-landing` | the empty-workspace page | 108 |
-| `orca-float` | the floating agent-session panel | 160 |
-| `orca-handoff` | the hand off / fork agent-session dialog | 364 |
-| `orca-tab-move` | the move-tab overlay: reorder in a space, migrate to another | 424 |
+| `orca-files` | the file tree (virtualized), preview, name/content search; opens a file from `props.file` | 1024 |
+| `orca-changes` | the source-control list, split commit actions, conflict resolution, and PR creation | 715 |
+| `orca-agents` | the agents panel: live scopes, search, and session history with resume | 546 |
+| `orca-status` | the bottom status bar | 70 |
+| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global`, plus the transcript capture shared with handoff | 510 |
+| `new-menu` | the create popup behind `+` | 121 |
+| `orca-landing` | the empty-workspace page | 111 |
+| `orca-float` | the floating agent-session panel | 162 |
+| `orca-handoff` | the hand off / fork agent-session dialog | 366 |
+| `orca-split-menu` | the pane split menu with directional split controls | 360 |
 
 Three rules shape the composition:
 
@@ -104,8 +104,8 @@ preview.png         the screenshot in README
 
 - **Ship copies, not symlinks** — `sync.sh` copies `mods/*/` whole (`rm -rf` then `cp -r`), so an installed mod is exactly the folder in the repo.
 - **One owner per region** — adding a second mod to a block replaces the first, so overlap is impossible by construction.
-- **Cross-mod channels are explicit**: `shared()` for values read at render (no notification — the consumer re-reads when it next renders), `<mod>.<command>` into `nextCommand()`, and `openOverlay` to raise another mod as a popup.
-- **Pure helpers in sibling modules** — `project.js` (remotes, avatars), `status.js` (marks), `indentation.js` (geometry), `tip.js` (tooltip glue), `focus.js` (focus rings). These are importable only within `orca-spaces`.
+- **Cross-mod channels are explicit**: `shared()` for values read at render (or broadcasted via `setShared`), `<mod>.<command>` into `nextCommand()`, and `openOverlay` to raise another mod as a popup.
+- **Pure helpers in sibling modules** — `project.js` (remotes, avatars), `status.js` (marks, `STATUS_RANK`), `indentation.js` (`resolveRowGeometry`), `review-store.js` (freshness, caching), `worktree-plan.js` (projection pipeline), `tip.js` (tooltip glue), `focus.js` (focus rings). These are importable only within their respective mods.
 
 ## Data Architecture
 
@@ -115,7 +115,7 @@ No persistence layer of the package's own. Four data sources, read at different 
    `panel-body` = the right panel's tab) is read from `layout()`, never cached.
 1. **Host model, live** — `spaces()`, `panes()`, `agents()`, `machines()` are read directly during render. `space.status` and `agent.status` are already rolled up by `Model::rollup`; the package never re-derives urgency.
 2. **git, polled** — `check()` runs `git status --porcelain=v2 --branch` per place, at most once per second per repo, plus `watchFolder` on the git dir. Local repos only for anything expensive.
-3. **GitHub, polled out of band** — reviews come from a cache keyed `<git-common-dir>::<branch>` in `localStorage` (`pr.cache.v2`). The reader (`reviewOf`) is pure; the writer (`lookupPRByBranch`) runs from the refresh cycle, never from render. A fork's same-named branch cannot answer because the head owner must match origin's.
+3. **GitHub, polled out of band with TTL** — reviews come from `review-store.js` (`pr.cache.v2` in `localStorage`), implementing Orca's dual TTLs (`FOUND_REVIEW_TTL_MS = 60s`, `NO_REVIEW_REFRESH_INTERVAL_MS = 15m`). Creating a PR in `orca-changes` immediately updates and invalidates the cache, broadcasting across mods via `setShared("pr.cache.v2", cache)`. Background lookups are throttled to `MAX_INFLIGHT_PR_LOOKUPS = 2`.
 4. **localStorage, per mod copy** — `git.cache.v2` (per-place branch/repo/worktree list; v1 is retired because it lacked worktrees for linked checkouts), `pr.cache.v2`, `repos.folded`, `agents.folded`, `machines.folded`, `machines.reconnecting`, `projects.saved.v1` (folders added to the sidebar), `tab.colors.v1` (`{tabId: hex}` written by orca-menu, read by orca-tabs). Each is a JSON array or object, written after the in-memory `Set`/`Map` changes.
 
 ## Cross-Cutting Concerns
@@ -161,29 +161,18 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 ## Changed Files
 
 `.claude/pipeline/project-doc.md` is a DELTA patch over the previous delta. Re-scanned files:
-- `mods/orca-agents/main.js`: Added Orca's `VaultScopeSwitch` (`workspace`, `project`, `all`) from `AiVaultPanelControls.tsx:87-160`, live search filter from `AiVaultPanelHeader.tsx:161-202`, and count bar from `AiVaultSessionListBar.tsx:50-54`. Added `search.svg` and `x.svg`.
-- `mods/orca-changes/main.js`: Added split commit action button from `commit-action-menu.tsx:34-85`, action dropdown with compound actions from `source-control-dropdown-items.ts:128-143`, and Create PR modal dialog/workflow via `gh pr create` from `use-hosted-review-creation.ts:80-150` and `review-animated-visual-ship-styles.tsx:7`. Added `git-pull-request.svg`.
-- `mods/orca-menu/main.js`: Fixed display name resolution line citation to `worktree-default-display-name.ts:13-25`.
-- `mods/orca-spaces/main.js`: Focus fallback on first group header's `space-new` and remote machine string passing.
-- `mods/orca-files/main.js`: Dropped the invented `rg --max-count 20` (Orca sets no per-file cap, so badges and totals no longer undercount); search summary `text-2xs` = 11px; match-row gap 4px (`SearchResultItems.tsx:178`). Match-click reveal is left unimplemented and documented: `EditorState`'s JS surface is `value`/`set_value`/`on`/`release` only, so no line or scroll target reaches JS.
-- `mods/orca-spaces/main.js` + `mods/orca-menu/main.js`: The `space` menu is now worktree-keyed (`WorktreeContextMenuView.tsx:165-298`): `Update`/`Close` only for an open space, `Open in`/`Copy Path`/`Copy Worktree Name` and the worktree actions always, `Remove worktree` only when linked. Opener passes `{id, path, top, branch, machine, linked, folder}`. Agent rows activate their pane (`worktree-card-compact-agent-row.tsx:311`) and stop the card's press.
-- `mods/orca-changes/main.js`: Commit & Push / Push / Sync actions and the Create-PR dialog (`gh pr create`); the PR cache is not written from this mod because the sidebar keys it `JSON.stringify([machine, commonDir])`.
-- `/.claude/pipeline/project-doc.md`: LOC table refreshed to current `main.js` sizes (orca-spaces 1175, orca-files 1021, orca-changes 482, orca-menu 405).
-- Re-scanned, no substantive change: `README.md` (prose rewrite, 78+/113-), `RECIPE.md` (6 lines), `mods/orca-float/main.js` (4 lines — the session row's focus click was already present).
-- `mods/orca-agents/main.js`: The Agents panel gained Orca's session history: an OMP transcript adapter (bounded head/tail read per file, since `readTextFile` caps at 1 MiB), parsed rows with title/preview/metadata, and resume via `terminal.open { argv: ["omp", "--resume=<path>"], folder: <session cwd> }`. Only the OMP store is read; another CLI is another adapter.
-- `mods/orca-nav/main.js` + `mods/orca-spaces/main.js`: Orca's workspace options menu (`SidebarWorkspaceOptionsMenu.tsx`, `sidebar-header-actions.tsx:92`) as the mod's own popup: group by (none/status/repo), sort by (name/smart/recent/repo/manual), project order, and the hide filters, persisted in `workspace.options.v1`; `orca-spaces`' projection reads that key, so the choices change the rows.
-- `mods/orca-changes/main.js`: Conflict resolution buttons from the porcelain XY pair, Discard all behind a confirmation, the too-many-changes banner (Stage All / Retry), and Fetch / Pull / Rebase / Force Push / Publish in the action menu; a changed-file row now opens the file through `tab.new { mod: "orca-files", props: { file } }`. Diff view stays unported — one editor buffer, no diff model.
-- `mods/orca-pane/main.js`: A 32px drag grip centred in the pane header (`terminal.css:275-307`, title fg at 36%) swaps with a neighbour by the released drag's dominant axis, because `pane.swap` takes only a direction; pane rename is absent from Herdr and named in the comment.
-- `mods/orca-spaces/main.js`: A card's status lane is now Orca's button: click toggles read/unread (mod-owned `spaces.unread.v1`, since Herdr has no unread state), the mark swaps to a bell on hover, and the press/release are stopped so the card does not also select.
-- `mods/orca-files/main.js`: Accepts `props.file`, so `tab.new`/`pane.split` can open the viewer on a file.
-- `mods/orca-handoff/main.js` (new): Orca's `AgentSessionContinuationDialog.tsx` ("Hand Off to Another Agent") and `TerminalAgentSessionForkDialog.tsx` ("Fork Agent Session") as one dialog whose `action` is `fork` or `handoff`; the fork uses `buildAgentSessionForkPrompt`, the handoff `buildAgentSessionContinuationPrompt`, both seeded by the shared capture.
-- `mods/orca-menu/transcript.js` (new): the shared session capture — ANSI-stripped, bounded scrollback (`buildBoundedSessionTranscript`) and the two prompt builders, ported from `agent-session-fork-context.ts` and `agent-session-continuation.ts`.
-- `mods/orca-tab-move/main.js` (new): the move-tab overlay — `tab.move { id, index }` for in-space reordering (`tab-order.ts:137`) and space migration by parking terminals, `space.select`, then `terminal.keep { place: "tab" }` (`workspace-layout-workspace-move.ts:61`).
-- `GLOSSARY.md`: distinguished the three continuations — **Resume** (same session, its own CLI), **Fork** (new session, same agent), **Handoff** (new session, different agent) — plus **Session capture** and **Tab**.
-- `GLOSSARY.md`: Added canonical definitions for `Vault scope`, `Commit action menu`, and `Hosted review creation`.
-- `docs/adr/0005-live-agent-scoping-vs-transcript-indexing.md`: Recorded the architectural decision to bind the Agents panel to in-memory live agent models rather than crawling on-disk transcripts.
-- `docs/adr/0008-transcript-history-off-the-render-path.md`: Supersedes 0005's history ban: the live rows stay, and a bounded (12 sessions, 64 KiB head + 16 KiB tail) OMP-adapter scan runs off the render path on init plus a 60-second timer, resuming with the session's recorded cwd.
+- `mods/orca-files/main.js` & `mods/orca-changes/main.js`: Updated `location()` to strictly return `{ cwd: space?.folder ?? null, on: space?.machine ?? null, space: space?.id }`, enforcing the `GLOSSARY.md` domain invariant that space folder is the immutable anchor ("The space is the scope; the terminal is only where keystrokes go"). File explorer tree re-rooting on terminal `cd` is eliminated. In `openEntry`, paths are normalized to workspace-relative without `../` distortions.
+- `mods/orca-spaces/worktree-plan.js` & `mods/orca-menu/main.js`: Updated `place(s)` to return `s?.folder ?? null`, preventing terminal `cd` from ejecting space cards from their repo groups or hijacking them into other repositories.
+- `mods/orca-agents/main.js`: Added `resolveProjectScope()` to match spaces sharing the repository git common directory, fixing linked worktree exclusion under `Project` vault scope.
+- `mods/orca-spaces/indentation.js`: Deepened geometry calculation by adding `resolveRowGeometry` (`getFolderWorkspaceRowGeometry` from `indentation.ts:68-121`), eliminating caller-side arithmetic in `main.js`. Deleted unused `getNewCardStyleParentContentMarginLeft`.
+- `mods/orca-spaces/worktree-plan.js`: Deepened projection to incorporate `options`, `sortRows`, `applyWorkspaceOptions`, and `projectKeys`. Fixed detached HEAD worktrees (`branch: wt.branch || ""`) to prevent inheriting the main branch review badge.
+- `mods/orca-spaces/main.js`: Unified status priority to `STATUS_RANK = { blocked: 4, done: 3, working: 2, idle: 1 }` matching `herdr-app/src/model.rs:92-97`. Fixed ghost `pos` drag indicator bug by passing `pos: i` in `draw` and `row` to `card()`. Removed pass-through `foldKey` wrapper.
+- `mods/orca-spaces/review-store.js` & `mods/orca-changes/review-store.js` (new): Implemented Orca review cache TTLs (`FOUND_REVIEW_TTL_MS = 60s`, `NO_REVIEW_REFRESH_INTERVAL_MS = 15m`). Added `isReviewFresh`, eliminating the permanent negative cache trap. Added `recordReview` and `invalidateReview` in `orca-changes` on `gh pr create` with `setShared("pr.cache.v2", cache)` broadcast. Added concurrency limit (`MAX_INFLIGHT_PR_LOOKUPS = 2`) in `settleRows`.
+- `mods/orca-spaces/project.js`: Ported `parseRemote` from Orca's `remote-repo.ts:138-192`, correctly handling port numbers in git remote URLs.
+- `GLOSSARY.md`: Sharpened `Review` definition with TTL rules and added canonical `Review store` term.
+- `docs/adr/0009-invariant-space-folder-and-review-store-ttl.md` (new): Recorded ADR 0009.
+- `docs/adr/0010-per-file-provenance-and-mixed-licensing.md` (new): Recorded ADR 0010.
 
 ## Last Scanned
 
-2026-11-08T00:54:45Z
+2026-11-08T01:54:00Z

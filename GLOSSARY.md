@@ -5,30 +5,24 @@ exactly one thing here.
 
 - **Repo** — a git repository on disk. Identified by its git common dir, so a main checkout and
   all of its linked worktrees share one repo.
-- **Space** — a Herdr workspace: one folder with tabs. A space is not a repo; several spaces can
+- **Space** — a Herdr space (`space.new`): one folder with tabs. A space is not a repo; several spaces can
   belong to one repo, a space can belong to none, and two spaces on one checkout share one card.
 - **Main checkout** — a repo's own working copy, the one holding `.git`. Orca marks it
   `isMain`.
 - **Linked worktree** — a `git worktree` of a repo, living in its own folder with a `.git` *file*
   pointing back. Secondary to its repo's main checkout by definition.
-- **Project group** — the sidebar unit Orca heads with one `SectionHeader`: a repo on one machine
+- **Project group** — the sidebar unit Orca heads with one header: a repo on one machine
   plus every worktree of it. Exactly one header per repo, never one per space.
 - **Project key** — the string a project group folds on: the repo identity
-  `JSON.stringify([machine, common-dir])`, or `space:<id>` for a folder with no repo. The header
-  keys on `foldKey` (`worktree-plan.js`) and collapse-all maps the rendered rows through it via
-  `projectKeys`, so they cannot disagree.
+  repo identity (machine and common dir), or `space:<id>` for a folder with no repo. The header
+  and collapse-all use the same key, so they cannot disagree.
 - **Top branch** — the branch the project group treats as primary: the main checkout's own
   branch. Only the main checkout can carry the `primary` badge; a linked worktree and a plain
   folder workspace carry none.
-- **Worktree row** — one card in a project group, identified by its machine and path, not by an
-  open space (`ordered()` builds the rows, `card()` draws them). Two spaces on one checkout are
-  one row; a worktree with no space is still a row, and clicking it opens a space there.
-- **Card** — the clickable row for one worktree row inside a project group; its agents span every
-  space open on that checkout.
-- **Worktree menu** — the context menu a card opens, belonging to its worktree rather than to a
-  space: `Update` and `Close` exist only while a space is open on the checkout, while `Open in`,
-  the copy actions and the worktree actions are offered on a closed checkout too. Herdr's tab is
-  still named `space`; the concept is the worktree (`WorktreeContextMenuView.tsx:165-298`).
+- **Card** — the clickable row for one worktree inside a project group, identified by its machine
+  and path, not by a space. Two spaces on one checkout are one card; a worktree with no space is
+  still a card, and clicking it opens a space there. Its agents span every space open on that checkout.
+- **Worktree menu** — the context menu a card opens. It belongs to the worktree, not to a space: `Update` and `Close` need an open space on the checkout; the rest works on a closed checkout too.
   _Avoid_: space menu, card menu, workspace context menu.
 - **Pane menu** — the context menu opened from a pane's header or surface. Evaluates the pane
   and terminal identity, providing clipboard, screen maintenance, split, and agent continuation actions.
@@ -38,8 +32,8 @@ exactly one thing here.
   space-born; everything else on a card is worktree-born.
   _Avoid_: space-only, tab action.
 - **Agent** — a terminal Herdr recognises as running a known program. Its status word is one of
-  `working | blocked | done | idle` (`herdr-app/src/model.rs:528-536`). That is the whole
-  vocabulary: Herdr folds `error` into `blocked` before a mod sees it (`:532`), and Orca's other
+  `working | blocked | done | idle`
+  vocabulary: Herdr folds `error` into `blocked` before a mod sees it, and Orca's other
   states (`monitoring`, `permission`, `unconfirmed`, `interrupted`) do not exist here.
 - **Tab** — one space's set of panes, drawn in the tab rail. A tab belongs to exactly one space,
   and a pane to exactly one tab; moving a tab to another space is not `space.move`.
@@ -51,13 +45,31 @@ exactly one thing here.
   Sits beside terminal panes inside a tab's layout tree.
   _Avoid_: widget pane, plugin window, tool split.
 - **Terminal split** — the division of a tab's viewport into two adjacent panes, either vertically
-  (`right`) or horizontally (`down`).
+  (`right`, `left`) or horizontally (`down`, `up`).
   _Avoid_: tab split, window split, column split.
+- **Split direction** — the orientation of a new pane relative to an existing one: `Right`, `Left`,
+  `Down`, or `Up`.
+  _Avoid_: split orientation, layout direction, axis.
+- **Drop quadrant** — one of four peripheral zones on a terminal pane (`left`, `right`, `bottom`,
+  `top`) where releasing a dragged tab or pane grip splits the viewport in that direction.
+  _Avoid_: drop zone, pane quadrant, split area.
+- **Drop indicator** — the accent-colored preview overlay highlighting the target quadrant where
+  a dragged pane or tab will land.
+  _Avoid_: drop outline, blue box, split preview.
+- **Pane grip** — the top-center affordance on a pane header that initiates moving or splitting
+  the pane by dragging.
+  _Avoid_: header handle, drag bar, move grip.
+- **Tab reordering** — changing the position of a tab within its current space's tab strip by
+  dragging horizontally or using move menu actions.
+  _Avoid_: tab shift.
 - **Tab migration** — transferring an active tab and its running terminals from one space into another.
   Distinct from tab reordering, which only changes position within the current space.
   _Avoid_: tab move, space move, workspace transfer.
 - **Tab color** — the accent tint assigned to a tab, drawn as an indicator dot before the label.
   _Avoid_: tab theme, tab badge, tab tag.
+- **Tab color swatch** — the compact circular color button in the tab context menu used to select
+  an accent tint from Orca's 10-color palette.
+  _Avoid_: color picker, color button, tint row.
 - **Tab group** — Orca's multi-column container allowing multiple parallel tab strips in one workspace.
   Not a Herdr construct: Herdr maintains strictly one tab strip per space.
   _Avoid_: split tab bar, tab column, workspace column.
@@ -80,35 +92,14 @@ exactly one thing here.
 - **Handoff** — a new session of a *different* agent, seeded with a continuation prompt. Fork and
   handoff share their mechanism; they differ only in whether the agent changes.
   _Avoid_: continue, transfer, hand-over.
-- **Mark** — the status glyph at the head of a card or an agent row. Not a dot: the mark differs
-  by state — a turning ring for `working`, a question glyph for `blocked` (Herdr's word for
-  Orca's `permission`), a filled dot for `done`, a quieter dot for `idle`. A card's mark shows
-  the most urgent status among that card's own agents.
-- **Status mark** — the state a mark encodes: exactly `working`, `blocked`, `done` or `idle`
-  (`herdr-app/src/model.rs:528-536`). `done` means finished and not yet seen (`:533`); a card
-  rolls up the most urgent state of its own agents.
+- **Mark** — the status glyph at the head of a card or agent row. Its shape differs by state: a turning ring for `working`, a question glyph for `blocked`, a filled dot for `done`, a quieter dot for `idle`. A card shows the most urgent status among its own agents.
+- **Status mark** — the state a mark encodes: exactly `working`, `blocked`, `done` or `idle`.
+  `done` means finished and not yet seen; a card rolls up the most urgent state of its own agents.
 - **Card title** — the 13px line a card leads with: the worktree's display name. Orca derives
-  an unpinned display name from the branch (`display-name-provenance.ts:17-19`), so on an
+  an unpinned display name from the branch, so on an
   untouched worktree the title *is* the branch. Named worktrees keep their name.
-- **Card meta** — the 11px line under the title: the branch for a git worktree, the folder's own
-  last segment for a folder workspace. **Not a second title.** Orca's classic template prints it
-  unconditionally whenever a branch exists (`default-workspace-card.json`, `vars.branch`), so on
-  a worktree whose title is its branch Orca genuinely draws the same string twice. We drop that
-  repeat: the meta line is the only part removed, and it is removed only when its text equals
-  the title. This is a deviation, not a port — record it as one.
-- **Title-only card** — Orca's template branch for a card with no meta line, no agent rows and
-  no lineage toggle (`singleLine`, `worktree-card-surface.tsx:61-67`). It is not a shape this
-  port ever draws: the `inline-agents` migration gives every user's card agent rows
-  (`normalize-loaded-ui-state.ts:106`), so `singleLine` is false for a migrated card and the
-  padding is always the meta-row pair, 5px above and 6px below. A card's padding does not depend
-  on whether an agent is running.
-- **Review** — the pull request for a worktree's own branch, drawn as a mark at the end of the
-  card's meta row. A review belongs to a **branch**, never to a repo: two worktrees of one repo
-  have different reviews, and a worktree with no PR has none. It is read from a persisted cache
-  keyed `<common-dir>::<branch>`, not fetched while rendering; a cached `null` means "asked, no
-  PR". Unlike the project key it carries no machine, but the lookup only ever runs on the local
-  machine (`if (!on && info.branch)`), so a remote worktree shows no review rather than a wrong
-  one; the hostless key is latent, not a live collision.
+- **Card meta** — the 11px line under the title: the branch for a git worktree, or the folder's last segment for a folder workspace. Dropped when its text equals the title, so the same string never appears twice.
+- **Review** — the pull request for a worktree's own branch, shown as a mark at the end of the card's meta row. A review belongs to a branch, not a repo, so two worktrees of one repo can have different reviews. Read from a cache, never fetched while rendering. Creating a pull request updates the badge.
 - **Port** — reproduce Orca's behaviour and result using Herdr's primitives. Not *transcribe*
   (copy its markup literally, impossible here) and not *invent* (a control Orca has no
   counterpart for). See AGENTS.md rule 1.
@@ -137,7 +128,7 @@ exactly one thing here.
   matching lines. A result belongs to a file, and the summary counts matches *and* files, so
   "no results" means no matching text, not an empty tree.
 - **Vault scope** — the visibility boundary applied to agents in the Agents panel: `Workspace`
-  restricts agents to the active space, `Project` encompasses all spaces sharing the same repository
+  restricts agents to the active space, `Repo` encompasses all spaces sharing the same repository
   or root folder, and `All` includes every live agent across the system.
   _Avoid_: agent filter, session scope, agent mode.
 - **Commit action menu** — the split action trigger in the Changes panel pairing the primary commit

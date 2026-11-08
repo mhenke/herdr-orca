@@ -127,6 +127,8 @@ python3 scripts/verify.py --smoke
 
 ## Credits and license
 
-Huge thanks to the team at [stablyai/orca](https://github.com/stablyai/orca) for creating Orca (MIT License, Copyright Orca). Space models and avatars were inspired by [herdr-t3](https://github.com/JinJieBeWater/herdr-t3) (Apache-2.0).
+Huge thanks to the team at [stablyai/orca](https://github.com/stablyai/orca) for creating Orca (MIT License, Copyright (c) 2026 Lovecast Inc.). Space models and avatars were inspired by [herdr-t3](https://github.com/JinJieBeWater/herdr-t3) (Apache-2.0).
 
-This package is licensed under Apache-2.0, matching Herdr App.
+Several mods are derived from Herdr App's shipped mods in `defaults/mods/` (Apache-2.0). Each derived file is marked with its source.
+
+This package is licensed under Apache-2.0, matching Herdr App. Files ported from Orca are MIT-licensed as noted in their headers. See `LICENSE` and `NOTICE`.
