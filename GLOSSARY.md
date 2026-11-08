@@ -51,6 +51,13 @@ exactly one thing here.
   because an account scopes it. The first row is **Default**: launch with no model flag at all.
   A model is picked for a launch and never changes a running agent.
   _Avoid_: model picker, provider list, model family.
+- **Agent mark** — the identity glyph beside a card row, a tab, or a menu row: which mark an
+  agent has is Orca's `AgentIcon` decision, and what decides its drawing is whether the mark
+  brings its own fills. omp's gradient, Kilo's yellow/black, Droid's white-on-black and the
+  bundled favicons keep their colors, so they are images; a `currentColor` glyph — Codex, Pi,
+  Aider, OpenCode, Copilot — takes the text color. A mark is not a **Mark**: the mark says which
+  agent, a Mark says what it is doing.
+  _Avoid_: icon, logo, avatar, agent type icon.
 - **Tab** — one space's set of panes, drawn in the tab rail. A tab belongs to exactly one space,
   and a pane to exactly one tab; moving a tab to another space is not `space.move`.
   _Avoid_: workspace, window, session.
