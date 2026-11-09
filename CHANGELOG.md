@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-11-09
+
+### Bug Fixes
+
+- **clipboard:** Also write the host display server
+- **orca-menu:** Close the context menu after every action
+- **orca-float:** One 24px agent row, Orca's density
+
+### Documentation
+
+- **spec:** Crew chip in the pane header, ported from Orca's orchestration pill
+- **spec:** Record the live parent-link check in the crew chip spec
+- Record the two real quota sources and the chip rule
+- **spec:** Filter crew children by Herdr's live state, as its own agents mod does
+
+### Features
+
+- **orca-float:** Port the workspace toggle, identity marks and header launcher
+- **orca-status:** Draw one chip per reading from agy and omp usage
+- **new-menu:** Persist the model catalog and resolve CLIs like a login shell
 ## [0.9.0] - 2026-11-09
 
 ### Bug Fixes
@@ -272,6 +292,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stroke width, and the group header's missing plus
 - The palette was invented; the drop indicator was the wrong shape
 - Refresh the raster after the row-order fix
+[0.10.0]: https://github.com/mhenke/herdr-orca/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/mhenke/herdr-orca/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/mhenke/herdr-orca/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mhenke/herdr-orca/compare/v0.6.0...v0.7.0
