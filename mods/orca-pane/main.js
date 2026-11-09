@@ -8,17 +8,66 @@
 // Props from the app: { pane, terminal }. Click: focus the pane.
 
 import { View, div, svg } from "gpui-kit";
-import { h_flex } from "gpui-base";
-import { panes, props, run, openOverlay, spaces, shared, setShared, settings } from "herdr";
+import { h_flex, v_flex } from "gpui-base";
+import { panes, props, run, openOverlay, closeOverlay, spaces, shared, setShared, settings, terminals, theme } from "herdr";
+import { crewOf, crewGroups, crewMembers, crewSignature } from "./crew.js";
+import { statusMark, agentMark } from "./status.js";
+
+// Orca's group words (`OrchestrationCrewPanel.tsx:50-56`): needsYou is Herdr's blocked.
+const GROUP_WORD = { blocked: "need you", working: "working", done: "done", idle: "idle" };
+
+// Row titles fall through title -> app -> program name, the same order orca-agents uses
+// (`mods/orca-agents/main.js:22`; `report.app` is the terminal's app key).
+const titleOf = (m) => m.title?.trim() || m.report?.app || m.program?.name || m.address;
 
 export default class Pane extends View {
-  init() {
+  init(_props, cx) {
     this.hovered = false;
     this.dragStart = null;
     this.isDragging = false;
     this.pollTimer = null;
     this.lastPos = null;
     this.still = 0;
+
+    // `terminals()` is live but does not notify a mod (the reason `orca-float` runs a timer);
+    // recompute at 1s and repaint only when an address or status changed.
+    this.crew = { managing: [], managedBy: null };
+    this.crewSeen = "";
+    const read = () => { this.crew = crewOf(terminals(), this.crewAddress()); };
+    read();
+    this.crewSeen = crewSignature(this.crew);
+    cx.timer.every(1000, (cx) => {
+      const before = this.crewSeen;
+      read();
+      this.crewSeen = crewSignature(this.crew);
+      if (this.crewSeen !== before) cx.notify();
+    });
+
+    // Orca's card is a child of the pane's surface (`OrchestrationCrewPanel.tsx:266-278`), so a tab
+    // switch takes it away. A Herdr popup is window-level; close it when its pane is gone or its
+    // tab is no longer the one shown, or it would describe a pane that is not on screen.
+    if (props()?.overlay) {
+      cx.timer.every(1000, () => {
+        if (this.crewPaneGone() && props()?.overlay) closeOverlay(props().overlay);
+      });
+    }
+  }
+
+  // A popup opened from `mod.open` carries no props, so it describes the focused pane; one opened
+  // from a chip names its pane.
+  crewPaneId() {
+    return props()?.pane ?? panes().find((x) => x.focused)?.pane;
+  }
+
+  crewAddress() {
+    return panes().find((x) => x.pane === this.crewPaneId())?.terminal ?? null;
+  }
+
+  crewPaneGone() {
+    const p = panes().find((x) => x.pane === this.crewPaneId());
+    if (!p) return true;
+    const space = spaces().find((s) => s.tabs.some((t) => t.id === p.tab));
+    return !space?.tabs.find((t) => t.id === p.tab)?.active;
   }
 
   me() {
@@ -156,7 +205,115 @@ export default class Pane extends View {
       .child(svg(`mods/orca-pane/${icon}.svg`).size(12));
   }
 
+  // Orca's collapsed pill (`OrchestrationCrewPanel.tsx:344-380`): `Workflow` + the managing count,
+  // then a status mark and a stack of agent marks per status group. Two pieces are dropped:
+  // `PanelRight` and its divider (they read "open the right panel"; this opens a popup) and
+  // `shadow-floating` (no shadow token in this theme).
+  crewChip(pane, t) {
+    const groups = crewGroups(this.crew);
+    const label = groups.map((g) => `${g.members.length} ${GROUP_WORD[g.status]}`).join(", ");
+    return h_flex()
+      .id(`pane-crew-${pane}`)
+      .h(22)
+      .px(5)
+      .gap(4)
+      .items_center()
+      .flex_none()
+      .rounded(4)
+      .border_1()
+      .border_color("#ffffff14")
+      .bg("#ffffff0a")
+      .text_color("#a1a1aa")
+      .hover((s) => s.bg("#ffffff14").text_color("#ffffff"))
+      .cursor_pointer()
+      .tooltip(`Orchestration: ${label}`)
+      .role("button")
+      .accessibility_label(`Show orchestration: ${label}`)
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        openOverlay({ mod: "orca-pane", kind: "popup", width: 300, props: { pane } });
+      })
+      .child(svg("mods/orca-pane/workflow.svg").size(12).flex_none())
+      .child(div().text_size(11).child(String(this.crew.managing.length)))
+      .children(groups.map((g) => h_flex().gap(2).items_center().flex_none()
+        .child(statusMark(g.status, 12, t))
+        .child(this.agentStack(g.members, t))));
+  }
+
+  // `CrewAgentStack` (`CrewAgentIcons.tsx:186-215`): up to 3 overlapping 16px circles, a 13px
+  // mark in each, `+N` for the rest of that group.
+  agentStack(members, t) {
+    const shown = members.slice(0, 3);
+    return h_flex().items_center().flex_none()
+      .children(shown.map((m, i) => {
+        const mark = agentMark(m, 13, t);
+        return div().size(16).rounded_full().flex().items_center().justify_center()
+          .bg(t.surface).when(i > 0, (el) => el.ml(-6))
+          .when(Boolean(mark), (el) => el.child(mark));
+      }))
+      .when(members.length > shown.length, (el) =>
+        el.child(div().ml(2).text_size(10).text_color(t.muted).child(`+${members.length - shown.length}`)));
+  }
+
+  // Orca's expanded card (`OrchestrationCrewPanel.tsx:284-330`): 36px title, one section per
+  // relation with an uppercase count, then lean rows. Row previews, the collapse button and the
+  // per-row menus are dropped: Herdr has no task or question text, closing the popup is the
+  // collapse, and focus is the only row action.
+  crewCard() {
+    if (this.crewPaneGone()) {
+      if (props()?.overlay) closeOverlay(props().overlay);
+      return div();
+    }
+    const t = theme();
+    const crew = this.crew;
+    const sections = [
+      ["Managing", crew.managing],
+      ["Managed by", crew.managedBy ? [crew.managedBy] : []],
+    ].filter(([, rows]) => rows.length > 0);
+
+    return v_flex()
+      .id("orca-crew-card")
+      .w_full()
+      .bg(t.surface)
+      .text_color(t.foreground)
+      .child(h_flex().h(36).flex_none().px(12).items_center().border_b(1).border_color(t.border)
+        .child(div().text_size(12).font_medium().child("Orchestration")))
+      .children(sections.map(([title, rows]) =>
+        v_flex().pt(12).pb(6)
+          .child(h_flex().px(12).pb(6).gap(6).items_center()
+            .child(div().text_size(10).font_semibold().text_color(t.muted).child(title.toUpperCase()))
+            .child(div().text_size(10).font_semibold().text_color(t.muted).child(String(rows.length))))
+          .children(rows.map((m) => this.crewRow(m, t)))));
+  }
+
+  crewRow(m, t) {
+    const mark = agentMark(m, 13, t);
+    return h_flex()
+      .id(`crew-row-${m.address}`)
+      .h(24)
+      .w_full()
+      .pl(12)
+      .pr(6)
+      .gap(4)
+      .items_center()
+      .cursor_pointer()
+      .hover((s) => s.bg("#4040402e"))
+      .role("button")
+      .accessibility_label(`${titleOf(m)} - ${m.status}`)
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        run("agent.focus", { terminal: m.address });
+        if (props()?.overlay) closeOverlay(props().overlay);
+      })
+      .child(statusMark(m.status, 12, t))
+      .when(Boolean(mark), (el) => el.child(mark))
+      .child(div().min_w(0).flex_1().truncate().text_size(12).child(titleOf(m)));
+  }
+
   render(cx) {
+    // The popup instance of this mod: its render is the crew list, not a header.
+    if (props()?.overlay) return this.crewCard();
+
     const p = this.me();
     if (!p) return div();
     const pane = p.pane;
@@ -292,6 +449,9 @@ export default class Pane extends View {
           .items_center()
           .gap(2)
           .when(!isFocused, (el) => el.opacity(0.6).hover((s) => s.opacity(1.0)))
+          // Placement is ours: Orca's pill rides the pane's right corner
+          // (`OrchestrationCrewPanel.tsx:344-380`); here that corner is the header's action cluster.
+          .when(crewMembers(this.crew).length > 0, (el) => el.child(this.crewChip(pane, theme())))
           // TabBarQuickCommandsButton.tsx:180-186: Play icon + "Command" pill
           .child(
             h_flex()
