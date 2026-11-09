@@ -1,7 +1,13 @@
 # 0011 — Jump Palette vs Picker and Command Palette
 
-- **Status**: accepted
+- **Status**: proposed (unimplemented specification)
 - **Date**: 2026-11-07
+
+> [!NOTE]
+> **Implementation Status**: As of 2026-11-09, `mods/orca-palette` has not yet been built.
+> `mods/orca-nav/main.js:164` currently opens Herdr's stock `picker` as an interim fallback,
+> and `keys.json` does not yet bind `ctrl-p`. The full specification and implementation plan
+> are tracked in `docs/superpowers/plans/2026-11-07-orca-palette.md`.
 
 ## Context
 

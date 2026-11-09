@@ -14,9 +14,8 @@ exactly one thing here.
   pointing back. Secondary to its repo's main checkout by definition.
 - **Project group** — the sidebar unit Orca heads with one header: a repo on one machine
   plus every worktree of it. Exactly one header per repo, never one per space.
-- **Project key** — the string a project group folds on: the repo identity
-  repo identity (machine and common dir), or `space:<id>` for a folder with no repo. The header
-  and collapse-all use the same key, so they cannot disagree.
+- **Project key** — the string a project group folds on: the repo identity (machine and common dir),
+  or `space:<id>` for a folder with no repo. The header and collapse-all use the same key, so they cannot disagree.
 - **Main branch** — the branch the project group treats as its main: the main checkout's own
   branch. Only the main checkout can carry the `primary` badge; a linked worktree and a plain
   folder workspace carry none.
@@ -79,6 +78,9 @@ exactly one thing here.
 - **Mod pane** — a pane hosting a mod view (such as a file tree or git diff) rather than a shell terminal.
   Sits beside terminal panes inside a tab's layout tree.
   _Avoid_: widget pane, plugin window, tool split.
+- **Floating agent panel** — the toggleable overlay workspace (Mod+Alt+A, ADR 0003) hosting active agent sessions across spaces, rather than a
+  standalone shell terminal.
+  _Avoid_: floating terminal, float window, agent popup.
 - **Terminal split** — the division of a tab's viewport into two adjacent panes, either vertically
   (`right`, `left`) or horizontally (`down`, `up`).
   _Avoid_: tab split, window split, column split.
@@ -137,6 +139,10 @@ exactly one thing here.
 - **Session capture** — the sanitised, bounded tail of a pane's scrollback that seeds a fork or a
   handoff. It is a raw digest of the session, never the session, and carries no instruction framing.
   _Avoid_: transcript, log dump, history.
+- **Agent transcript** — the persistent on-disk record of an agent's past execution, messages, and
+  tool interactions. Indexed asynchronously to power past session discovery and resume. Distinct from
+  **Session capture**, which is an active pane's scrollback digest.
+  _Avoid_: scrollback capture, terminal log, prompt capture.
 - **Fork prompt** — a markdown instruction envelope enclosing a session capture that directs the
   *same* agent to treat the prior transcript as background context for an independent session.
   _Avoid_: fork context, fork template.
@@ -166,6 +172,9 @@ exactly one thing here.
   _Avoid_: name resolution, title fallback, card name hierarchy.
 - **Card meta** — the 11px line under the title: the branch for a git worktree, or the folder's last segment for a folder workspace. Dropped when its text equals the title, so the same string never appears twice.
 - **Review** — the pull request for a worktree's own branch, shown as a mark at the end of the card's meta row. A review belongs to a branch, not a repo, so two worktrees of one repo can have different reviews. Read from a cache, never fetched while rendering. Creating a pull request updates the badge.
+- **Review store** — the time-bounded cache tracking pull request status across branches and workspaces,
+  decoupling review presentation from network fetch cycles.
+  _Avoid_: review cache, pr store, gh cache.
 - **Port** — reproduce Orca's behaviour and result using Herdr's primitives. Not *transcribe*
   (copy its markup literally, impossible here) and not *invent* (a control Orca has no
   counterpart for). See AGENTS.md rule 1.

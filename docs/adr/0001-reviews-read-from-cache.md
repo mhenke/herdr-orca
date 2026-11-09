@@ -1,6 +1,6 @@
 # 0001 — Read reviews from a cache, write them off the render path
 
-- **Status**: accepted
+- **Status**: accepted (amended by [0009](0009-invariant-space-folder-and-review-store-ttl.md))
 - **Date**: 2026-11-07
 
 ## Context
@@ -46,8 +46,10 @@ Split the two halves, as Orca does.
   construction rather than by a fix.
 - The cache is keyed per branch, so a same-named branch on a foreign fork cannot collide.
 - **Cost**: a settled answer is kept for the life of the process. A PR that merges while the
-  app runs keeps its old glyph until the key is re-fetched. This is the shortcut, recorded in
-  the code; revisit if a stale badge is ever noticed after a merge.
+  app runs keeps its old glyph until the key is re-fetched. *(Amended by [0009](0009-invariant-space-folder-and-review-store-ttl.md):
+  this process-lifetime shortcut and zero-TTL negative cache were superseded by `review-store.js`,
+  which enforces dual TTLs of 60s for found PRs and 15m for negative probes, with explicit invalidation
+  on PR creation and background concurrency capped at 2 in-flight requests).*
 - **Cost**: two `gh` calls can now run per repo on first sight (the fork probe and the review
   lookup). Both are local-only and both settle.
 

@@ -1,6 +1,6 @@
 # 0008 — Add bounded transcript history beside the live agent list
 
-- **Status**: accepted, supersedes [0005](0005-live-agent-scoping-vs-transcript-indexing.md)
+- **Status**: accepted (amends [0005](0005-live-agent-scoping-vs-transcript-indexing.md))
 - **Date**: 2026-11-07
 
 ## Context
@@ -28,6 +28,9 @@ Keep the live rows exactly as 0005 specified — they still own scope, status ma
    then message records) behind `scanOmpSessions`. Another CLI is another adapter, not a rewrite.
 4. **Resume uses the recorded cwd**: `terminal.open { argv: ["omp", "--resume=<path>"], folder }`,
    never the focused terminal's folder.
+5. **History scoping & search**: Past sessions are scoped via `VaultScopeSwitch` by matching `session.cwd`
+   against the active space folder (Workspace) or repository worktrees from `git.cache.v2` (Project).
+   The header search input filters past session titles, cwd paths, and model names.
 
 ## Consequences
 

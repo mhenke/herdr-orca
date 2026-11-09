@@ -35,3 +35,6 @@ header; they are judged by the shingle check (Orca overlap above ~30% gets a hea
   "Porting code: licenses").
 - The 5-gram check is a heuristic, not a legal test; a high score triggers a header, a low score
   does not clear a file of Orca-derived expression that renamed its identifiers.
+- **Standalone asset replicas**: When an asset or icon from Orca or Herdr App is duplicated across
+  standalone mods to satisfy Rule 9 ("A mod must work alone", e.g. in `mods/orca-tabs/agent-icons/`),
+  every replica must carry its source attribution comment and be catalogued in `NOTICE`.

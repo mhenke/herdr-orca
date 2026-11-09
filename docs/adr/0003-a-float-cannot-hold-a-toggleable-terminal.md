@@ -45,7 +45,7 @@ away, and a mod float can be toggled but only draws what a mod can draw.
 
 ## Decision
 
-Float `orca-float` (`layouts/orca.json:28-30`: `edge: bottom`, `align: end`, so bottom-right)
+Float `orca-float` (`layouts/orca.json:30-37`: `edge: bottom`, `align: end`, so bottom-right)
 and give it the widest content Herdr can toggle — the live agent sessions.
 
 - **Toggle** — the mod's own command `orca-float.toggle`, bound to `ctrl-alt-a`

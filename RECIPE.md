@@ -35,7 +35,7 @@ Left to right, divider 1px `border` (`#2e2e2e`):
   - **Work body** (flexible row):
     - **Main pane** (stack, active `main-terminals`):
       - Live terminal view (`#282c34`, Ghostty Default Style Dark; `terminal-themes/defaults.ts:6-12`), 14px horizontal and 12px vertical padding, square corners (radius 0).
-      - Pane header: minimal 24px header revealing on hover (`reveal: "hover"`) with pane title, split right (`pane.split:right`), split down (`pane.split:down`), and close button.
+      - Pane header: attached 32px header (`TabGroupPanel.tsx:281-315`, `h-[32px] shrink-0 border-b border-border bg-tab-bar`) with the tab pill, split-right `+`, `▷ Command` pill, ellipsis menu, split right/down, and close. Dragging the header into the tab strip moves the pane into a tab of its own.
       - Landing view (`orca-landing`): welcome screen rendered when all tabs/spaces are closed.
     - **Right utility panel** (350px wide, min 220, max 900; `surface` `#171717` background, 1px `border`; `startup-ui-hydration.ts:45`, `right-sidebar-width.ts:1`):
       - Activity bar header (36px tall; `right-sidebar-top-activity-bar.tsx:40`):
@@ -117,7 +117,7 @@ A missing token paints **magenta** (`hsla(0.83, 1.0, 0.5, 1.0)` by design; `sett
   - Dragging a tab at least 12px opens Orca's blue drop quadrant over the panel: the outer 20% band of the panel width picks Left/Right, the outer 20% of the body height picks Up/Down, and the middle means no split. Releasing there splits the pane and shows the dragged tab's terminal in the new pane (`terminal.show`); Esc cancels (ADR 0007, "Tab Drop-To-Split").
 
 - **Work Area & Panes**:
-  - Hovering a terminal reveals the 24px floating pane header (`mods/orca-pane/main.js`) with terminal title, split buttons (`pane.split`), zoom toggle (`pane.zoom`), and close button (`pane.close`).
+  - Every terminal carries Orca's attached 32px pane header (`mods/orca-pane/main.js`): tab pill with the pane title and close button, split-right `+`, `▷ Command` and ellipsis that open the pane menu (`pane.split`, `pane.zoom`, pane swaps), split right/down, and close. Dragging the header up into the tab strip moves that pane into its own tab (`terminal-pane-tab-detach.ts:40-58`).
   - When all tabs and spaces are closed, the center area switches to `orca-landing` with quick start actions.
 
 - **Right Utility Panel Interaction**:
@@ -153,15 +153,15 @@ A missing token paints **magenta** (`hsla(0.83, 1.0, 0.5, 1.0)` by design; `sett
   - `mods/orca-nav`: Search launcher button and top navigation items.
   - `mods/orca-spaces`: Project section headers, worktree cards, primary badge, status rollups, collapse all.
   - `mods/orca-tabs`: Flat tabs strip with 2px underline indicator and sidebar toggle.
-  - `mods/orca-pane`: Minimal 24px hover terminal header with split controls.
+  - `mods/orca-pane`: Attached 32px pane header with tab pill, command menu, split controls, and drag-to-new-tab.
   - `mods/orca-landing`: Clean landing page when no spaces/terminals are open.
   - `mods/orca-panel-head`: 36px activity bar header for switching right panel tools.
-  - `mods/orca-files`: File explorer tree with file-type icons, git badges, a name filter, and a contents search with its own search options.
-  - `mods/orca-changes`: Git diff review, staging list, and commit message composer.
+  - `mods/orca-files`: File explorer tree with file-type icons, git badges, a name filter, a contents search with its own search options, and a row context menu (New File, New Folder, Copy Path, Duplicate, View File, Reveal, Rename, Delete).
+  - `mods/orca-changes`: Git diff review, staging list, commit message composer, and an uncommitted-entry context menu (View, conflict resolutions, Copy Path, Reveal, Open in File Explorer).
   - `mods/orca-agents`: Agent session history list.
   - `mods/orca-panel-gap`: Clean placeholder views for unopened secondary tabs.
   - `mods/orca-status`: 24px bottom status bar spanning the full window width.
-  - `mods/orca-menu`: 208px / 176px context menu overlay for cards, spaces, and tabs.
+  - `mods/orca-menu`: 208px / 176px / 240px context menu overlay for cards, spaces, tabs and terminal panes; clipboard writes go through GPUI's native clipboard (`cx.write_to_clipboard`), file reveals through the desktop opener.
   - `mods/new-menu`: 288px create dropdown overlay for creating terminals and worktrees.
   - `mods/orca-float`: Bottom-right floating workspace panel (`ctrl-alt-a`) listing live agent
     sessions; named divergence documented in

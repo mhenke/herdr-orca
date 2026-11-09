@@ -1,6 +1,6 @@
 # 0006 — Porting Orca tab capabilities and context actions to Herdr
 
-- **Status**: accepted
+- **Status**: accepted (amended by [0007](0007-terminal-panel-capabilities-and-actions.md) §7 and [0012](0012-multi-tab-split-groups-vs-pane-hierarchy.md))
 - **Date**: 2026-11-07
 
 ## Context
@@ -54,12 +54,12 @@ transcribe, never invent), bridging host model gaps through honest equivalents.
 - **Terminal Drop Boundary**: In GPUI, `on_mouse_up` and `on_mouse_move` only fire while the pointer
   is within an element's hitbox (`vendor/gpui-pre/src/elements/div.rs:219`). Because layout blocks enforce
   `overflow_hidden` (`herdr-app/src/window.rs:3988`), dragging a tab down past the 36px tab bar into the
-  terminal area leaves the mod's element tree. Because QuickJS does not expose pointer capture (`capture_pointer`)
-  to mods, inter-block tab drop-to-split cannot be intercepted by the tab mod. Splitting is instead provided
-  via the native pane grip (`pane_drag.rs`, which captures window events in Rust), the tab context menu
-  (`"Split Terminal Left/Right/Up/Down"` in `orca-menu`), and the header split menu (`orca-split-menu`).
-- **Menu Reorder**: Implemented in `mods/orca-menu/main.js:134-135` as explicit `"Move Left"` and
-  `"Move Right"` rows when the tab is not at the boundary.
+  terminal area leaves the mod's element tree. While standard inter-block DOM pointer capture is unavailable,
+  drop-to-split was achieved via a frameless popup overlay window pattern (documented in [0007](0007-terminal-panel-capabilities-and-actions.md) §7
+  and [0012](0012-multi-tab-split-groups-vs-pane-hierarchy.md)) which tracks global pointer position,
+  rendering 20% edge drop zones and fallback splitting.
+- **Menu Reorder**: Implemented in `mods/orca-menu/main.js:150-158` as explicit `"Move Tab to Split Right"`,
+  `"Move Tab to Split Left"`, `"Move Tab to Split Down"`, and `"Move Tab to Split Up"` actions.
 
 ### 2. Split Terminal
 - **Tab Context Menu**: Exposed as top-level rows `"Split Terminal Right"`, `"Split Terminal Left"`,
@@ -103,8 +103,8 @@ transcribe, never invent), bridging host model gaps through honest equivalents.
   (`TerminalTabLeadingIcon.tsx:38-100`): spinning yellow spinner for `working`, emerald checkmark for
   `done`, orange question icon for `blocked`.
 - **Pin / Settle**: Orca's `isPinned` maps to Herdr's `settled` state (`TabInfo.settled`). Settled tabs
-  hide the close button (`orca-tabs/main.js:226-235`), and `orca-menu/main.js:129` surfaces this as
-  `"Put Tab Away"` / `"Bring Tab Back"`.
+  hide the close button (`orca-tabs/main.js:226-235`), and `orca-menu/main.js:167` surfaces this as
+  `"Pin Tab"` / `"Unpin Tab"`.
 - **Close & Close Others**: Implemented in `orca-tabs/main.js` and `orca-menu/main.js`.
   Closing a tab (via strip `X`, middle-click, or context menu) evaluates Orca's close guard
   (`running-terminal-close-guard.ts:22-34`, `terminal-tab-actions.ts:121-131`):

@@ -1,14 +1,17 @@
 # 0007 — Porting Orca terminal panel capabilities, actions, and menu routing
 
-- **Status**: accepted
+- **Status**: accepted (amended by [0012](0012-multi-tab-split-groups-vs-pane-hierarchy.md))
 - **Date**: 2026-11-07
 
 ## Context
 
 Orca's terminal panel is governed by two complementary components:
-1. **The Terminal Pane Header Overlay** (`TerminalPaneHeaderOverlay.tsx`, `terminal.css`): A 24px header
+1. **The Terminal Pane Header Overlay** (`TerminalPaneHeaderOverlay.tsx`, `terminal.css`): A header
    bar mounted over each terminal pane providing title display, click-to-edit renaming, a centered
    drag handle (`.pane-title-drag-handle`), and contextual action buttons (`.pane-title-actions`).
+   *(Amended by [0012](0012-multi-tab-split-groups-vs-pane-hierarchy.md): Upgraded from a 24px hover-revealed overlay
+   to a 32px attached header matching Orca's `TabGroupPanel.tsx`, adding the left tab pill, `▷ Command` pill,
+   and drag-to-unsplit handle).*
 2. **The Terminal Context Menu** (`TerminalContextMenu.tsx`, `use-terminal-pane-context-menu.ts`):
    The primary action surface for terminal operations, defining standard actions across clipboard,
    terminal management, layout splits, and agent session workflows.
@@ -93,10 +96,8 @@ transcribe, never invent), and route all terminal right-clicks through `orca-men
   and copies to system clipboard via `clip.js` without opening a dialog. Matches Orca's
   `copyAgentSessionContextFromMenuPane` (`terminal-pane-menu-agent-session-actions.ts:58-65`).
 - **`Hand Off to Another Agent`**:
-  Implemented in `mods/orca-handoff/` and exposed in both the pane header actions
-  (`mods/orca-pane/main.js:141-149`, `MessageSquarePlus`, `TerminalPaneHeaderOverlay.tsx:212-238`)
-  and the context menu (`mods/orca-menu/main.js:61, 339-347`, `TerminalContextMenu.tsx:236-238`).
-  Captures live terminal context via `hc read`, synthesizes the exact Orca continuation prompt
+  Implemented in `mods/orca-handoff/` and exposed in the terminal context menu (`mods/orca-menu/main.js:74, 339-347`,
+  `TerminalContextMenu.tsx:236-238`). Captures live terminal context via `hc read`, synthesizes the exact Orca continuation prompt
   (`buildAgentSessionContinuationPrompt`, `agent-session-continuation.ts:57-140`), provides a target
   agent picker (Claude Code, OpenCode, Codex, Pi, Gemini, Aider, Antigravity), and on submit executes
   `tab.new` with the target agent's `argv` and the synthesized continuation prompt as `task`.

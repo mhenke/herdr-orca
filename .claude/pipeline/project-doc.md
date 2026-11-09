@@ -42,18 +42,18 @@ Eighteen mods, all `"place": "none"` (composed into blocks rather than floated):
 |---|---|---|
 | `orca-chrome` | titlebar strip and the sidebar footer | 68 |
 | `orca-nav` | Search, Tasks/Automations/Orca Mobile rows, history arrows, Projects header and its options menu | 429 |
-| `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, saved folders | 1297 |
-| `orca-tabs` | the tab rail, window controls, right-sidebar toggle, close guards, drag reorder | 606 |
-| `orca-pane` | the terminal pane header, move/split grip, and split controls | 168 |
+| `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, owner avatars, saved folders | 1300 |
+| `orca-tabs` | the tab rail, window controls, right-sidebar toggle, close guards, drag reorder, drop-to-split indicators | 1110 |
+| `orca-pane` | the attached 32px pane header: tab pill, command/ellipsis menu, split controls, drag-to-unsplit | 350 |
 | `orca-pane-status` | the agent mark drawn in a pane header | 37 |
 | `orca-panel-head` | the right panel's activity switcher | 118 |
 | `orca-panel-gap` | the honest body for a panel or page Herdr has no backend for | 61 |
-| `orca-files` | the file tree (virtualized), preview, name/content search; opens a file from `props.file` | 1024 |
-| `orca-changes` | the source-control list, split commit actions, conflict resolution, and PR creation | 715 |
+| `orca-files` | the file tree (virtualized), preview, name/content search, row context menu; opens a file from `props.file` | 1090 |
+| `orca-changes` | the source-control list, split commit actions, conflict resolution, PR creation, uncommitted-entry context menu | 788 |
 | `orca-agents` | the agents panel: live scopes, search, and session history with resume | 546 |
-| `orca-status` | the bottom status bar | 70 |
-| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global`, plus the transcript capture shared with handoff | 598 |
-| `new-menu` | the create popup behind `+`: agent launch and model list drilldown | 338 |
+| `orca-status` | the bottom status bar: provider usage cluster, updates, hosts | 159 |
+| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global`, plus the transcript capture shared with handoff | 740 |
+| `new-menu` | the create popup behind `+`: agent launch and model list drilldown | 314 |
 | `orca-landing` | the empty-workspace page | 111 |
 | `orca-float` | the floating agent-session panel | 162 |
 | `orca-handoff` | the hand off / fork agent-session dialog | 366 |
@@ -146,7 +146,7 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 - **Overall coverage**: 0% by unit-test measure. There is no test runner, no `package.json` and no test files.
 - **Testing framework**: none. `scripts/verify.py` is an audit, not a suite.
 - **Rationale**: the defects this project actually shipped were four runtime throws, three invented values and three fabricated citations. None is visible to a unit test; the oracle for a value is `~/Projects/orca`, which is not a JS dependency. So the audit checks what would have caught them, and it did — it found three fabricated line citations in its first run.
-- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (480 citations checked); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
+- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (811 citations checked); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
 - **Known untested areas**: pointer interaction. Keys are injectable — this build's `hyprctl` speaks the Lua dispatcher, and `hl.dsp.send_key_state({mods="", state="down", key="f"})` reaches the focused window (a programmatically focused `Input` accepted typed text this way). Pointer is not: `hl.dsp.cursor` exposes only `move` and `move_to_corner`, and `xdotool`, `ydotool`, `wlrctl` are absent while `/dev/uinput` is root-only. So hover, click and drag stay code-verified; typing is verifiable when a probe can focus an element.
 
 ## Entry Points
@@ -163,16 +163,23 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 ## Changed Files
 
 `.claude/pipeline/project-doc.md` is a DELTA patch over the previous delta. Re-scanned files:
-- `extras/programs.json` & `extras/icons/omp.svg` (new): the program-table entry that registers `omp` (name, icon, `run`, tile and colour). A program table is settings, so `sync.sh` copies the icon into `$app/icons/` but never writes the table; the entry is merged by hand. Without it `omp` is absent from `knownAgents()` and so from the create menu; the bundled marks in the tab strip and sidebar are mod-local files and still draw.
-- `scripts/sync.sh`: creates `$app/icons` and copies `extras/icons/*.svg`; comment states why the program table is not written.
-- `mods/orca-tabs/main.js`: `omp`'s tab mark moved to `agent-icons/omp.svg`; identity selection now goes through an `agentMarks` table keyed by `pane.app` (`mono` = the program table's glyph, image marks keep their own fills, a currentColor glyph takes the text tint); idle now draws `AgentStateDot.tsx:186-195`'s plain 8px dot; the tab drop-to-split comment cites `window.rs:3988` and `pane_drag.rs:147-181` and points at ADR 0007.
-- `mods/orca-tabs/omp.svg`: deleted, replaced by `mods/orca-tabs/agent-icons/omp.svg`.
-- `mods/orca-spaces/main.js`, `project.js`, `status.js`, `mods/orca-pane/main.js`, `mods/new-menu/main.js`: comment reduction only, no behaviour change.
-- `RECIPE.md`: mod isolation corrected (the build calls resolve against `appHome`, not the mod folder, `gpui-kit.d.ts:20273-20289`) while the package still copies each mark per mod; new program-table section; tab drop-to-split recorded as a deliberate omission.
-- `docs/adr/0011-jump-palette-vs-picker-and-command-palette.md` (new): why a dedicated `orca-palette` beats Herdr's stock `picker` and `app.palette`.
-- `docs/superpowers/plans/2026-11-07-orca-palette.md`, `docs/superpowers/specs/2026-11-07-orca-palette-design.md` (new): the jump-palette plan. `mods/orca-palette` is not created yet.
-- `README.md`: mod count corrected to 18; activity rail lists the Agents panel; tab drag-reorder, middle-click close and close guard documented; 6-dot grip and `ctrl-shift-s` split menu documented; floating agent panel documented; create menu now says it follows the program table; `extras/icons` and the manual `programs.json` merge added to the install steps; shortcuts table gains `ctrl-alt-a` and `ctrl-shift-s`.
+- `mods/orca-pane/main.js`: pane header upgraded from a 24px hover overlay to Orca's attached 32px split-group header (`TabGroupPanel.tsx:281-315`): tab pill with pane title and close, split-right `+`, `▷ Command` pill, ellipsis pane-actions, split right/down and close. The centre is a drag handle (poll at 16ms, 8px activation) that tracks the cursor into the tab strip (`terminal-tab-strip-drop-target.ts:12-16`) and unsplits the pane into its own tab via `terminal.park`/`terminal.keep` (`terminal-pane-tab-detach.ts:40-58`). Release is inferred after ~240ms of stillness because the host exposes no global mouse-up. Right-click on the header opens the pane menu (`TerminalPaneHeaderOverlay.tsx:149`).
+- `mods/orca-tabs/main.js`: tab drag rework for split groups: the drop record lives in the `orca-tabs.drop` shared key so the overlay copy can resolve the release; the drop poll honours a `released` flag, still-ticks raised to 20 (~320ms), and the overlay requests resolution through `shared()` instead of holding a stale `cx`.
+- `mods/orca-files/main.js`: row context menu rebuilt from `file-explorer-row-context-menu.tsx`: Duplicate (`useFileDuplicate.ts:34-63`, picks `name copy` / `name copy 2`), View File (`:216-225`, opens preview through the shared `orca-files.viewFile` key), platform-named reveal row, Open in Terminal gated to directories, destructive Delete. Module-level `mainFilesView` lets the popup's commands refresh the installed view; the `command` loop now handles `remove`, `refresh` and `view`.
+- `mods/orca-changes/main.js`: right-click on an uncommitted entry opens `SourceControlEntryContextMenu` (`entry-context-menu.tsx:90-150`): View, conflict resolutions, Copy Path / Copy Relative Path, Reveal in File Manager (disabled for deleted files), Open in File Explorer. `openEntry` and `resolveConflict` accept the popup's `root`/`on` so a popup copy acts on the same repo; `recordReview` now carries the PR title and the entry list refreshes from the installed view.
+- `mods/orca-menu/main.js`: pane and tab menu rows follow Orca's gating: Hand Off only for agent panes (`canContinueAgentSessionInNewSession`/`isTuiAgent`), Move to New Tab for split panes, new marks (`bell`, `bell-off`, `eraser`, `rotate-ccw`, `text-select`); copy actions pass their click `cx` to the native clipboard.
+- `mods/orca-spaces/main.js`, `project.js`: repo owner avatars from `repo-icon.ts:37-54`: a GitHub-shaped owner URL downloads once to `$app/avatars/<host>_<owner>.png` (`curl`, then `convert` to PNG, Folder fallback on failure), and a renamed fork keeps its own owner. Fork PR lookup no longer overwrites `slug`, so `baseRepo` and the avatar owner stay separate.
+- `mods/*/clip.js` (4 copies, identical): clipboard writes go through `cx.write_to_clipboard` with `globalThis.__clipboard_write_text` as fallback (`quickjs/host.rs:93,917`), replacing `wl-copy`/`xclip`/`pbcopy` subprocesses and temp files; reveal spawns the desktop opener detached. Rationale and evidence: ADR 0013.
+- `mods/orca-handoff/main.js`: awaited clipboard write and `cx.timer.after` instead of `setTimeout` (ADR 0002 / rule 13).
+- `mods/orca-status/main.js`, `usage.js` (new): Orca's usage cluster (`StatusBarSurface.tsx:308-370`) with provider probing (`agy`, Claude, Codex, Cursor) every 120s, tightest-window label selection (`rate-limit-window-label.ts`), and an on-demand refresh whose icon spins while in flight.
+- `layouts/orca.json`: the terminal pane's `header` is `height: 32`, no `reveal`, and `lone: false` to match the attached header.
+- `docs/adr/0012-multi-tab-split-groups-vs-pane-hierarchy.md`, `0013-native-gpui-clipboard-over-cli-daemons.md`, `0014` (recorded in 85cf2f2), `docs/adr/README.md` (new).
+- `docs/adr/*` (existing): amendments pointing at 0009/0012 and the built split-group reality, plus the standalone-asset provenance rule.
+- `NOTICE`: `mods/orca-status/main.js` and the `orca-tabs/agent-icons` replicas catalogued.
+- `GLOSSARY.md`: floating agent panel, agent transcript, review store defined, project key wording fixed.
+- `README.md`, `RECIPE.md`: pane header now documented as the attached 32px header with drag-to-new-tab; status bar documented as the provider usage cluster; clipboard and file-menu claims corrected; row/entry menus listed.
+- `scripts/verify.py`: `usage.js` added to the mod-owned module allowlist (811 citations checked).
 
 ## Last Scanned
 
-2026-11-08T04:10:00Z
+2026-11-09T17:02:19Z
