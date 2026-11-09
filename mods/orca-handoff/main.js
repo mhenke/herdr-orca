@@ -103,13 +103,13 @@ export default class HandoffDialog extends View {
       cx.notify();
       return;
     }
-    await copyText(prompt);
+    await copyText(prompt, cx);
     this.copied = true;
     this.statusMessage = "Prompt copied to clipboard";
     cx.notify();
-    setTimeout(() => {
+    cx.timer.after(600, () => {
       closeOverlay(props()?.overlay);
-    }, 600);
+    });
   }
 
   async executeHandoff(cx) {
