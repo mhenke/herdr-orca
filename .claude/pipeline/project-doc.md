@@ -51,11 +51,11 @@ Eighteen mods, all `"place": "none"` (composed into blocks rather than floated):
 | `orca-files` | the file tree (virtualized), preview, name/content search, row context menu; opens a file from `props.file` | 1090 |
 | `orca-changes` | the source-control list, split commit actions, conflict resolution, PR creation, uncommitted-entry context menu | 788 |
 | `orca-agents` | the agents panel: live scopes, search, and session history with resume | 546 |
-| `orca-status` | the bottom status bar: provider usage cluster, updates, hosts | 159 |
-| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global`, plus the transcript capture shared with handoff | 740 |
-| `new-menu` | the create popup behind `+`: agent launch and model list drilldown | 314 |
+| `orca-status` | the bottom status bar: one usage chip per meterable provider (`agy`, `omp usage`), updates, hosts, float toggle | 199 |
+| `orca-menu` | every context menu: `pane`, `tab`, `space`, `group`, `global`, plus the transcript capture shared with handoff | 775 |
+| `new-menu` | the create popup behind `+`: agent launch and model list drilldown, catalog cached 10 min | 336 |
 | `orca-landing` | the empty-workspace page | 111 |
-| `orca-float` | the floating agent-session panel | 162 |
+| `orca-float` | the floating workspace toggle and agent-session panel | 229 |
 | `orca-handoff` | the hand off / fork agent-session dialog | 366 |
 | `orca-split-menu` | the pane split menu with directional split controls | 360 |
 
@@ -143,10 +143,10 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 
 ## Test Coverage
 
-- **Overall coverage**: 0% by unit-test measure. There is no test runner, no `package.json` and no test files.
-- **Testing framework**: none. `scripts/verify.py` is an audit, not a suite.
+- **Overall coverage**: one unit suite, `mods/orca-status/usage.test.js` (13 cases, `node --test`), covering quota parsing, tightest-window selection, label formatting and probe failure shapes. The rest of the package is covered by `scripts/verify.py` only.
+- **Testing framework**: Node's built-in `node:test` for `usage.js` (no `package.json`, no dependency install); `scripts/verify.py` remains an audit, not a suite.
 - **Rationale**: the defects this project actually shipped were four runtime throws, three invented values and three fabricated citations. None is visible to a unit test; the oracle for a value is `~/Projects/orca`, which is not a JS dependency. So the audit checks what would have caught them, and it did — it found three fabricated line citations in its first run.
-- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (811 citations checked); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
+- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (836 citations checked); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
 - **Known untested areas**: pointer interaction. Keys are injectable — this build's `hyprctl` speaks the Lua dispatcher, and `hl.dsp.send_key_state({mods="", state="down", key="f"})` reaches the focused window (a programmatically focused `Input` accepted typed text this way). Pointer is not: `hl.dsp.cursor` exposes only `move` and `move_to_corner`, and `xdotool`, `ydotool`, `wlrctl` are absent while `/dev/uinput` is root-only. So hover, click and drag stay code-verified; typing is verifiable when a probe can focus an element.
 
 ## Entry Points
@@ -163,23 +163,17 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 ## Changed Files
 
 `.claude/pipeline/project-doc.md` is a DELTA patch over the previous delta. Re-scanned files:
-- `mods/orca-pane/main.js`: pane header upgraded from a 24px hover overlay to Orca's attached 32px split-group header (`TabGroupPanel.tsx:281-315`): tab pill with pane title and close, split-right `+`, `▷ Command` pill, ellipsis pane-actions, split right/down and close. The centre is a drag handle (poll at 16ms, 8px activation) that tracks the cursor into the tab strip (`terminal-tab-strip-drop-target.ts:12-16`) and unsplits the pane into its own tab via `terminal.park`/`terminal.keep` (`terminal-pane-tab-detach.ts:40-58`). Release is inferred after ~240ms of stillness because the host exposes no global mouse-up. Right-click on the header opens the pane menu (`TerminalPaneHeaderOverlay.tsx:149`).
-- `mods/orca-tabs/main.js`: tab drag rework for split groups: the drop record lives in the `orca-tabs.drop` shared key so the overlay copy can resolve the release; the drop poll honours a `released` flag, still-ticks raised to 20 (~320ms), and the overlay requests resolution through `shared()` instead of holding a stale `cx`.
-- `mods/orca-files/main.js`: row context menu rebuilt from `file-explorer-row-context-menu.tsx`: Duplicate (`useFileDuplicate.ts:34-63`, picks `name copy` / `name copy 2`), View File (`:216-225`, opens preview through the shared `orca-files.viewFile` key), platform-named reveal row, Open in Terminal gated to directories, destructive Delete. Module-level `mainFilesView` lets the popup's commands refresh the installed view; the `command` loop now handles `remove`, `refresh` and `view`.
-- `mods/orca-changes/main.js`: right-click on an uncommitted entry opens `SourceControlEntryContextMenu` (`entry-context-menu.tsx:90-150`): View, conflict resolutions, Copy Path / Copy Relative Path, Reveal in File Manager (disabled for deleted files), Open in File Explorer. `openEntry` and `resolveConflict` accept the popup's `root`/`on` so a popup copy acts on the same repo; `recordReview` now carries the PR title and the entry list refreshes from the installed view.
-- `mods/orca-menu/main.js`: pane and tab menu rows follow Orca's gating: Hand Off only for agent panes (`canContinueAgentSessionInNewSession`/`isTuiAgent`), Move to New Tab for split panes, new marks (`bell`, `bell-off`, `eraser`, `rotate-ccw`, `text-select`); copy actions pass their click `cx` to the native clipboard.
-- `mods/orca-spaces/main.js`, `project.js`: repo owner avatars from `repo-icon.ts:37-54`: a GitHub-shaped owner URL downloads once to `$app/avatars/<host>_<owner>.png` (`curl`, then `convert` to PNG, Folder fallback on failure), and a renamed fork keeps its own owner. Fork PR lookup no longer overwrites `slug`, so `baseRepo` and the avatar owner stay separate.
-- `mods/*/clip.js` (4 copies, identical): `copyText` writes GPUI's in-app clipboard (`globalThis.__clipboard_write_text`, `cx.write_to_clipboard`; `quickjs/host.rs:93,917`) and then the host display server through one probe shell (`wl-copy`/`xclip`/`pbcopy`/`powershell.exe`) with the text on argv and both streams closed, so the forked selection daemon cannot hold `exec`'s pipes; no temp files; reveal spawns the desktop opener detached. Rationale and evidence: ADR 0013.
-- `mods/orca-handoff/main.js`: awaited clipboard write and `cx.timer.after` instead of `setTimeout` (ADR 0002 / rule 13).
-- `mods/orca-status/main.js`, `usage.js` (new): Orca's usage cluster (`StatusBarSurface.tsx:308-370`) with provider probing (`agy`, Claude, Codex, Cursor) every 120s, tightest-window label selection (`rate-limit-window-label.ts`), and an on-demand refresh whose icon spins while in flight.
-- `layouts/orca.json`: the terminal pane's `header` is `height: 32`, no `reveal`, and `lone: false` to match the attached header.
-- `docs/adr/0012-multi-tab-split-groups-vs-pane-hierarchy.md`, `0013-clipboard-writes-reach-both-gpui-and-the-host.md`, `0014` (recorded in 85cf2f2), `docs/adr/README.md` (new).
-- `docs/adr/*` (existing): amendments pointing at 0009/0012 and the built split-group reality, plus the standalone-asset provenance rule.
-- `NOTICE`: `mods/orca-status/main.js` and the `orca-tabs/agent-icons` replicas catalogued.
-- `GLOSSARY.md`: floating agent panel, agent transcript, review store defined, project key wording fixed.
-- `README.md`, `RECIPE.md`: pane header now documented as the attached 32px header with drag-to-new-tab; status bar documented as the provider usage cluster; clipboard and file-menu claims corrected; row/entry menus listed.
-- `scripts/verify.py`: `usage.js` added to the mod-owned module allowlist (811 citations checked).
+- `mods/orca-status/main.js`, `usage.js`, `usage.test.js`: the cluster now draws from one flat list of readings (`{ provider, status, label, buckets }`, Orca's `ProviderRateLimits` shape) instead of four fixed provider fields, so adding a provider is one entry in `MARKS` plus one in `ORDER`. Sources are `agy -p /usage --output-format json` and `omp usage --json`; each CLI resolves through PATH then the install folders a desktop launch misses (`node-cli-command-resolution.ts:123-140`). A reading with no percentage draws no chip (the earlier credential-file probes shipped chips that could never carry a number), an error draws mark + triangle + the source's copy, and a provider with no mark falls back to Orca's per-provider letter (`StatusBarProviderSegment.tsx:184-212`). Roster order is fixed, never sorted by percentage (`use-status-bar-controller.ts:219-231`). 13 unit cases in `usage.test.js`.
+- `mods/new-menu/main.js`, `models.js`: the probed model catalog persists in `new-menu.models.v1` with Orca's 10-minute freshness (`agent-model-catalog-entry-lifetime.ts:12`), so the picker paints a saved list before asking again; the Default row is drawn even while the catalog is unavailable (`AgentLaunchTextModelDefault.tsx:26-35`). CLI probes use the same login-shell resolution as `orca-status` (`INSTALL_DIRS`), since `omp` lives in `~/.bun/bin` and a bare `exec("omp")` failed from a desktop launch.
+- `mods/orca-float/main.js` (+ `agent-icons/`, `plus.svg`): Orca's workspace toggle in the status bar, per-agent identity marks copied into the mod (Rule 9), a header launcher, and one 24px agent row (state mark, agent mark, name) matching Orca's density.
+- `mods/orca-menu/main.js`: every menu action closes the popup through one path, instead of per-row closes that left the overlay up when an action returned early.
+- `mods/*/clip.js`: `copyText` writes GPUI's in-app clipboard and then the host display server in one probe shell with the text on argv and both streams closed, so copied text pastes both inside Herdr and into other programs; the forked selection daemon cannot hold `exec`'s pipes. ADR 0013 (renamed `0013-clipboard-writes-reach-both-gpui-and-the-host.md`).
+- `mods/orca-status/{command-code,copilot,omp}.svg` (new): Command Code and Copilot are Herdr's CC0 Simple Icons draws, copied into the mod so it installs alone; `omp.svg` is Orca's mark for the second probe's pending chip. All catalogued in `NOTICE` items 4 and 5.
+- `docs/adr/0014-mod-side-provider-quota-probing.md`: rewritten to record the two real sources, why credential-file probes were removed, and why Orca's signed HTTP fetchers are not re-implemented.
+- `GLOSSARY.md`: **Reading** and **Window label** defined; **Usage chip** now states that a mark without a number is not a chip.
+- `docs/superpowers/specs/2026-11-09-crew-chip-design.md` (new): crew chip in the pane header, from Orca's orchestration pill. Not implemented.
+- `README.md`, `RECIPE.md`: status bar documented as one chip per meterable provider via `agy` and `omp usage`; new-menu catalog caching and CLI resolution noted.
 
 ## Last Scanned
 
-2026-11-09T17:02:19Z
+2026-11-09T18:46:02Z

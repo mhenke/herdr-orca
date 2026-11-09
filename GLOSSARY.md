@@ -230,12 +230,20 @@ exactly one thing here.
   _Avoid_: new workspace row, create action.
 - **Usage cluster** — the status bar area displaying AI provider quota chips and refresh actions (`StatusBarUsageCluster`). Sits between space actions and system metrics.
   _Avoid_: quota bar, provider bar, usage bar, rate limit cluster.
-- **Usage chip** — the compact status bar pill representing an AI provider's current quota consumption or error state. Displays the provider mark, percentage, and window label, or an error summary with a warning mark.
+- **Usage chip** — the compact status bar pill representing an AI provider's current quota consumption or error state. Displays the provider mark, percentage, and window label, or an error summary with a warning mark. A provider with no readable percentage has no chip; a mark with no number is not a chip.
   _Avoid_: quota badge, provider tag, usage pill, status chip.
+- **Reading** — one probe result for one provider: its status (`ok` | `error` | `unavailable`), its
+  buckets, and the error copy when it has one. The cluster draws from a flat list of readings, one
+  per provider, which is Orca's `ProviderRateLimits` shape.
+  _Avoid_: usage result, provider snapshot, quota state.
 - **Unit label** — the leading indicator text in the usage cluster (`Used` or `Remaining`) designating whether displayed percentages represent consumed or remaining capacity.
   _Avoid_: metric label, mode indicator, quota prefix.
 - **Quota pool** — a distinct rate limit bucket or model grouping allocated by an AI provider with its own reset window and capacity limit.
   _Avoid_: rate limit group, quota bucket, usage tier, model allowance.
+- **Window label** — the short text naming a pool's reset period (`5h`, `wk`, `Monthly`, or a live
+  countdown when the pool is nearly spent). A grouped pool is labelled `<group> <window>`; an
+  ungrouped one is just the window, because the provider is already the chip's mark.
+  _Avoid_: reset label, period text.
 - **Tightest window** — the quota pool window within a provider that has the highest percentage consumed, selected for compact summary display on a usage chip.
   _Avoid_: bottleneck window, active window, primary limit.
 - **Provider quota error** — a failure to probe or retrieve an AI provider's quota (such as an unauthenticated CLI or network timeout), displayed on a usage chip with a warning indicator. Distinct from an agent, space, or tab status.

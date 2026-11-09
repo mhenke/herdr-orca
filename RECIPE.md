@@ -165,7 +165,14 @@ A missing token paints **magenta** (`hsla(0.83, 1.0, 0.5, 1.0)` by design; `sett
   - `mods/orca-changes`: Git diff review, staging list, commit message composer, and an uncommitted-entry context menu (View, conflict resolutions, Copy Path, Reveal, Open in File Explorer).
   - `mods/orca-agents`: Agent session history list.
   - `mods/orca-panel-gap`: Clean placeholder views for unopened secondary tabs.
-  - `mods/orca-status`: 24px bottom status bar spanning the full window width.
+  - `mods/orca-status`: 24px bottom status bar spanning the full window width. Its usage cluster
+    draws one chip per provider from `agy -p /usage --output-format json` (Antigravity) and
+    `omp usage --json` (every provider OMP holds an account for), each reduced to its tightest
+    window. A chip exists only if it carries a percentage: Orca's own fetchers are signed HTTP
+    calls against an account store this package does not have, so Claude, Codex and Cursor
+    draw nothing here rather than a mark with no number. Provider marks live in the mod
+    (`mods/orca-status/*.svg`), and a provider with no mark falls back to Orca's per-provider
+    letter (`StatusBarProviderSegment.tsx:184-212`). Doc: `docs/adr/0014-mod-side-provider-quota-probing.md`.
   - `mods/orca-menu`: 208px / 176px / 240px context menu overlay for cards, spaces, tabs and terminal panes; clipboard writes land in GPUI's in-app clipboard and on the host display server (`wl-copy` / `xclip` / `pbcopy` / `powershell.exe`, text on argv, no temp files), file reveals through the desktop opener.
   - `mods/new-menu`: 288px create dropdown overlay for creating terminals and worktrees.
   - `mods/orca-float`: Bottom-right floating workspace panel (`ctrl-alt-a`) listing live agent
