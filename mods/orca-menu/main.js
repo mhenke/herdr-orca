@@ -362,43 +362,44 @@ export default class Menu extends View {
   }
 
   choose(i, cx) {
-    const it = items(props(), this.git)[i];
+    const pProps = props();
+    const it = items(pProps, this.git)[i];
     if (!it) return;
+    const overlayId = pProps?.overlay;
     // `terminal.copy`/`terminal.paste` act on the focused terminal (commands.md:285-287), so
     // focus the pane that was right-clicked before the overlay gives focus back.
     if (it[1] === "terminal.copy" || it[1] === "terminal.paste") {
-      const tg = props()?.target ?? {};
+      const tg = pProps?.target ?? {};
       if (tg.pane || tg.terminal) run("pane.focus", tg.pane ? { pane: tg.pane } : { terminal: tg.terminal });
       run(it[1], it[2]);
-      closeOverlay(props()?.overlay);
+      closeOverlay(overlayId);
       return;
     }
-    closeOverlay(props()?.overlay);
     if (it[1].startsWith("orca-menu.")) {
-      const space = spaces().find((s) => s.id === (props()?.target?.id ?? ""));
+      const target = pProps?.target ?? {};
+      const space = spaces().find((s) => s.id === (target.id ?? ""));
       const folder = space ? place(space) : "";
       // CopyTabIdMenuItem.tsx:16 — writeClipboardText(`orcaTabId: ${unifiedTabId}`)
-      if (it[1] === "orca-menu.copy-tab-id") void copyText(`orcaTabId: ${it[2].id ?? ""}`, cx);
+      if (it[1] === "orca-menu.copy-tab-id") copyText(`orcaTabId: ${it[2].id ?? ""}`, cx);
       if (it[1] === "orca-menu.copy-path") {
-        const target = props()?.target ?? {};
         const p = it[2]?.path || target.path || target.folder || target.top || folder || (space ? home() : "");
-        void copyText(p, cx);
+        copyText(p, cx);
       }
       // Display name: explicit custom name (space.named), else branch name, else folder basename
       // (Orca spec: worktree-default-display-name.ts:13-25 resolveWorktreeDisplayName).
       if (it[1] === "orca-menu.copy-name") {
-        const target = props()?.target ?? {};
         const customName = (space?.named || target.named) ? (space?.name || target.name) : null;
         const branchName = it[2]?.name || target.branch || null;
         const folderPath = String(it[2]?.folder ?? target.folder ?? target.path ?? folder ?? "");
         const fallback = folderPath.replace(/\/+$/, "").split("/").pop() || space?.name || "";
         const name = customName || branchName || fallback;
-        void copyText(name, cx);
+        copyText(name, cx);
       }
       if (it[1] === "orca-menu.close-group") {
         for (const id of (it[2]?.ids ?? [])) {
           run("space.close", { id, confirmed: true });
         }
+        closeOverlay(overlayId);
         return;
       }
       // WorktreeContextMenuView.tsx:203-214 — toggle read / unread
@@ -411,6 +412,7 @@ export default class Menu extends View {
           localStorage.setItem("spaces.unread.v1", JSON.stringify(updated));
           setShared("spaces.unread.v1", updated);
         } catch {}
+        closeOverlay(overlayId);
         return;
       }
       // Close Others — SortableTabContextMenu.tsx:213 & useBulkTabCloseConfirmation (bulk-tab-close-confirmation.ts:5-15)
@@ -433,6 +435,7 @@ export default class Menu extends View {
             }
           });
         }
+        closeOverlay(overlayId);
         return;
       }
       if (it[1] === "orca-menu.move-tab-split") {
@@ -441,6 +444,7 @@ export default class Menu extends View {
           tab: it[2].id,
           direction: it[2].direction,
         });
+        closeOverlay(overlayId);
         return;
       }
       if (it[1] === "orca-menu.unsplit-to-tab") {
@@ -449,35 +453,47 @@ export default class Menu extends View {
           terminal: it[2].terminal,
           pane: it[2].pane,
         });
+        closeOverlay(overlayId);
         return;
       }
       if (it[1] === "orca-menu.close-split-panes") {
         const mine = panes().filter((x) => x.tab === it[2].id);
         const keep = mine.find((x) => x.focused) ?? mine[0];
         for (const x of mine) if (x !== keep) run("pane.close", { pane: x.pane });
+        closeOverlay(overlayId);
+        return;
       }
       if (it[1] === "orca-menu.split-left") {
         if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
         run("pane.split", { direction: "right", ...(it[2]?.pane ? { pane: it[2].pane } : {}) });
         run("pane.swap", { direction: "left" });
+        closeOverlay(overlayId);
         return;
       }
       if (it[1] === "orca-menu.split-up") {
         if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
         run("pane.split", { direction: "down", ...(it[2]?.pane ? { pane: it[2].pane } : {}) });
         run("pane.swap", { direction: "up" });
+        closeOverlay(overlayId);
         return;
       }
-      if (it[1] === "orca-menu.copy-terminal" || it[1] === "orca-menu.copy-pane-id") void copyText(it[2].id ?? "", cx);
+      if (it[1] === "orca-menu.copy-terminal" || it[1] === "orca-menu.copy-pane-id") {
+        copyText(it[2].id ?? "", cx);
+        closeOverlay(overlayId);
+        return;
+      }
       // Copy Context (terminal-pane-menu-agent-session-actions.ts:58-65 & terminal-agent-session-fork.ts:139):
       // Extracts up to 1000 lines scrollback, cleans and bounds transcript to clipboard.
-      if (it[1] === "orca-menu.copy-context" && it[2].terminal) void (async () => {
+      if (it[1] === "orca-menu.copy-context" && it[2].terminal) {
         if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
-        const r = await hc(["read", "--lines", "1000", it[2].terminal]).catch(() => null);
-        if (!r?.stdout) return;
-        const clean = buildBoundedSessionTranscript(r.stdout);
-        if (clean) await copyText(clean, cx);
-      })();
+        hc(["read", "--lines", "1000", it[2].terminal]).then((r) => {
+          if (!r?.stdout) return;
+          const clean = buildBoundedSessionTranscript(r.stdout);
+          if (clean) copyText(clean, cx);
+        }).catch(() => {});
+        closeOverlay(overlayId);
+        return;
+      }
       // Hand Off to Another Agent (AgentSessionContinuationDialog.tsx:59)
       if (it[1] === "orca-menu.handoff") {
         if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
@@ -488,6 +504,7 @@ export default class Menu extends View {
           height: 380,
           props: { action: "handoff", terminal: it[2].terminal, pane: it[2].pane }
         });
+        closeOverlay(overlayId);
         return;
       }
       // Fork Agent Session (TerminalAgentSessionForkDialog.tsx:25)
@@ -500,34 +517,45 @@ export default class Menu extends View {
           height: 320,
           props: { action: "fork", terminal: it[2].terminal, pane: it[2].pane }
         });
+        closeOverlay(overlayId);
         return;
       }
       // Select All: Herdr cannot select, so the screen and scrollback buffer go to the clipboard (TerminalContextMenu.tsx:217).
-      if (it[1] === "orca-menu.select-all" && it[2].terminal) void (async () => {
+      if (it[1] === "orca-menu.select-all" && it[2].terminal) {
         if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
-        const r = await hc(["read", "--lines", "10000", it[2].terminal]).catch(() => null);
-        if (r?.code === 0 && r.stdout.trim()) await copyText(r.stdout, cx);
-      })();
+        hc(["read", "--lines", "10000", it[2].terminal]).then((r) => {
+          if (r?.code === 0 && r.stdout.trim()) copyText(r.stdout, cx);
+        }).catch(() => {});
+        closeOverlay(overlayId);
+        return;
+      }
       // Clear Screen / Reset Terminal: `hc` writes to the terminal; Ctrl+L clears the screen,
       // `reset` restores the terminal modes (TerminalContextMenu.tsx:359-369).
       if (it[1] === "orca-menu.clear-screen" && it[2].terminal) {
         if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
         void hc(["keys", it[2].terminal, "ctrl+l"]);
+        closeOverlay(overlayId);
+        return;
       }
       if (it[1] === "orca-menu.reset-terminal" && it[2].terminal) {
         if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
         void hc(["send", it[2].terminal, "reset"]);
+        closeOverlay(overlayId);
+        return;
       }
+      closeOverlay(overlayId);
       return;
     }
     if (it[1] === "pane.swap") {
       if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
       run("pane.swap", { direction: it[2].direction, ...(it[2]?.pane ? { pane: it[2].pane } : {}) });
+      closeOverlay(overlayId);
       return;
     }
     if (it[1] === "pane.zoom") {
       if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
       run("pane.zoom", it[2]);
+      closeOverlay(overlayId);
       return;
     }
     if (it[1] === "pane.split") {
@@ -537,6 +565,7 @@ export default class Menu extends View {
       }
       if (it[2]?.pane) run("pane.focus", { pane: it[2].pane });
       run("pane.split", it[2]);
+      closeOverlay(overlayId);
       return;
     }
     if (it[1] === "terminal.open" && props()?.tab === "space") {
@@ -554,10 +583,12 @@ export default class Menu extends View {
         run("space.new", { ...(targetFolder ? { folder: targetFolder } : {}), ...(tg.machine ? { machine: tg.machine } : {}) });
         run("layout.select", { stack: "main", child: "main-terminals" });
       }
+      closeOverlay(overlayId);
       return;
     }
     if (it[1] === "worktree") {
       openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
+      closeOverlay(overlayId);
     } else if (it[1] === "tab.close") {
       // Close tab confirmation — terminal-tab-actions.ts:121-131 & running-terminal-close-guard.ts:56-97
       const owner = spaces().find((s) => (s.tabs ?? []).some((x) => x.id === it[2].id));
@@ -579,6 +610,7 @@ export default class Menu extends View {
               height: 200,
               props: { confirmClose: { kind: "pinned", tabId: tab.id, tabLabel: name } }
             });
+            closeOverlay(overlayId);
             return;
           }
         }
@@ -600,12 +632,15 @@ export default class Menu extends View {
             height: isAgent ? 240 : 208,
             props: { confirmClose: { kind: isAgent ? "agent" : "command", tabId: tab.id, tabLabel: name } }
           });
+          closeOverlay(overlayId);
           return;
         }
       }
       run("tab.close", it[2]);
+      closeOverlay(overlayId);
     } else {
       run(it[1], it[2]);
+      closeOverlay(overlayId);
     }
   }
 
