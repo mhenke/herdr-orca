@@ -97,3 +97,74 @@ test('parseAntigravityOutput returns null on malformed JSON or empty output', ()
   assert.equal(parseAntigravityOutput('not json'), null);
   assert.equal(parseAntigravityOutput('{}'), null);
 });
+
+test('probeAntigravity returns ok with tightest bucket on valid exec output', async () => {
+  const { probeAntigravity } = await import('./usage.js');
+  const mockExec = async (cmd, args) => {
+    assert.equal(cmd, 'agy');
+    assert.deepEqual(args, ['-p', '/usage', '--output-format', 'json', '--print-timeout', '20s']);
+    return {
+      code: 0,
+      stdout: JSON.stringify({
+        status: 'SUCCESS',
+        command: {
+          data: {
+            groups: [
+              {
+                name: 'Gemini Models',
+                buckets: [
+                  {
+                    id: 'gemini-wk',
+                    window: 'weekly',
+                    remaining_fraction: 0.40,
+                    name: 'Weekly Limit Remaining'
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      })
+    };
+  };
+
+  const res = await probeAntigravity(mockExec);
+  assert.equal(res.status, 'ok');
+  assert.equal(res.usedPercent, 60);
+  assert.equal(res.label, 'Gemini wk');
+});
+
+test('probeAntigravity returns error when exec fails', async () => {
+  const { probeAntigravity } = await import('./usage.js');
+  const mockFailingExec = async () => {
+    throw new Error('Command not found: agy');
+  };
+
+  const res = await probeAntigravity(mockFailingExec);
+  assert.equal(res.status, 'error');
+  assert.equal(res.label, 'Refresh failed');
+});
+
+test('probeClaude returns error with "Refresh failed" when unauthenticated', async () => {
+  const { probeClaude } = await import('./usage.js');
+  const mockReadTextFile = async () => null; // File missing
+  const res = await probeClaude(mockReadTextFile);
+  assert.equal(res.status, 'error');
+  assert.equal(res.label, 'Refresh failed');
+});
+
+test('probeCodex and probeCursor return unavailable when auth files are missing', async () => {
+  const { probeCodex, probeCursor, probeAllProviders } = await import('./usage.js');
+  const mockReadTextFile = async () => null;
+  assert.equal((await probeCodex(mockReadTextFile)).status, 'unavailable');
+  assert.equal((await probeCursor(mockReadTextFile)).status, 'unavailable');
+
+  const all = await probeAllProviders({
+    exec: async () => ({ code: 1, stdout: '' }),
+    readTextFile: mockReadTextFile
+  });
+  assert.equal(all.antigravity.status, 'error');
+  assert.equal(all.claude.status, 'error');
+  assert.equal(all.codex.status, 'unavailable');
+  assert.equal(all.cursor.status, 'unavailable');
+});

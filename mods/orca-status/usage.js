@@ -104,3 +104,124 @@ export function getTightestUsageBucket(groups) {
   }
   return tightest;
 }
+
+export async function probeAntigravity(execFn) {
+  try {
+    const res = await execFn('agy', [
+      '-p',
+      '/usage',
+      '--output-format',
+      'json',
+      '--print-timeout',
+      '20s'
+    ], { timeout: 25000 });
+    if (res && res.code === 0 && res.stdout) {
+      const parsed = parseAntigravityOutput(res.stdout);
+      if (parsed) {
+        const tightest = getTightestUsageBucket(parsed.groups);
+        if (tightest) {
+          return {
+            provider: 'antigravity',
+            status: 'ok',
+            usedPercent: tightest.bucket.usedPercent,
+            label: formatPoolShortLabel(tightest.groupName, tightest.bucket)
+          };
+        }
+      }
+    }
+  } catch {
+    // Falls through to error status
+  }
+  return {
+    provider: 'antigravity',
+    status: 'error',
+    label: 'Refresh failed'
+  };
+}
+
+export async function probeClaude(readFileFn) {
+  try {
+    const content = await readFileFn('~/.claude.json');
+    if (content) {
+      const json = JSON.parse(content);
+      if (json && json.oauthToken) {
+        return {
+          provider: 'claude',
+          status: 'ok',
+          usedPercent: null,
+          label: ''
+        };
+      }
+    }
+  } catch {
+    // Ignore read/parse errors
+  }
+  // When unauthenticated, token stale, or API failed: matches Orca's getProviderUsageStatusLabel() fallback
+  return {
+    provider: 'claude',
+    status: 'error',
+    label: 'Refresh failed'
+  };
+}
+
+export async function probeCodex(readFileFn) {
+  try {
+    const content = await readFileFn('~/.codex/auth.json');
+    if (content) {
+      const json = JSON.parse(content);
+      if (json && (json.tokens || json.session)) {
+        return {
+          provider: 'codex',
+          status: 'ok',
+          usedPercent: null,
+          label: ''
+        };
+      }
+    }
+  } catch {
+    // Ignore read errors
+  }
+  return {
+    provider: 'codex',
+    status: 'unavailable',
+    label: ''
+  };
+}
+
+export async function probeCursor(readFileFn) {
+  try {
+    const content = await readFileFn('~/.cursor/auth.json');
+    if (content) {
+      const json = JSON.parse(content);
+      if (json && json.accessToken) {
+        return {
+          provider: 'cursor',
+          status: 'ok',
+          usedPercent: null,
+          label: ''
+        };
+      }
+    }
+  } catch {
+    // Ignore read errors
+  }
+  return {
+    provider: 'cursor',
+    status: 'unavailable',
+    label: ''
+  };
+}
+
+export async function probeAllProviders(deps) {
+  const execFn = deps?.exec ?? (async () => ({ code: 1, stdout: '' }));
+  const readFn = deps?.readTextFile ?? (async () => null);
+
+  const [antigravity, claude, codex, cursor] = await Promise.all([
+    probeAntigravity(execFn),
+    probeClaude(readFn),
+    probeCodex(readFn),
+    probeCursor(readFn)
+  ]);
+
+  return { antigravity, claude, codex, cursor };
+}
