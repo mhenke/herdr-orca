@@ -6,13 +6,45 @@
 // visibility-menu trigger last.
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { machines, updates, theme, run, exec, readTextFile, shared, keys } from "herdr";
-import { probeAllProviders } from "./usage.js";
+import { machines, updates, theme, run, exec, home, shared, keys } from "herdr";
+import { probeAllProviders, getTightestUsageBucket, formatBucketChipLabel } from "./usage.js";
+
+// Every provider the cluster can draw a mark for, keyed by the id its quota source reports.
+// A PNG keeps its own colours (`image`); a `currentColor` glyph is a mask (`svg`,
+// gpui-kit.d.ts:20273-20281). Rule 9: each mark lives in this folder, so the mod installs alone.
+const MARKS = {
+  antigravity: { path: "antigravity.png", image: true },
+  commandcode: { path: "command-code.svg" },
+  "github-copilot": { path: "copilot.svg" },
+  claude: { path: "claude.svg" },
+  anthropic: { path: "claude.svg" },
+  codex: { path: "codex.svg" },
+  openai: { path: "codex.svg" },
+  cursor: { path: "cursor.png", image: true },
+  // The second probe's own mark, for its pending chip: `omp usage` speaks for several
+  // providers before any of them has answered.
+  omp: { path: "omp.svg", image: true },
+};
+// Orca's roster order (use-status-bar-controller.ts:219-231). The bar never reorders by
+// percentage, unlike the popover roster, so a chip does not move when a reading changes.
+const ORDER = [
+  "antigravity", "claude", "anthropic", "codex", "openai",
+  "commandcode", "github-copilot", "cursor"
+];
+const rank = (provider) => {
+  const i = ORDER.indexOf(provider);
+  return i === -1 ? ORDER.length : i;
+};
+// A provider this mod ships no mark for takes Orca's per-provider letter instead of the
+// icon (StatusBarProviderSegment.tsx:184-212); ours is the id's first letter, because
+// Orca's switch only covers the ten providers it ships drawings for.
+const letterFor = (provider) => (provider.trim()[0] ?? "?").toUpperCase();
 
 export default class OrcaStatus extends View {
 
   init(_props, cx) {
-    this.usage = null;
+    // Null is "not read yet", distinct from "read, and nothing is signed in".
+    this.readings = null;
     this.isRefreshing = false;
     this.refreshUsage(cx);
     // Orca's 120s polling interval (service-polling.ts:24-32, DEFAULT_POLL_MS)
@@ -26,8 +58,8 @@ export default class OrcaStatus extends View {
 
     cx.spawn(async (cx) => {
       try {
-        const results = await probeAllProviders({ exec, readTextFile });
-        this.usage = results;
+        const { providers } = await probeAllProviders({ exec, home: home() });
+        this.readings = providers;
       } catch {
         // Retain prior state on failure
       } finally {
@@ -73,11 +105,38 @@ export default class OrcaStatus extends View {
         .when(Boolean(opts.spin), el => el.spin(1000)))
       .child(label);
 
-    const usage = this.usage;
-    const agy = usage?.antigravity;
-    const claude = usage?.claude;
-    const codex = usage?.codex;
-    const cursor = usage?.cursor;
+    // Orca nests the number and the window inside one chip per provider
+    // (StatusBarProviderSegment.tsx:315-339); the provider is the mark, not a word, and the
+    // tightest window stands for the whole provider (getTightestUsageSection, UsageRosterPanel.tsx).
+    // `readings === null` is the first load, which draws Orca's pending chips
+    // (StatusBarProviderSegment.tsx:267-274); an empty array is a finished probe that found
+    // nothing signed in, and then the cluster shows only "Used" with no chips at all.
+    const readings = this.readings;
+    const mark = (provider, size) => {
+      const m = MARKS[provider];
+      if (m?.image) return image(`mods/orca-status/${m.path}`).w(size).h(size).flex_none().rounded(2);
+      if (m) return svg(`mods/orca-status/${m.path}`).size(size).flex_none();
+      return div().size(size).flex_none().flex().items_center().justify_center()
+        .text_size(10).text_color(t.muted).child(letterFor(provider));
+    };
+    const chip = (reading) => {
+      const tightest = reading.status === "ok" ? getTightestUsageBucket(reading.buckets) : null;
+      if (tightest) {
+        const label = formatBucketChipLabel(tightest);
+        return h_flex().gap(6).items_center()
+          .child(mark(reading.provider, 13))
+          .child(div().text_color(t.foreground).child(`${tightest.usedPercent}% ${label}`));
+      }
+      // Error chip: mark, warning triangle, then the source's own words
+      // (StatusBarProviderSegment.tsx:297-305; the copy is usage-error-copy.ts:131).
+      return h_flex().gap(4).items_center().text_color(t.muted)
+        .child(mark(reading.provider, 13))
+        .child(svg("mods/orca-status/triangle-alert.svg").size(11).flex_none().text_color(t.muted))
+        .child(div().text_size(11).child(reading.label));
+    };
+    const drawn = (readings ?? [])
+      .filter(r => r.status === "error" || (r.status === "ok" && r.buckets.length > 0))
+      .sort((a, b) => rank(a.provider) - rank(b.provider));
 
     // StatusBarSurface.tsx:121 — h-6 min-h-[24px] px-3 gap-4 border-t, text-xs,
     // bg-[var(--bg-titlebar,var(--card))] = t.surface (#171717).
@@ -89,59 +148,17 @@ export default class OrcaStatus extends View {
           .child(
             h_flex().gap(12).items_center().px(4).py(2).rounded(4).text_size(11)
               .role("button").cursor_pointer().hover(s => s.bg("#404040b3"))
-              // usage-unit-label.tsx:32-50: "Used" in muted text
-              .child(div().text_color(t.muted).child("Used"))
-              // Pending initial loading state: ProviderIcon + ··· (StatusBarProviderSegment.tsx:267-274)
-              .when(!usage, el => el
-                .child(
+              // usage-unit-label.tsx:32-50: "Used" in muted text; it is absent when no chip
+              // shows a percentage (getUsageUnitLabelState), which here means no reading at all.
+              .when(drawn.length > 0 || readings === null, el =>
+                el.child(div().text_color(t.muted).child("Used")))
+              // Pending initial loading state: mark + ··· (StatusBarProviderSegment.tsx:267-274).
+              // The two sources this mod reads, before either has answered.
+              .when(readings === null, el =>
+                el.children(["antigravity", "omp"].map(p =>
                   h_flex().gap(6).items_center().text_color(t.muted)
-                    .child(image("mods/orca-status/antigravity.png").w(13).h(13).flex_none().rounded(2))
-                    .child(div().child("···"))
-                )
-                .child(
-                  h_flex().gap(4).items_center().text_color(t.muted)
-                    .child(svg("mods/orca-status/claude.svg").size(13).flex_none())
-                    .child(div().child("···"))
-                )
-              )
-              // Antigravity active chip (StatusBarProviderSegment.tsx:315-339)
-              .when(Boolean(agy && agy.status === "ok"), el => el.child(
-                h_flex().gap(6).items_center()
-                  .child(image("mods/orca-status/antigravity.png").w(13).h(13).flex_none().rounded(2))
-                  .child(div().text_color(t.foreground).child(`${agy.usedPercent}% ${agy.label}`))
-              ))
-              // Antigravity error chip (StatusBarProviderSegment.tsx:297-305)
-              .when(Boolean(agy && agy.status === "error"), el => el.child(
-                h_flex().gap(4).items_center().text_color(t.muted)
-                  .child(image("mods/orca-status/antigravity.png").w(13).h(13).flex_none().rounded(2))
-                  .child(svg("mods/orca-status/triangle-alert.svg").size(11).flex_none().text_color(t.muted))
-                  .child(div().text_size(11).child(agy.label))
-              ))
-              // Claude error chip (StatusBarProviderSegment.tsx:297-305, usage-error-copy.ts:131)
-              .when(Boolean(claude && claude.status === "error"), el => el.child(
-                h_flex().gap(4).items_center().text_color(t.muted)
-                  .child(svg("mods/orca-status/claude.svg").size(13).flex_none())
-                  .child(svg("mods/orca-status/triangle-alert.svg").size(11).flex_none().text_color(t.muted))
-                  .child(div().text_size(11).child(claude.label))
-              ))
-              // Claude ok chip
-              .when(Boolean(claude && claude.status === "ok"), el => el.child(
-                h_flex().gap(6).items_center()
-                  .child(svg("mods/orca-status/claude.svg").size(13).flex_none())
-                  .child(div().text_color(t.foreground).child(claude.label || "Claude"))
-              ))
-              // Codex chip (when active)
-              .when(Boolean(codex && codex.status === "ok"), el => el.child(
-                h_flex().gap(6).items_center()
-                  .child(svg("mods/orca-status/codex.svg").size(13).flex_none())
-                  .child(div().text_color(t.foreground).child(codex.label || "Codex"))
-              ))
-              // Cursor chip (when active)
-              .when(Boolean(cursor && cursor.status === "ok"), el => el.child(
-                h_flex().gap(6).items_center()
-                  .child(image("mods/orca-status/cursor.png").w(13).h(13).flex_none().rounded(2))
-                  .child(div().text_color(t.foreground).child(cursor.label || "Cursor"))
-              ))
+                    .child(mark(p, 13)).child(div().child("···")))))
+              .children(drawn.map(chip))
           )
           // StatusBarSurface.tsx:280-298 — Refresh button
           .child(
