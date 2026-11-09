@@ -2,8 +2,11 @@
 // Modified for herdr-orca; see LICENSE and NOTICE.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea, Input, InputState } from "gpui-base";
-import { spaces, exec, watchFolder, theme, window, run } from "herdr";
+import { spaces, exec, watchFolder, theme, window, run, props, openOverlay, closeOverlay, nextCommand } from "herdr";
 import { recordReview, invalidateReview } from "./review-store.js";
+import { copyText, reveal } from "./clip.js";
+
+let mainChangesView = null;
 
 function fade(color, factor) {
   if (!color || typeof color !== "string") return "#00000000";
@@ -64,6 +67,7 @@ function gitTone(mark, t) {
 
 export default class Changes extends View {
   init(_props, cx) {
+    if (props()?.tab !== "entry-menu") mainChangesView = this;
     this.files = []; this.message = ""; this.handle = cx.focus_handle();
     this.hovered = null; this.collapsed = {}; this.busy = false; this.busyReason = null; this.typing = false;
     this.menuOpen = false;
@@ -78,6 +82,13 @@ export default class Changes extends View {
     this.input.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
     this.refresh(cx);
     cx.timer.every(10000, (cx) => this.refresh(cx));
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = await nextCommand();
+        if (c === "refresh") this.refresh(cx);
+        cx.notify();
+      }
+    });
   }
 
   watch(root, cx) {
@@ -351,7 +362,7 @@ export default class Changes extends View {
           } catch {}
         }
         if (number) {
-          recordReview(repo, branch, { number, state: draft ? "draft" : "open" });
+          recordReview(repo, branch, { number, title, state: draft ? "draft" : "open" });
         } else {
           invalidateReview(repo, branch);
         }
@@ -429,6 +440,16 @@ export default class Changes extends View {
       .hover((s) => s.bg(t.hover + "66"))
       .on_hover((on, cx) => { if (on !== hovered) { this.hovered = on ? id : null; cx.notify(); } })
       .on_click(() => this.openEntry(f))
+      // uncommitted-entry-row.tsx:100-277 — right-click context menu (SourceControlEntryContextMenu)
+      .on_mouse_down("right", (_e, cx) => {
+        cx.stop_propagation();
+        openOverlay({
+          mod: "orca-changes",
+          kind: "popup",
+          width: 208,
+          props: { tab: "entry-menu", entry: f, root: this.root }
+        });
+      })
       .child(svg("mods/orca-changes/file.svg").size(14).flex_none().text_color(gitTone(f.status, t)))
       .child(h_flex().flex_1().min_w(0).items_center()
         .child(div().flex_none().max_w(260).truncate().text_color(t.foreground).child(name))
@@ -444,22 +465,23 @@ export default class Changes extends View {
         .items_center().gap(6).bg(t.hover).pr(12).pl(8).children(buttons)));
   }
 
-  // openUncommittedEntry (open-uncommitted-entry.ts:6-36) opens a diff editor for most rows,
+  // openUncommittedEntry (open-uncommitted-entry.ts:6-36, entry-context-menu.tsx:93-99) opens a diff editor for most rows,
   // the file itself for added/untracked markdown, and the conflicted file for conflicts. Herdr's
   // editor holds one buffer and has no diff model, so the diff half has no primitive; the
   // open-file half is ported through orca-files' `props.file` (a tab whose only pane is that mod),
   // which resolves it against space.folder. The conflict merge view has no equivalent either,
   // so a conflicted file opens as plain text.
-  openEntry(f) {
-    const root = this.root, cwd = location().cwd;
+  openEntry(f, root = this.root) {
+    const cwd = location().cwd;
     if (!root || !cwd) return;
     // Status paths are relative to the git toplevel; `props.file` is read against space.folder.
     const file = relPath(cwd, `${root.replace(/\/+$/, "")}/${f.path}`);
     run("tab.new", { mod: "orca-files", props: { file } });
   }
 
-  resolveConflict(f, resolution, cx) {
-    const root = this.root, on = this.on, context = this.context;
+  // resolveConflict (src/main/git/source-control/staging.ts:41-86, entry-context-menu.tsx:100-113)
+  resolveConflict(f, resolution, cx, root = this.root, on = this.on) {
+    const context = this.context;
     if (!root || this.busy) return;
     // resolveConflict (src/main/git/source-control/staging.ts:41-86) re-reads the exact unmerged
     // record and refuses to keep a file the worktree no longer has, because `git add` would stage
@@ -480,6 +502,8 @@ export default class Changes extends View {
           throw new Error(`${f.path} has changed since this list loaded. Refresh to see its current state.`);
         const r = await exec("git", [...READ, ...command], { cwd: root, on });
         if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
+        if (mainChangesView) mainChangesView.refresh(cx);
+        run("orca-changes.refresh");
       } catch (e) { if (key() === context) this.note = String(e).trim(); }
       finally { this.busy = false; this.refresh(cx); cx.notify(); }
     });
@@ -642,6 +666,54 @@ export default class Changes extends View {
       .child(item("Publish", Boolean(this.root), (cx) => this.runPublish(cx)));
   }
 
+  // SourceControlEntryContextMenu — entry-context-menu.tsx:90-150
+  entryMenuView(t, cx) {
+    const { entry, root } = props() ?? {};
+    if (!entry) return div();
+    const abs = root ? `${root.replace(/\/+$/, "")}/${entry.path}` : entry.path;
+    const overlay = props()?.overlay;
+    const close = () => { if (overlay) closeOverlay(overlay); };
+    const plat = typeof window !== "undefined" && typeof window === "function" ? window()?.platform : null;
+    const revealLabel = plat === "macos" ? "Reveal in Finder" : plat === "windows" ? "Reveal in File Explorer" : "Open Containing Folder";
+
+    const item = (i, label, icon, onClick, enabled = true) => h_flex().id(`scm-${i}`).h(28).flex_none().px(8).gap(8).items_center().rounded(6)
+      .when(enabled, s => s.cursor_pointer().hover(x => x.bg(t.hover)).on_click((_e, clickCx) => { onClick(clickCx); close(); }))
+      .when(!enabled, s => s.opacity(0.5))
+      .child(svg(`mods/orca-changes/${icon}.svg`).size(14).flex_none().text_color(t.muted))
+      .child(div().child(label));
+    const sep = () => div().h(1).my(3).mx(4).bg(t.border);
+
+    // Conflict resolutions if conflicted (entry-context-menu.tsx:100-113)
+    const resolutions = entry.section === "conflicts" ? conflictResolutions(entry.xy) : [];
+
+    return v_flex().id("orca-changes-entry-menu").w_full().min_h(0).p(5).bg(t.popover).text_size(12.8).text_color(t.foreground)
+      .child(div().px(8).py(4).text_size(11).text_color(t.dim).child(entry.path ?? ""))
+      // View — entry-context-menu.tsx:93-99
+      .child(item(0, "View", "eye", () => this.openEntry(entry, root)))
+      .when(resolutions.length > 0, el => el
+        .child(sep())
+        .children(resolutions.map((r, idx) => {
+          const [icon, title] = RESOLUTION[r];
+          return item(`res-${idx}`, title, icon.replace(/\.svg$/, ""), (clickCx) => this.resolveConflict(entry, r, clickCx, root, location().on));
+        }))
+      )
+      .child(sep())
+      // Copy Path — entry-context-menu.tsx:115-118
+      .child(item(1, "Copy Path", "copy", (clickCx) => void copyText(abs, clickCx)))
+      // Copy Relative Path — entry-context-menu.tsx:119-124
+      .child(item(2, "Copy Relative Path", "copy", (clickCx) => void copyText(entry.path, clickCx)))
+      .child(sep())
+      // Reveal in File Manager — entry-context-menu.tsx:132-139 (disabled if deleted: hasWorkingTreeFile)
+      .child(item(3, revealLabel, "external-link", () => void reveal(abs, false), entry.status !== "D"))
+      .child(sep())
+      // Open in File Explorer — entry-context-menu.tsx:141-147
+      .child(item(4, "Open in File Explorer", "folder-open", () => {
+        const cwd = location().cwd;
+        const file = cwd ? relPath(cwd, abs) : entry.path;
+        run("tab.new", { mod: "orca-files", props: { file } });
+      }));
+  }
+
   render(cx) {
     // A task's error is reported, not thrown into the paint: a failed refresh
     // must never replace the pane with the shell's "could not be re-rendered" bar.
@@ -649,6 +721,7 @@ export default class Changes extends View {
     // up to its first `await`, and calling into a view from render invites the same refusal.
     if (key() !== this.context) cx.timer.after(0, (cx) => this.refresh(cx));
     const t = theme(), action = this.primaryAction();
+    if (props()?.tab === "entry-menu") return this.entryMenuView(t, cx);
     // Orca pins conflicts first, then applies the group order (default changes-first):
     // listing/source-control-section-order.ts:121-142, source-control-group-order.ts:3-5. A fourth
     // section, Committed on Branch (listing/branch-section.tsx:92-99), needs a base ref and a branch
