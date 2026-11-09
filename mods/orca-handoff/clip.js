@@ -1,31 +1,29 @@
-// Clipboard and reveal, without a shell helper: exec() has no stdin, so text
-// goes through a temp file. Copied into each mod that needs it — a mod cannot
-// import outside its own folder (herdr-t3/scripts/sync.sh:10).
-import { exec, appHome } from "herdr";
+// Clipboard and reveal. Writing to the clipboard uses GPUI's native display server
+// integration (Wayland wl_data_device / X11 selection / macOS pasteboard / Win32)
+// via cx.write_to_clipboard or __clipboard_write_text, exactly matching Orca's
+// clipboard.writeText (clipboard-text-write-verify.ts:6). No CLI daemons, no disk I/O,
+// no subshells.
+// Copied into each mod that needs it — a mod cannot import outside its own folder (herdr-t3/scripts/sync.sh:10).
+import { exec } from "herdr";
 
-let tool = null;
-
-async function pick() {
-  if (tool) return tool;
-  for (const [cmd, args] of [["wl-copy", ["--version"]], ["xclip", ["-version"]], ["pbcopy", []], ["powershell.exe", ["-NoProfile", "-Command", "exit"]]]) {
-    try { if ((await exec(cmd, args)).code === 0) return (tool = cmd); } catch {}
+export function copyText(text, cx) {
+  if (typeof text !== "string") text = String(text ?? "");
+  if (!text) return;
+  if (cx && typeof cx.write_to_clipboard === "function") {
+    try { cx.write_to_clipboard(text); return; } catch {}
   }
-  return (tool = null);
-}
-
-export async function copyText(text) {
-  const cmd = await pick();
-  if (!cmd) return;
-  const tmp = `${appHome()}/data/.clip-${Date.now()}`;
-  await exec("sh", ["-c", 'mkdir -p "$(dirname "$1")" && printf %s "$2" > "$1"', "copy", tmp, text]);
-  const flags = cmd === "xclip" ? ["-selection", "clipboard"] : [];
-  await exec("sh", ["-c", '"$@" < "$0"', tmp, cmd, ...flags]);
-  await exec("rm", ["-f", tmp]);
-}
-
-export async function reveal(path) {
-  const dir = path.replace(/\/[^/]*$/, "") || path;
-  for (const [cmd, args] of [["xdg-open", [dir]], ["open", [dir]], ["explorer.exe", [dir]]]) {
-    try { if ((await exec(cmd, args)).code === 0) return; } catch {}
+  if (typeof globalThis.__clipboard_write_text === "function") {
+    try { globalThis.__clipboard_write_text(text); } catch {}
   }
 }
+
+export function reveal(path, isDir = false) {
+  const dir = isDir ? path : (path.replace(/\/[^/]*$/, "") || path);
+  for (const cmd of ["xdg-open", "open", "explorer.exe"]) {
+    try {
+      exec("sh", ["-c", 'command -v "$1" >/dev/null 2>&1 && ("$1" "$2" >/dev/null 2>&1 &)', "reveal", cmd, dir]);
+      return;
+    } catch {}
+  }
+}
+
