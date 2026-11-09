@@ -1,5 +1,5 @@
 # Project Documentation
-> Generated: 2026-11-08T03:08:00Z | Mode: DELTA (updated from 2026-11-08T01:54:00Z)
+> Generated: 2026-11-09T18:50:45Z | Mode: DELTA (updated from 2026-11-09T18:46:02Z)
 
 ## Tech Stack
 
@@ -41,7 +41,7 @@ Eighteen mods, all `"place": "none"` (composed into blocks rather than floated):
 | Mod | Owns | LOC |
 |---|---|---|
 | `orca-chrome` | titlebar strip and the sidebar footer | 68 |
-| `orca-nav` | Search, Tasks/Automations/Orca Mobile rows, history arrows, Projects header and its options menu | 429 |
+| `orca-nav` | Search, Tasks/Automations/Mobile rows, history arrows, Projects header and its options menu | 431 |
 | `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, owner avatars, saved folders | 1300 |
 | `orca-tabs` | the tab rail, window controls, right-sidebar toggle, close guards, drag reorder, drop-to-split indicators | 1110 |
 | `orca-pane` | the attached 32px pane header: tab pill, command/ellipsis menu, split controls, drag-to-unsplit | 350 |
@@ -64,11 +64,11 @@ Three rules shape the composition:
 - **A repo, not a session, is the sidebar unit.** One group per repo, anchored on its main
   checkout; the rows under it are `git worktree list`, including worktrees no space has opened
   (`mods/orca-spaces/worktree-plan.js`). Spaces only decide where you already are.
-- **A page, not a panel, is where the sidebar's Tasks/Automations/Orca Mobile rows go.** Each is
+- **A page, not a panel, is where the sidebar's Tasks/Automations/Mobile rows go.** Each is
   a child of the `main` stack in `layouts/orca.json`, selected with `layout.select`; choosing a
   workspace or tab selects the terminals back.
 - **A gap is a surface, not an omission.** When Herdr lacks the backend (PR Checks, Ports,
-  Tasks, Automations, Orca Mobile, …), the control still renders where Orca puts it and its body
+  Tasks, Automations, Mobile, …), the control still renders where Orca puts it and its body
   names what is missing in Orca's unavailable-state geometry (`docs/adr/0004-…`).
 
 Mods are isolated by rule: **a mod cannot import or read outside its own folder**. `svg()`/`image()` resolve against `~/.config/herdr-app`, so icons are copied per mod, and each ships its own `gpui-kit.d.ts` and `jsconfig.json`. The duplication is deliberate — it is what makes a mod folder independently installable.
@@ -171,9 +171,11 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 - `mods/orca-status/{command-code,copilot,omp}.svg` (new): Command Code and Copilot are Herdr's CC0 Simple Icons draws, copied into the mod so it installs alone; `omp.svg` is Orca's mark for the second probe's pending chip. All catalogued in `NOTICE` items 4 and 5.
 - `docs/adr/0014-mod-side-provider-quota-probing.md`: rewritten to record the two real sources, why credential-file probes were removed, and why Orca's signed HTTP fetchers are not re-implemented.
 - `GLOSSARY.md`: **Reading** and **Window label** defined; **Usage chip** now states that a mark without a number is not a chip.
-- `docs/superpowers/specs/2026-11-09-crew-chip-design.md` (new): crew chip in the pane header, from Orca's orchestration pill. Not implemented.
+- `docs/superpowers/specs/2026-11-09-crew-chip-design.md` (revised, still unimplemented): popup contract switched to `props().overlay` (exists only in the overlay instance) instead of a `crew: true` flag; `mod.json` gains an `"overlay"` declaration so `mod.open orca-pane` renders the card for proof without pointer automation; header repaint signature simplified to `address:status` (parent dropped).
 - `README.md`, `RECIPE.md`: status bar documented as one chip per meterable provider via `agy` and `omp usage`; new-menu catalog caching and CLI resolution noted.
+- `docs/superpowers/plans/2026-11-09-crew-chip.md` (new): five-task implementation plan — `crew.js` + `crew.test.js` (pure derivation, `node --test`), `status.js` + asset copies, `main.js` chip/popup branch, `mod.json` overlay declaration, docs/`NOTICE` updates. Crew rule: live children with a `status` plus the parent when it has one (`herdr-app/defaults/mods/agents/main.js:176`).
+- `mods/orca-nav/main.js`, `mods/orca-panel-gap/main.js`: the sidebar row and gap page now read "Mobile" instead of "Orca Mobile" (icon, page id, and gap body unchanged).
 
 ## Last Scanned
 
-2026-11-09T18:46:02Z
+2026-11-09T18:50:45Z

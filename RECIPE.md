@@ -12,7 +12,7 @@ Left to right, divider 1px `border` (`#2e2e2e`):
   - **Brand bar** (36px tall, drags the window; `main.css:1086-1088` `titlebar-left`): Orca logo (16px at 75% opacity, margin `0 4px 0 10px`), followed by window drag region and 14px icon buttons (`p-4 rounded-4`; `TitlebarLeftControls.tsx`).
   - **Nav header** (168px tall; `SidebarNav.tsx:99-130+`):
     - Search: 28px tall button (`h-28 px-8 gap-8 rounded-6 bg-foreground/5`), 13px medium text at 60%, 16px search icon at 30% (`SidebarNav.tsx:99-116`).
-    - Navigation rows: full-width inside `px-2 pt-2 pb-1` container, `rounded-md px-2 py-1.5 text-[13px]`, inactive `foreground/60`, hover `foreground/8`. Rows: Search, Tasks, Automations, Orca Mobile with their respective 16px icons.
+    - Navigation rows: full-width inside `px-2 pt-2 pb-1` container, `rounded-md px-2 py-1.5 text-[13px]`, inactive `foreground/60`, hover `foreground/8`. Rows: Search, Tasks, Automations, Mobile with their respective 16px icons.
     - Projects header band (32px tall, `mt-2 h-8 px-2 gap-1.5`; `SidebarHeader.tsx:61-66`): section label `Projects` (`pl-2 pr-0.5 text-xs semibold muted/80`), followed by 24px action buttons with 14px icons at stroke 2.25: Activity bell toggle (`w-8`), Add Project (`folder-plus`), Collapse All toggle (`chevrons-up-down` / `chevrons-down-up`), and New Workspace (`plus`).
   - **Spaces & Project Groups** (flexible block, `weight: 1`):
     - Project group headers (28px tall, `h-7 w-full gap-1.5 pr-2`; `worktree-list/rows/SectionHeader.tsx:227-340`): 16px icon slot with folder glyph (`size-4 rounded-[4px]`, glyph `size-3.5`), `text-[13px] font-semibold leading-4` repository name, and a 20px collapse chevron (`size-3.5`, `-rotate-90` when collapsed) flush right.

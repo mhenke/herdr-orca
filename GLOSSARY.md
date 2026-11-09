@@ -179,7 +179,7 @@ exactly one thing here.
   (copy its markup literally, impossible here) and not *invent* (a control Orca has no
   counterpart for). See AGENTS.md rule 1.
 
-- **Page** — a full view that replaces the middle column: Tasks, Automations, Orca Mobile. A
+- **Page** — a full view that replaces the middle column: Tasks, Automations, Mobile. A
   page is not a sidebar panel: its body occupies the workspace column and is selected in the
   `main` stack, and choosing a workspace or tab shows the terminals again. A row in the sidebar
   may open a page; the page is the destination, not the row.
