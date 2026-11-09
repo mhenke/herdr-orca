@@ -16,9 +16,9 @@
 // "Floating blocks"), so Herdr places it 12 px in from the edge (window/floats.rs:14).
 // The mod draws only content; Herdr draws the frame. An empty div hides both
 // (window/floats.rs:187,198).
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, run, theme, nextCommand, keys } from "herdr";
+import { agents, run, theme, nextCommand, keys, setShared, openOverlay } from "herdr";
 
 // Orca's DEFAULT_PANEL_WIDTH/HEIGHT, MIN_PANEL_WIDTH/HEIGHT and viewport clamp
 // (`floating-terminal-panel-bounds.ts:1-4,89-90`).
@@ -29,13 +29,14 @@ const MIN_HEIGHT = 280;
 
 // `AgentStateDot` at its default `sm` size (`src/renderer/src/components/AgentStateDot.tsx:105-197`):
 // a 10px box (`h-2.5 w-2.5`), 10px glyphs (`size-2.5`), and a 6px inner dot (`size-1.5`).
-// Statuses map to Herdr's 4-state rollup: working (AgentWorkingSpinner turning 1000ms in t.working),
-// blocked (AgentQuestionIcon message-circle-question in t.blocked), done (CircleCheck in
-// t.done), and idle (6px dot in t.idle + "66").
+// Statuses map to Herdr's 4-state rollup: working (AgentWorkingSpinner at the 6px *inner*
+// size, `:130-138`, not the 10px glyph slot in t.working), blocked (AgentQuestionIcon
+// message-circle-question in t.blocked), done (CircleCheck in t.done), and idle (6px dot in
+// t.idle + "66" = neutral-500/40).
 function stateDot(status, t) {
   const box = div().size(10).flex_none().flex().items_center().justify_center();
   if (status === "working") {
-    return box.child(svg("mods/orca-float/agent-working-spinner.svg").size(10).flex_none().text_color(t.working).spin(1000));
+    return box.child(svg("mods/orca-float/agent-working-spinner.svg").size(6).flex_none().text_color(t.working).spin(1000));
   }
   if (status === "blocked") {
     return box.child(svg("mods/orca-float/message-circle-question.svg").size(10).flex_none().text_color(t.blocked));
@@ -46,6 +47,36 @@ function stateDot(status, t) {
   return box.child(div().size(6).rounded_full().flex_none().bg(t.idle + "66"));
 }
 
+// Orca's `AgentTypeIcon` beside the state dot (`worktree-card-compact-agent-row.tsx:241-242`,
+// size 13); the catalog map is orca-spaces/main.js:884-908. The marks live in this mod's
+// folder because a mod must draw alone (AGENTS.md rule 9), and `svg()` is a one-color mask
+// (gpui-kit.d.ts:20273-20281), so marks with their own fills are drawn as images.
+const OWN_FILLS = new Set(["omp", "droid", "kilo"]);
+const AGENT_MARKS = {
+  codex: "mono",
+  omp: "mods/orca-float/agent-icons/omp.svg",
+  gemini: "mods/orca-float/agent-icons/gemini.png",
+  cursor: "mods/orca-float/agent-icons/cursor.png",
+  grok: "mods/orca-float/agent-icons/grok.png",
+  qoder: "mods/orca-float/agent-icons/qoder.png",
+  hermes: "mods/orca-float/agent-icons/hermes.png",
+  "dsh-tui": "mods/orca-float/agent-icons/dsh.png",
+  droid: "mods/orca-float/agent-icons/droid.svg",
+  kilo: "mods/orca-float/agent-icons/kilo.svg",
+  aider: "mods/orca-float/agent-icons/aider.svg",
+};
+// `mono` is Orca's one-color Codex glyph; the program table supplies it.
+function agentMark(a, t) {
+  const p = a.program;
+  const override = AGENT_MARKS[a.app];
+  if (override === "mono") return p?.icon ? svg(p.icon).size(13).flex_none().text_color(t.muted) : null;
+  if (override) return OWN_FILLS.has(a.app) || !override.endsWith(".svg")
+    ? image(override).w(13).h(13).flex_none()
+    : svg(override).size(13).flex_none().text_color(t.muted);
+  if (!p?.icon) return null;
+  return p.tint ? svg(p.icon).size(13).flex_none().text_color(t.muted) : image(p.icon).w(13).h(13).flex_none();
+}
+
 // Orca's row title falls back through title -> app -> program name
 // (orca-agents/main.js:22; `program.agent` is a boolean).
 const title = (a) => a.title?.trim() || a.app || a.program?.name || "Agent";
@@ -54,10 +85,12 @@ export default class FloatWorkspace extends View {
   init(_props, cx) {
     // Orca starts the panel hidden; the hotkey toggles it (`floatingTerminal.toggle`).
     this.open = false;
+    // The last values written to the status bar's toggle (`publish`).
+    this.published = { open: null, attention: null };
     cx.spawn(async (cx) => {
       for (;;) {
         const cmd = await nextCommand();
-        if (cmd === "toggle") this.open = !this.open;
+        if (cmd === "toggle") this.setOpen(!this.open, cx);
         cx.notify();
       }
     });
@@ -65,6 +98,7 @@ export default class FloatWorkspace extends View {
     // timer for the same reason (main.js:36-43).
     this.seen = "";
     cx.timer.every(1000, (cx) => {
+      this.publish();
       const now = agents().map((a) => `${a.address}:${a.status}`).join(",");
       if (now === this.seen) return;
       this.seen = now;
@@ -72,12 +106,36 @@ export default class FloatWorkspace extends View {
     });
   }
 
+  setOpen(open, cx) {
+    if (this.open === open) return;
+    this.open = open;
+    this.publish();
+    cx?.notify();
+  }
+
+  // Orca's status-bar dot reads the panel's visibility and unread state
+  // (`use-status-bar-controller.ts:216`). Herdr mods share no store, so both go through
+  // `shared`, which re-renders every mod — hence only a change is written. `blocked` is
+  // Herdr's "needs you" word, Orca's attention case; `done` is completion, which Herdr
+  // already announces once, so it stays out.
+  publish() {
+    const attention = agents().some((a) => a.status === "blocked");
+    if (this.published.open === this.open && this.published.attention === attention) return;
+    this.published = { open: this.open, attention };
+    setShared("orca-float.open", this.open);
+    setShared("orca-float.attention", attention);
+  }
+
   row(a, t) {
+    // Orca's compact row draws the state mark, then the agent's identity mark, then the title
+    // (`worktree-card-compact-agent-row.tsx:233-242`).
+    const mark = agentMark(a, t);
     return h_flex().id(`float-agent-${a.address}`).w_full().min_w(0).flex_none().px(12).py(8).gap(6).items_start()
       .border_b(1).border_color(t.border).cursor_pointer().hover((s) => s.bg(t.hover))
       .role("button").accessibility_label(`${title(a)} — ${a.status}`)
       .on_click(() => run("agent.focus", { terminal: a.address }))
       .child(stateDot(a.status, t))
+      .when(Boolean(mark), (el) => el.child(mark))
       .child(v_flex().flex_1().min_w(0)
         .child(div().min_w(0).truncate().text_size(13).font_medium().line_height("20px").text_color(t.foreground).child(title(a)))
         .child(h_flex().mt(2).gap(4).items_center().text_size(11).line_height("16px").text_color(t.muted)
@@ -118,7 +176,7 @@ export default class FloatWorkspace extends View {
         .child(h_flex().id("orca-float-new").h(32).w_full().px(12).gap(10).rounded(6).items_center()
           .cursor_pointer().hover((s) => s.bg(t.hover))
           .role("button").accessibility_label("New terminal")
-          .on_click((_e, cx) => { run("tab.new"); this.open = false; cx.notify(); })
+          .on_click((_e, cx) => { run("tab.new"); this.setOpen(false, cx); })
           .child(div().flex_none().opacity(0.9).text_color(t.foreground).child(svg("mods/orca-float/terminal-square.svg").size(14)))
           .child(div().flex_1().min_w(0).truncate().text_size(14).line_height("14px").text_color(t.foreground).child("New Terminal"))
           .when(Boolean(newTabChord), (el) => el.child(div().flex_none().text_size(10).line_height("12px").opacity(0.9).text_color(t.foreground).child(newTabChord))))
@@ -127,27 +185,37 @@ export default class FloatWorkspace extends View {
         .child(h_flex().id("orca-float-minimize").h(32).w_full().px(12).gap(10).rounded(6).items_center()
           .cursor_pointer().hover((s) => s.bg(t.hover))
           .role("button").accessibility_label("Minimize floating workspace")
-          .on_click((_e, cx) => { this.open = false; cx.notify(); })
+          .on_click((_e, cx) => this.setOpen(false, cx))
           .child(div().flex_none().opacity(0.9).text_color(t.foreground).child(svg("mods/orca-float/minus.svg").size(14)))
           .child(div().flex_1().min_w(0).truncate().text_size(14).line_height("14px").text_color(t.foreground).child("Minimize"))
           .when(Boolean(toggleChord), (el) => el.child(div().flex_none().text_size(10).line_height("12px").opacity(0.9).text_color(t.foreground).child(toggleChord)))));
     return v_flex().id("orca-float").w(w).h(h).min_h(0).overflow_hidden().text_color(t.foreground)
       // Orca's floating title bar (`FloatingTerminalPanelSurface.tsx:116-117`): `h-9`
       // (36px), `border-b border-border`, over the float frame's card colour. Of its
-      // window controls (`FloatingTerminalWindowControls.tsx:91-188`) only Minimize —
-      // `×`, `onOpenChange(false)` — has a Herdr backend; maximize and the
-      // default-agent launch are dropped.
+      // window controls (`FloatingTerminalWindowControls.tsx:91-188`) Herdr has Minimize —
+      // `×`, `onOpenChange(false)` — and a launcher; Maximize is dropped because the panel's
+      // bounds are the layout's own `float-workspace` block, not a window.
       .child(h_flex().h(36).flex_none().px(12).gap(6).items_center().border_b(1).border_color(t.border)
         .child(v_flex().flex_1().min_w(0)
           .child(div().truncate().text_size(12).font_semibold().child("Floating Workspace"))
           .child(div().truncate().text_size(11).text_color(t.muted).child("Live agent sessions")))
+        // Orca's launch control (`FloatingTerminalWindowControls.tsx:91-121`) starts the
+        // person's default agent inside the panel. Herdr has no default-agent setting
+        // (herdr-app/src/settings.rs:471-498), so this opens Herdr's own agent launcher —
+        // `new-menu`, the popup the tab bar's `+` opens — instead of guessing one.
+        .child(div().id("orca-float-start-agent").size(24).flex_none().flex().items_center().justify_center().rounded(6)
+          .border_1().border_color(t.border).bg(t.raised).text_color(t.foreground)
+          .cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .role("button").accessibility_label("Start an agent")
+          .on_click(() => openOverlay({ mod: "new-menu", kind: "popup", width: 288, height: 512 }))
+          .child(svg("mods/orca-float/plus.svg").size(14).flex_none()))
         // Minimize's `icon-xs` outline button: `size-6 rounded-md` (`button.tsx:41`),
         // `border-border bg-secondary hover:bg-accent` (`FloatingTerminalWindowControls.tsx:25-26`).
         .child(div().id("orca-float-close").size(24).flex_none().flex().items_center().justify_center().rounded(6)
           .border_1().border_color(t.border).bg(t.raised).text_color(t.foreground).text_size(14)
           .cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
           .role("button").accessibility_label("Hide floating workspace")
-          .on_click((_e, cx) => { this.open = false; cx.notify(); })
+          .on_click((_e, cx) => this.setOpen(false, cx))
           .child("×")))
       .child(v_flex().flex_1().min_h(0)
         .when(list.length > 0, (el) => el

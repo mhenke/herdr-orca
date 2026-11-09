@@ -6,7 +6,7 @@
 // visibility-menu trigger last.
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { machines, updates, theme, run, exec, readTextFile } from "herdr";
+import { machines, updates, theme, run, exec, readTextFile, shared, keys } from "herdr";
 import { probeAllProviders } from "./usage.js";
 
 export default class OrcaStatus extends View {
@@ -49,6 +49,17 @@ export default class OrcaStatus extends View {
     // machines() stays "loading" until its first read (herdr.d.ts:22323); counting
     // before that would flash "0 hosts" on every start.
     const hostsKnown = hosts.length > 0 && !hosts.some(m => m.layout === "loading");
+
+    // StatusBarSurface.tsx:330-366 — the floating-workspace toggle at the maintenance row's
+    // end: a 20px (`size-5`) outlined button around the 14px (`size-3.5`) PanelsTopLeft glyph,
+    // with a 6px amber dot (`size-1.5 bg-amber-500 ring-1 ring-secondary`) while the panel is
+    // closed with activity the person has not seen (`use-status-bar-controller.ts:216`).
+    // Orca reads both flags from its store; Herdr mods share none, so orca-float publishes them
+    // and the bar reads them back (AGENTS.md rule 10).
+    const floatOpen = shared("orca-float.open") === true;
+    const floatAttention = !floatOpen && shared("orca-float.attention") === true;
+    const floatLabel = floatOpen ? "Minimize Floating Workspace" : "Show Floating Workspace";
+    const floatChord = (keys() ?? []).find(k => k.action === "orca-float.toggle")?.keys ?? "";
 
     // Orca segment shape: gap-1.5 px-1 py-0.5 rounded, 12px glyph, 11px label,
     // hover:bg-accent/70 (UpdateStatusSegment.tsx:115-122); the label keeps #f0f0f0.
@@ -154,6 +165,18 @@ export default class OrcaStatus extends View {
         .when(Boolean(up.app.ready), el => el.child(segment("st-app-ready", "circle-check", "Update ready", { iconColor: t.done, on: openSettings("updates") })))
         // Remote hosts (SshStatusSegment.tsx:177)
         .when(hostsKnown, el => el.child(segment("st-hosts", "server", `${connected} host${connected === 1 ? "" : "s"}`, { muted: true, on: openSettings("machines") })))
+        // StatusBarSurface.tsx:330-366 — `border-border bg-secondary shadow-xs`, hover
+        // `bg-accent`; the dot sits `right-0.5 top-0.5` and its ring is the button's fill.
+        .child(div().id("st-float").relative().size(20).flex_none().flex().items_center().justify_center().rounded(4)
+          .border_1().border_color(t.border).bg(t.raised).text_color(t.foreground)
+          .cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))
+          .role("button")
+          .accessibility_label(floatAttention ? `${floatLabel}, new activity` : floatLabel)
+          .tooltip(floatChord ? `${floatLabel} (${floatChord})` : floatLabel)
+          .on_click(() => run("orca-float.toggle"))
+          .child(svg("mods/orca-status/panels-top-left.svg").size(14).flex_none())
+          .when(floatAttention, el => el.child(div().absolute().top(2).right(2).size(6).rounded_full().flex_none()
+            .bg("#f59e0b").border_1().border_color(t.raised))))
       );
   }
 }

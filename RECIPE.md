@@ -52,13 +52,18 @@ Left to right, divider 1px `border` (`#2e2e2e`):
   - Height 24px, `px-3 gap-4`, top border `border`, `text-xs`.
   - Left: Git branch badge, dirty file count, ahead/behind sync indicator.
   - Center: Agent rollup status indicator.
-  - Right: Host machine count, update status indicator, and workspace connection state.
+  - Right: Host machine count, update status indicator, and the floating-workspace toggle
+    (`StatusBarSurface.tsx:330-366`: 20px outlined button, `PanelsTopLeft` at 14px, amber
+    6px dot while the panel is closed with an agent blocked).
 
 - **Floating workspace** (`float-workspace`, `edge: bottom`, `align: end`; `layouts/orca.json`):
   - Mod `orca-float`: Orca's `Mod+Alt+A` panel, toggled here by `ctrl-alt-a` →
     `orca-float.toggle` (`keys.json`). Opens a 920x560 panel (min 420x280, clamped to the
     viewport as `floating-terminal-panel-bounds.ts:89-97` does) at bottom-right, listing the
-    live agent sessions; a row focuses its agent, `×` hides the panel.
+    live agent sessions; a row shows the state mark then the agent's identity mark
+    (`worktree-card-compact-agent-row.tsx:233-242`), focuses its agent, and `×` hides the
+    panel. The header's `+` opens the `new-menu` agent launcher: Orca's first header button
+    launches the person's `defaultTuiAgent`, and Herdr has no such setting.
   - Named divergence: Herdr cannot toggle a float's visibility by command (`layout.toggle`
     walks nodes, not floats) and a mod cannot host a terminal, so the panel floats agents
     rather than a tabbed terminal/browser/markdown workspace. See
@@ -164,7 +169,8 @@ A missing token paints **magenta** (`hsla(0.83, 1.0, 0.5, 1.0)` by design; `sett
   - `mods/orca-menu`: 208px / 176px / 240px context menu overlay for cards, spaces, tabs and terminal panes; clipboard writes land in GPUI's in-app clipboard and on the host display server (`wl-copy` / `xclip` / `pbcopy` / `powershell.exe`, text on argv, no temp files), file reveals through the desktop opener.
   - `mods/new-menu`: 288px create dropdown overlay for creating terminals and worktrees.
   - `mods/orca-float`: Bottom-right floating workspace panel (`ctrl-alt-a`) listing live agent
-    sessions; named divergence documented in
+    sessions with their state and identity marks, plus a header launcher; named divergence
+    documented in
     `docs/adr/0003-a-float-cannot-hold-a-toggleable-terminal.md`.
   - `mods/orca-pane-status`: Pane-footer agent state mark, hard right (16px pane header).
 
