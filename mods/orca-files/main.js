@@ -372,10 +372,12 @@ export default class Files extends View {
     cx.notify();
   }
 
-  // `canCollapseAll` is `expanded.size > 0` (FileExplorer.tsx:150); collapsing drops the
-  // expanded folders and their cached listings, as `toggle` does.
+  // canCollapseAll is files-view only and never under a name filter
+  // (FileExplorer.tsx:150, handleCollapseAll :151-157); collapsing drops the expanded
+  // folders and their cached listings, as `toggle` does. Under a name filter the tree is
+  // `nfMap`, so clearing `folders` would change nothing on screen.
   collapseAll(cx) {
-    if (!this.folders.size) return;
+    if (this.view !== "files" || this.name.value().trim() || !this.folders.size) return;
     for (const folder of this.folders) this.entries.delete(folder);
     this.folders.clear();
     cx.notify();
@@ -624,6 +626,8 @@ cp -r "$src" "$cand"
   command(c, cx) {
     if (c === "remove") return this.remove(cx);
     if (c === "refresh") return this.refresh(cx);
+    // The More menu's filter toggles rebuild the cached name projection (see moreView).
+    if (c === "filters") return this.scheduleName(cx);
     if (c === "view") {
       const file = shared("orca-files.viewFile");
       setShared("orca-files.viewFile", null);
@@ -824,8 +828,10 @@ cp -r "$src" "$cand"
   // FileExplorerToolbar.tsx:66 — `flex h-8 min-h-8 items-center gap-2 border-b border-border px-2`;
   // controls are icon-xs ghost buttons: 24x24 rounded-md with 12px glyphs (button.tsx:41).
   toolbar(t) {
-    // canCollapseAll = !hasNameFilter && expanded.size > 0 (FileExplorer.tsx:150).
-    const name = this.repo(), collapse = this.folders.size > 0 && !this.q.value().trim();
+    // canCollapseAll = isFilesViewActive && !hasNameFilter && expanded.size > 0
+    // (FileExplorer.tsx:150); canRefresh = isFilesViewActive (:260).
+    const name = this.repo(), files = this.view === "files";
+    const collapse = files && !this.name.value().trim() && this.folders.size > 0;
     const btn = (id, label, icon, action, enabled) => div().id(id).size(24).flex_none().flex().items_center().justify_center().rounded(6)
       .text_color(t.muted).tooltip(label).disabled(!enabled)
       .when(enabled, s => s.cursor_pointer().hover(x => x.bg(t.hover).text_color(t.foreground)))
@@ -838,10 +844,11 @@ cp -r "$src" "$cand"
       // :73-106 — Collapse All; `aria-disabled` + `opacity-50` when nothing is expanded.
       .child(btn("files-collapse", "Collapse All", svg("mods/orca-files/list-collapse.svg").size(12).flex_none(),
         (_e, cx) => this.collapseAll(cx), collapse))
-      // :107-144 — Refresh Explorer; Loader2-style spinner while `refresh.isRefreshing`.
+      // :107-144 — Refresh Explorer; Loader2-style spinner while `refresh.isRefreshing`,
+      // disabled outside the files view (`aria-disabled={!canRefresh || refresh.isRefreshing}`).
       .child(btn("files-refresh", "Refresh Explorer",
         this.loading ? svg("mods/orca-files/refresh-cw.svg").size(12).flex_none().spin(1000) : svg("mods/orca-files/refresh-cw.svg").size(12).flex_none(),
-        (_e, cx) => this.refresh(cx), !this.loading))
+        (_e, cx) => this.refresh(cx), files && !this.loading))
       // :145-198 — More Explorer Actions; the dropdown opens at the pointer.
       .child(btn("files-more", "More Explorer Actions", svg("mods/orca-files/ellipsis.svg").size(12).flex_none(),
         () => openOverlay({ mod: "orca-files", kind: "popup", width: 192, height: this.git ? 140 : 112,
@@ -863,9 +870,12 @@ cp -r "$src" "$cand"
       .child(div().child(label));
     const fm = window()?.platform === "windows" ? "File Explorer" : window()?.platform === "macos" ? "Finder" : "File Manager";
     return v_flex().id("orca-files-more").w_full().min_h(0).p(5).bg(t.popover).text_size(12.8).text_color(t.foreground)
-      .child(check(0, "Show Dotfiles", f.dotfiles, () => setFilter(root, "dotfiles", !f.dotfiles)))
+      // The plain tree reads `filters()` every render, but the name projection caches its
+      // rows, so a toggle also asks the main copy to rebuild it (FileExplorer.tsx:134-148
+      // recomputes it from the new state).
+      .child(check(0, "Show Dotfiles", f.dotfiles, () => { setFilter(root, "dotfiles", !f.dotfiles); run("orca-files.filters"); }))
       // Orca renders this item while the repo supports Git (FileExplorerToolbar.tsx:177-187).
-      .when(git, el => el.child(check(1, "Show Git Ignored Files", f.ignored, () => setFilter(root, "ignored", !f.ignored))))
+      .when(git, el => el.child(check(1, "Show Git Ignored Files", f.ignored, () => { setFilter(root, "ignored", !f.ignored); run("orca-files.filters"); })))
       .child(div().h(1).mt(4).mb(4).bg(t.border))
       // WorktreeOpenInMenuItems (:189-196): Orca lists its `openInApplications` editors then
       // the file manager. Herdr has no editor setting or editor command, so only the rows it
