@@ -19,12 +19,29 @@
 //  - Effort, fast mode, service tier and permission rows (`AgentLaunchSetupPanel.tsx:283-399`)
 //    are not ported: they need a session to apply them mid-run and a draft store to remember
 //    the pick. A launch choice here is the model alone.
-import { exec } from "herdr";
+import { exec, home } from "herdr";
+
+// The app's own PATH is not the login shell's: `omp` installs to ~/.bun/bin, which a desktop
+// launch misses, while `knownAgents()` checks the login shell and still calls it installed.
+// Orca resolves a CLI through PATH, then the version-manager bins a GUI launch misses
+// (`node-cli-command-resolution.ts:123-140`); the nvm/fnm scans there need a directory listing
+// this API has no use for — one extra path to add if a CLI ships that way.
+const INSTALL_DIRS = [".bun/bin", ".local/bin", ".volta/bin", ".asdf/shims", ".local/share/mise/shims", ".local/share/pnpm", ".yarn/bin", "Library/pnpm"];
+
+// The probe's program as the login shell would find it; rejects only when nothing starts.
+async function agentExec(command, args) {
+  let first;
+  for (const program of [command, ...INSTALL_DIRS.map((dir) => `${home()}/${dir}/${command}`)]) {
+    try { return await exec(program, args, { timeout: 60000 }); }
+    catch (error) { first ??= error; }
+  }
+  throw first;
+}
 
 // `omp models --json` (`OMP_MODEL_LIST_ARGS`, omp-model-list-probe.ts:5): the provider/id
 // selector is exactly what `--model` takes, and a bare id collides across providers.
 async function ompModels() {
-  const { stdout } = await exec("omp", ["models", "--json"], { timeout: 60000 });
+  const { stdout } = await agentExec("omp", ["models", "--json"]);
   // Update notices may print before the outermost JSON object (omp-model-list-probe.ts:7-27).
   const start = stdout.indexOf("{");
   const end = stdout.lastIndexOf("}");
@@ -42,7 +59,7 @@ async function ompModels() {
 // `agy models` prints "<slug>\t<label>" after a fetching notice; the slug is what
 // `agy --model` takes (`agent-session-option-catalog-antigravity.ts:33`).
 async function agyModels() {
-  const { stdout } = await exec("agy", ["models"], { timeout: 60000 });
+  const { stdout } = await agentExec("agy", ["models"]);
   return stdout.split("\n").flatMap((line) => {
     const [id, label] = line.split("\t");
     return id && label?.trim() ? [{ id: id.trim(), label: label.trim() }] : [];

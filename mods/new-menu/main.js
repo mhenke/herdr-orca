@@ -12,9 +12,27 @@ import { MODELS } from "./models.js";
 let agentsCache = null;
 let agentsFailed = false;
 let agentsLoading = false;
-// Models an agent reported, by program key: `omp models --json` takes seconds, so one ask
-// serves every open.
-const modelCache = new Map();
+// A probed model list survives the app; the picker paints it before asking again. Orca serves a
+// saved catalog until it is 10 minutes old (`agent-model-catalog-entry-lifetime.ts:12`).
+const MODELS_KEY = "new-menu.models.v1";
+const MODELS_FRESH_MS = 10 * 60_000;
+
+function cachedModels(key) {
+  try {
+    const hit = JSON.parse(localStorage.getItem(MODELS_KEY) ?? "{}")[key];
+    return hit && Date.now() - hit.at < MODELS_FRESH_MS ? hit.models : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberModels(key, models) {
+  try {
+    const all = JSON.parse(localStorage.getItem(MODELS_KEY) ?? "{}");
+    all[key] = { at: Date.now(), models };
+    localStorage.setItem(MODELS_KEY, JSON.stringify(all));
+  } catch {}
+}
 
 // Visible row counts follow the 288x512 popup and its 32px rows (orca-tabs/main.js:343).
 const FIT = { list: 13, models: 11 };
@@ -108,18 +126,21 @@ export default class NewMenu extends View {
   }
 
   // Orca only adds `--model` after selection (`AgentLaunchTextModelDefault.tsx:23-33`,
-  // `agent-session-option-launch.ts:194-203`).
+  // `agent-session-option-launch.ts:194-203`). Its default row is drawn whether or not the
+  // catalog was discovered (`AgentLaunchTextModelDefault.tsx:26-35`), so a failed probe never
+  // blocks the launch.
   modelRows() {
     const agent = this.picking;
     const seed = MODELS[agent.key];
     const all = seed.models ?? this.models;
+    const rows = [{ label: "Default", hint: "its own", run: () => this.launch(agent) }];
     if (!all) {
-      return [{ label: this.modelsFailed ? "Could not list models" : "Asking the agent…", disabled: true }];
+      return [...rows, { label: this.modelsFailed ? "Could not list its models" : "Asking the agent…", disabled: true }];
     }
     const q = this.filter.trim().toLowerCase();
     const matching = q ? all.filter((m) => `${m.label} ${m.id}`.toLowerCase().includes(q)) : all;
     return [
-      { label: "Default", hint: "its own", run: () => this.launch(agent) },
+      ...rows,
       ...(all.length
         ? matching.map((m) => ({ label: m.label, hint: m.id, run: () => this.launch(agent, m.id) }))
         : [{ label: "No models listed", disabled: true }]),
@@ -158,7 +179,7 @@ export default class NewMenu extends View {
     this.at = 0;
     this.filter = "";
     this.input.set_value("");
-    this.models = modelCache.get(agent.key) ?? null;
+    this.models = cachedModels(agent.key);
     this.modelsFailed = false;
     this.input.focus();
     // The filter mounts next frame, so retry focus after paint (defaults/mods/picker/main.js:44).
@@ -167,11 +188,12 @@ export default class NewMenu extends View {
     if (this.models || !seed.probe) return;
     cx.spawn(async (cx) => {
       try {
-        modelCache.set(agent.key, await seed.probe());
+        const models = await seed.probe();
+        rememberModels(agent.key, models);
+        if (this.picking === agent) this.models = models;
       } catch {
-        this.modelsFailed = true;
+        if (this.picking === agent) this.modelsFailed = true;
       }
-      if (this.picking === agent) this.models = modelCache.get(agent.key) ?? null;
       cx.notify();
     });
   }
