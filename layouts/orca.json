@@ -126,20 +126,20 @@
                     {
                       "id": "main-terminals",
                       "type": "block",
+                      "movable": false,
                       "content": {
                         "tab": "active",
                         "pane": {
                           "gap": 0,
                           "radius": 0,
                           "background": "background",
-                          "lone": true,
+                          "lone": false,
                           "header": {
                             "content": {
                               "mod": "orca-pane"
                             },
-                            "height": 24,
-                            "position": "top",
-                            "reveal": "hover"
+                            "height": 32,
+                            "position": "top"
                           }
                         }
                       }

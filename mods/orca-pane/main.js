@@ -3,18 +3,138 @@
 // A pane's header, for layouts that frame their panes:
 //   { "tab": "active", "pane": { "header": { "content": { "mod": "pane" } } } }
 // Shows the pane's title, and on hover buttons that split and close this pane.
-// Pane drag/move is owned by herdr-app's native pane_grip (`pane_drag.rs`).
+// Multi-pane drag to tab area ported from Orca: TerminalPaneHeaderOverlay.tsx:188-196,
+// terminal.css:275-306, terminal-tab-strip-drop-target.ts:12-16, and use-terminal-pane-tab-detach-actions.ts:16-36,61-73.
 // Props from the app: { pane, terminal }. Click: focus the pane.
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { panes, props, run, openOverlay, spaces } from "herdr";
+import { panes, props, run, openOverlay, spaces, shared, setShared, settings } from "herdr";
 
 export default class Pane extends View {
-  init() { this.hovered = false; }
+  init() {
+    this.hovered = false;
+    this.dragStart = null;
+    this.isDragging = false;
+    this.pollTimer = null;
+    this.lastPos = null;
+    this.still = 0;
+  }
 
   me() {
     return panes().find((p) => p.pane === props()?.pane);
+  }
+
+  // Orca: onBeginPaneDrag (TerminalPaneHeaderOverlay.tsx:188-196) & beginPaneDragFromPointerDown
+  // (pane-drag-pointer.ts:12-100). Starts tracking the drag; if moved >= 8px towards the tab strip,
+  // broadcasts drag state through shared store so orca-tabs shows the insertion indicator.
+  startPaneDrag(pos, pane, terminal, cx) {
+    this.dragStart = {
+      x: pos.x,
+      y: pos.y,
+      pane,
+      terminal,
+      time: Date.now(),
+    };
+    this.isDragging = false;
+    this.still = 0;
+    this.lastPos = { x: pos.x, y: pos.y };
+
+    if (this.pollTimer) {
+      try { this.pollTimer.cancel(); } catch {}
+      this.pollTimer = null;
+    }
+
+    this.pollTimer = cx.timer.every(16, (cx) => {
+      if (!this.dragStart) {
+        if (this.pollTimer) {
+          try { this.pollTimer.cancel(); } catch {}
+          this.pollTimer = null;
+        }
+        return;
+      }
+
+      const at = typeof window !== "undefined" ? window.mouse_position() : null;
+      if (!at) return;
+
+      const dx = at.x - this.dragStart.x;
+      const dy = at.y - this.dragStart.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (!this.isDragging && dist >= 8) {
+        this.isDragging = true;
+      }
+
+      if (this.isDragging) {
+        // Tab strip is at y <= 48 * zoom (terminal-tab-strip-drop-target.ts:12-16 & use-terminal-pane-tab-detach-actions.ts:16-36).
+        const zoom = settings()?.zoom || 1;
+        const inTabStrip = at.y <= 48 * zoom;
+        setShared("orca-tabs.pane-drag", {
+          active: true,
+          pane: this.dragStart.pane,
+          terminal: this.dragStart.terminal,
+          x: at.x,
+          y: at.y,
+          inTabStrip,
+        });
+
+        const moved = !this.lastPos || this.lastPos.x !== at.x || this.lastPos.y !== at.y;
+        this.lastPos = { x: at.x, y: at.y };
+        this.still = moved ? 0 : (this.still ?? 0) + 1;
+
+        // Pointer stopped moving (inferred release since host provides no global mouse-up).
+        // 15 ticks at 16ms = ~240ms of stillness.
+        if (this.still >= 15) {
+          this.finishPaneDrag(at, cx);
+        }
+      }
+    });
+  }
+
+  // Orca: detachTerminalPaneToTab (terminal-pane-tab-detach.ts:40-58) & handleExternalPaneDrop
+  // (use-terminal-pane-tab-detach-actions.ts:61-73). When released in the tab strip area (y <= 48 * zoom),
+  // unsplit the pane into a new tab via terminal.park -> terminal.keep.
+  finishPaneDrag(at, cx) {
+    const drag = this.dragStart;
+    this.dragStart = null;
+    this.isDragging = false;
+    this.still = 0;
+    this.lastPos = null;
+    if (this.pollTimer) {
+      try { this.pollTimer.cancel(); } catch {}
+      this.pollTimer = null;
+    }
+    setShared("orca-tabs.pane-drag", null);
+
+    if (!drag) return;
+
+    const zoom = settings()?.zoom || 1;
+    if (at.y <= 48 * zoom) {
+      setShared("orca-tabs.action", {
+        kind: "unsplit-to-tab",
+        terminal: drag.terminal,
+        pane: drag.pane,
+        dropX: at.x,
+      });
+      cx.notify();
+    }
+  }
+
+  endPaneDrag(pos, pane, terminal, cx) {
+    if (!this.dragStart) return;
+    const wasDragging = this.isDragging;
+    const at = typeof window !== "undefined" ? window.mouse_position() : pos;
+    this.finishPaneDrag(at, cx);
+
+    // If mouse was released without dragging (< 8px), treat as a click to open orca-menu.
+    if (!wasDragging) {
+      openOverlay({
+        mod: "orca-menu",
+        kind: "popup",
+        width: 240,
+        props: { tab: "pane", target: { pane, terminal } }
+      });
+    }
   }
 
   button(id, icon, action, args) {
@@ -40,84 +160,116 @@ export default class Pane extends View {
     const p = this.me();
     if (!p) return div();
     const pane = p.pane;
-    // TerminalPaneHeaderOverlay.tsx:263-276 draws the pane's title from `.pane-title-text`;
-    // Orca's pane title is the tab's custom title (`ClaudeAccountSwitchSessionTree.tsx:276`
-    // renders `tab?.customTitle || tab?.title`). Herdr has no per-pane title, so the closest
-    // mechanism is `tab.rename` (`commands.rs:40`), and TabInfo.named tells us whether the
-    // person named it. When named, show the tab's name; otherwise the terminal's own title
-    // (`PaneInfo.title`, herdr.d.ts:193 — "what the program set, or the mod's name").
     const tab = spaces().flatMap((s) => s.tabs).find((t) => t.id === p.tab);
     const tabTitle = tab && tab.named ? tab.name : p.title;
+    const isFocused = Boolean(p.focused);
     const paneCount = panes().filter((x) => x.tab === p.tab).length;
+
+    // TabGroupPanel.tsx:281-315: attached split tab strip is h-[32px] shrink-0 border-b border-border bg-tab-bar.
+    // split-group-dim.ts:1 UNFOCUSED_SPLIT_GROUP_OPACITY = 0.95.
     return h_flex()
       .id(`pane-head-${pane}`)
       .size_full()
-      .px(8)
-      .gap(8)
+      .h(32)
+      .px(6)
       .items_center()
       .relative()
-      // `terminal.css:266-271` — the bar is `font-size: 13px`, `font-family: var(--font-mono)`,
-      // `color: rgb(255 255 255 / 0.52)`, `background: #000`, `border-bottom: 1px solid
-      // rgb(255 255 255 / 0.06)`. Geometry (px-8, height) comes from the layout; the rest is
-      // the literal the CSS states, because the theme's `border` is not this separator.
-      .bg("#000000")
+      .bg("#141416")
       .border_b(1)
-      .border_color("#ffffff0f")
-      .text_size(13)
+      .border_color(isFocused ? "#ffffff24" : "#ffffff0f")
+      .when(!isFocused, (el) => el.opacity(0.95))
+      .text_size(12)
       .font_family("JetBrains Mono")
       .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
       .on_click(() => run("pane.focus", { pane }))
-      // TerminalPaneHeaderOverlay.tsx:149 `onContextMenuCapture={(e) => onPaneTitleContextMenu(e, pane.id)}`
-      // — the pane title bar opens the pane menu on right-click. `orca-menu` already implements
-      // the `pane` case (split right/down, zoom, right-click routing, close), so this is the
-      // missing caller, not a missing menu.
+      // TerminalPaneHeaderOverlay.tsx:149 onContextMenuCapture={(e) => onPaneTitleContextMenu(e, pane.id)}
       .on_mouse_down("right", (_e, cx) => {
         cx.stop_propagation();
-        // TerminalContextMenu.tsx:113 — the pane menu content is `min-w-60` (240).
-        openOverlay({ mod: "orca-menu", kind: "popup", width: 240, height: 260, props: { tab: "pane", target: { pane, terminal: p.terminal } } });
+        run("pane.focus", { pane });
+        openOverlay({ mod: "orca-menu", kind: "popup", width: 240, props: { tab: "pane", target: { pane, terminal: p.terminal } } });
       })
-      // TerminalPaneHeaderOverlay.tsx:263-276 — the bar's only text is `.pane-title-text`
-      // (`font: inherit` → the bar's 13px mono, `color: inherit` → /0.52 white, flex 1,
-      // truncated; terminal.css:330-347). No program icon, folder or status mark: the
-      // header draws title (:263) then `.pane-title-actions` (:277-342) and nothing else.
-      // TerminalPaneHeaderOverlay.tsx:197-210,218-236 make the title a button that starts an
-      // inline rename (Enter/Tab submit, Escape cancels), and :293-320 add an X to remove the
-      // title. Herdr has no `pane.rename` — only `space.rename` and `tab.rename`
-      // (`herdr-app commands`) — and the title shown here is derived (tab name or terminal
-      // title), so both actions are omitted, not faked.
-      .when(Boolean(tabTitle), el => el.child(div().flex_1().min_w(0).truncate().text_color("#ffffff85").child(tabTitle)))
-      // Orca's multi-pane drag handle opens layout actions (TerminalPaneHeaderOverlay.tsx:188-196,
-      // terminal.css:275-306).
-      .when(paneCount > 1 && this.hovered, (el) =>
-        el.child(
-          div()
-            .id(`pane-drag-handle-${pane}`)
-            .absolute()
-            .top(0)
-            .left_1_2()
-            .ml(-16)
-            .w(32)
-            .h_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(4)
-            .cursor_grab()
-            .active((s) => s.cursor_grabbing())
-            .hover((s) => s.bg("#ffffff1a"))
-            .accessibility_label("Move or split pane")
-            .tooltip("Move or split pane")
-            .on_click((_e, cx) => {
+      // TabGroupPanel.tsx:288-301: Left side renders TabBar items (tab pill + add button)
+      .child(
+        h_flex()
+          .items_center()
+          .gap(4)
+          .child(
+            h_flex()
+              .h(26)
+              .px(8)
+              .gap(6)
+              .items_center()
+              .rounded(4)
+              .bg(isFocused ? "#222226" : "#19191c")
+              .border_1()
+              .border_color(isFocused ? "#ffffff24" : "#ffffff0d")
+              .cursor_pointer()
+              .child(div().text_size(11).text_color("#8a8a93").child(">"))
+              .child(div().max_w(180).truncate().text_size(12).font_medium().text_color(isFocused ? "#ffffff" : "#a1a1aa").child(tabTitle || "terminal"))
+              .child(
+                div()
+                  .size(16)
+                  .flex()
+                  .items_center()
+                  .justify_center()
+                  .rounded(3)
+                  .text_color("#ffffff4d")
+                  .hover((s) => s.text_color("#ef4444").bg("#ffffff14"))
+                  // TerminalPaneHeaderOverlay.tsx:125-131: terminalPaneCloseLabel(paneCount)
+                  .tooltip(paneCount > 1 ? "Close pane" : "Close tab")
+                  .on_click((e, cx) => {
+                    cx.stop_propagation();
+                    run(paneCount > 1 ? "pane.close" : "tab.close", paneCount > 1 ? { pane } : { id: p.tab });
+                  })
+                  .child(svg("mods/orca-pane/x.svg").size(10))
+              )
+          )
+          .child(
+            div()
+              .size(24)
+              .flex()
+              .items_center()
+              .justify_center()
+              .rounded(4)
+              .text_color("#ffffff4d")
+              .hover((s) => s.text_color("#ffffffcc").bg("#ffffff14"))
+              .tooltip("Split terminal right")
+              .on_click((e, cx) => {
+                cx.stop_propagation();
+                run("pane.split", { direction: "right", pane });
+              })
+              .child(svg("mods/orca-pane/plus.svg").size(12))
+          )
+      )
+      // Center area: draggable handle for unsplitting to tab strip (terminal-tab-strip-drop-target.ts:12-16)
+      .child(
+        div()
+          .flex_1()
+          .h_full()
+          .flex()
+          .items_center()
+          .justify_center()
+          .cursor_grab()
+          .active((s) => s.cursor_grabbing())
+          .on_mouse_down("left", (e, cx) => {
+            this.startPaneDrag(e.position, pane, p.terminal, cx);
+          })
+          .on_mouse_up("left", (e, cx) => {
+            if (this.isDragging) {
               cx.stop_propagation();
-              openOverlay({
-                mod: "orca-menu",
-                kind: "popup",
-                width: 240,
-                height: 320,
-                props: { tab: "pane", target: { pane, terminal: p.terminal } }
-              });
-            })
-            .child(
+              this.endPaneDrag(e.position, pane, p.terminal, cx);
+            } else {
+              this.dragStart = null;
+              if (this.pollTimer) { try { this.pollTimer.cancel(); } catch {} this.pollTimer = null; }
+            }
+          })
+          .on_mouse_down("right", (_e, cx) => {
+            cx.stop_propagation();
+            run("pane.focus", { pane });
+            openOverlay({ mod: "orca-menu", kind: "popup", width: 240, props: { tab: "pane", target: { pane, terminal: p.terminal } } });
+          })
+          .when(this.hovered && paneCount > 1, (el) =>
+            el.child(
               div()
                 .flex()
                 .flex_col()
@@ -132,34 +284,67 @@ export default class Pane extends View {
                     ))
                 ))
             )
-        )
+          )
       )
-      // Orca's TerminalPaneHeaderOverlay header actions (TerminalPaneHeaderOverlay.tsx:285,334):
-      // SquareSplitVertical (split right), split-down (split down), then X (close), size-3 glyphs in size-6 icon-xs boxes.
-      // Orca has no zoom button in the header; those live in the right-click
-      // menu (TerminalContextMenu.tsx:269,277,294), which `orca-menu` already provides.
-      // The trigger buttons sit at opacity 0 until the bar is hovered (terminal.css:401,414),
-      // matching this `.when(this.hovered)` gate.
-      // Orca's `.pane-title-actions` is `flex shrink-0 items-center gap-0 ml-auto`
-      // (TerminalPaneHeaderOverlay.tsx:211), so the glyphs sit flush and hard right; the
-      // parent h_flex gap(8) would space them otherwise.
-      .when(this.hovered, el => el
-        .child(div().ml_auto().flex().flex_shrink_0().items_center().gap(0)
-          // TerminalPaneHeaderOverlay.tsx:212-238,277-330 — `.pane-title-actions`, left to right:
-          // Hand Off to Another Agent (MessageSquarePlus, `isTuiAgent` / active terminal agent),
-          // Split Terminal Right (SquareSplitVertical), Split Terminal Down (split-down), and Close Pane (X).
-          .when(Boolean(p.terminal), h => h
-            .child(this.button(`ph-h-${pane}`, "message-square-plus", () => {
-              openOverlay({
-                mod: "orca-handoff",
-                kind: "dialog",
-                width: 480,
-                height: 380,
-                props: { action: "handoff", terminal: p.terminal, pane }
-              });
-            }).accessibility_label("Hand off to another agent").tooltip("Hand off to another agent")))
-          .child(this.button(`ph-r-${pane}`, "square-split-vertical", "pane.split", { direction: "right", pane }).accessibility_label("Split terminal right").tooltip("Split terminal right"))
-          .child(this.button(`ph-d-${pane}`, "split-down", "pane.split", { direction: "down", pane }).accessibility_label("Split terminal down").tooltip("Split terminal down"))
-          .child(this.button(`ph-x-${pane}`, "x", "pane.close", { pane }).accessibility_label("Close pane").tooltip("Close pane"))));
+      // TabGroupPanel.tsx:302-314: Right action chrome (TabBarQuickCommandsButton + TabGroupPaneActionsMenu + split controls)
+      .child(
+        h_flex()
+          .items_center()
+          .gap(2)
+          .when(!isFocused, (el) => el.opacity(0.6).hover((s) => s.opacity(1.0)))
+          // TabBarQuickCommandsButton.tsx:180-186: Play icon + "Command" pill
+          .child(
+            h_flex()
+              .h(22)
+              .px(6)
+              .gap(4)
+              .items_center()
+              .rounded(4)
+              .border_1()
+              .border_color("#ffffff14")
+              .text_color(isFocused ? "#ffffff" : "#a1a1aa")
+              .hover((s) => s.bg("#ffffff14").text_color("#ffffff"))
+              .tooltip("Open pane commands")
+              .on_click((e, cx) => {
+                cx.stop_propagation();
+                run("pane.focus", { pane });
+                openOverlay({ mod: "orca-menu", kind: "popup", width: 240, props: { tab: "pane", target: { pane, terminal: p.terminal } } });
+              })
+              .child(div().text_size(9).text_color("#a1a1aa").child("▷"))
+              .child(div().text_size(11).font_medium().child("Command"))
+          )
+          // TabGroupPaneActionsMenu.tsx:41-45: Ellipsis button
+          .child(
+            this.button(`ph-m-${pane}`, "ellipsis", () => {
+              run("pane.focus", { pane });
+              openOverlay({ mod: "orca-menu", kind: "popup", width: 240, props: { tab: "pane", target: { pane, terminal: p.terminal } } });
+            }).tooltip("Pane actions")
+          )
+          // Split right & split down buttons
+          .child(
+            this.button(`ph-r-${pane}`, "square-split-vertical", "pane.split", { direction: "right", pane }).tooltip("Split terminal right")
+          )
+          .child(
+            this.button(`ph-d-${pane}`, "split-down", "pane.split", { direction: "down", pane }).tooltip("Split terminal down")
+          )
+          // TerminalPaneHeaderOverlay.tsx:125-131: Close split pane or tab when alone
+          .child(
+            div()
+              .id(`ph-x-${pane}`)
+              .size(24)
+              .flex()
+              .items_center()
+              .justify_center()
+              .rounded(6)
+              .text_color("#ffffff4d")
+              .hover((s) => s.text_color("#ef4444").bg("#ffffff14"))
+              .tooltip(paneCount > 1 ? "Close pane" : "Close tab")
+              .on_click((e, cx) => {
+                cx.stop_propagation();
+                run(paneCount > 1 ? "pane.close" : "tab.close", paneCount > 1 ? { pane } : { id: p.tab });
+              })
+              .child(svg("mods/orca-pane/x.svg").size(12))
+          )
+      );
   }
 }
