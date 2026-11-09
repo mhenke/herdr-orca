@@ -1,7 +1,8 @@
-// Project header marks. Orca uses a repo-owned image when set, otherwise Folder
-// (`src/renderer/src/components/repo/repo-icon.tsx:145-177`); Herdr has no per-repo image.
-import { svg } from "gpui-kit";
+// Project header marks. Orca uses the repo's icon image when set, otherwise Folder
+// (`SectionHeader.tsx:327-342`, `repo-icon.tsx:145-186`).
+import { svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
+import { appHome, exec } from "herdr";
 
 // T3's project colors in its order, each as Tailwind's 400 (dark themes) and 600 (light).
 const PALETTE = [
@@ -62,8 +63,58 @@ export function parseRemote(remoteUrl) {
   return null;
 }
 
-// Orca uses a repo-owned image or Folder (`src/renderer/src/components/repo/repo-icon.tsx:145-177`); Herdr has no per-repo image.
-export function repoMark(size) {
+export function avatarUrlFor({ host, owner }) {
+  return /^[A-Za-z0-9-]+$/.test(owner) ? `https://${host}/${owner}.png?size=64` : null;
+}
+
+const avatarPath = (url) => `avatars/${url.replace(/[^A-Za-z0-9.-]+/g, "_")}.png`;
+const avatarTried = new Set();
+const avatarWritten = new Set();
+
+// RepoIconGlyph prefers the repo's image; Herdr has no per-repo icon, so a repo whose origin
+// names a GitHub owner gets Orca's owner avatar (`githubAvatarIcon`, `repo-icon.ts:46-54`).
+// `image()` takes a path under the app folder, so the first sight downloads once to
+// `avatars/<host>_<owner>.png`; a failed download leaves the lucide Folder, which is what
+// `repo-icon.tsx:149-162` falls back to. QuickJS lacks Node's `fs/promises`, so filesystem
+// checks and curl/convert run through `exec`. Herdr-app compiles `image` with `features = ["png"]`,
+// so non-PNG avatar bytes from GitHub must convert to PNG.
+export function ensureAvatar(url, cx) {
+  if (!url || avatarTried.has(url)) return;
+  avatarTried.add(url);
+  const rel = avatarPath(url);
+  const path = `${appHome()}/${rel}`;
+  // `cx` here is the render's own handle, and the download outlives it: notifying through it
+  // throws "cx is no longer valid: it was captured during an earlier call and used later".
+  // Spawn so the notify belongs to a live callback, which is what that error asks for.
+  cx.spawn(async (cx) => {
+    try {
+      const dir = `${appHome()}/avatars`;
+      await exec("mkdir", ["-p", dir]);
+      const check = await exec("test", ["-s", path]);
+      if (check.code !== 0) {
+        const tmp = `${path}.tmp`;
+        const r = await exec("curl", ["-sfL", "--max-time", "10", url, "-o", tmp]);
+        if (r.code !== 0) return;
+        const conv = await exec("convert", [tmp, `png:${path}`]);
+        if (conv.code !== 0) await exec("mv", [tmp, path]);
+        else await exec("rm", ["-f", tmp]);
+      }
+      avatarWritten.add(url);
+      cx.notify();
+    } catch {}
+  });
+}
+
+export function avatarFile(url) {
+  return url && avatarWritten.has(url) ? avatarPath(url) : null;
+}
+
+// Orca's RepoIconGlyph uses the repo's own image or Folder (`SectionHeader.tsx:327-342`,
+// `repo-icon.tsx:145-186`).
+export function repoMark(size, avatarUrl) {
+  const file = avatarFile(avatarUrl);
   return h_flex().size(size).flex_none().items_center().justify_center().rounded(4).overflow_hidden()
-    .child(svg("mods/orca-spaces/folder.svg").size(14).text_color(REPO_BADGE_COLOR));
+    .child(file
+      ? image(file).size(size)
+      : svg("mods/orca-spaces/folder.svg").size(14).text_color(REPO_BADGE_COLOR));
 }

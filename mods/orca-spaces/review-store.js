@@ -32,6 +32,7 @@ export function reviewKey(repo, branch) {
  */
 export function isReviewFresh(entry, now = Date.now()) {
   if (!entry || typeof entry.at !== "number") return false;
+  if (entry.data && entry.data.title === undefined) return false;
   const ttl = entry.data ? FOUND_REVIEW_TTL_MS : NO_REVIEW_REFRESH_INTERVAL_MS;
   return (now - entry.at) < ttl;
 }

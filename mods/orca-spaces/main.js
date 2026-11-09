@@ -8,7 +8,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, props, nextCommand } from "herdr";
-import { repoMark, tint, parseRemote } from "./project.js";
+import { repoMark, tint, parseRemote, avatarUrlFor, ensureAvatar } from "./project.js";
 import { statusMark, agentStateMark } from "./status.js";
 import { getFolderWorkspaceRowGeometry, getFlushWorktreeCardPaddingLeft, getProjectGroupHeaderPaddingLeft, WORKTREE_CARD_SURFACE_MARGIN, LEGACY_STATUS_LANE_WIDTH } from "./indentation.js";
 import { tip, tipMark } from "./tip.js";
@@ -211,7 +211,7 @@ export default class Spaces extends View {
     const at = {};
     for (const s of sp) at[s.id] = where(s, ps);
     const keys = new Set(Object.values(at).filter((k) => readPair(k)[1]));
-    const due = new Set([...keys].filter((k) => !(k in this.git)));
+    const due = new Set([...keys].filter((k) => !(k in this.git) || this.git[k]?.owner === undefined));
     for (const [id, k] of Object.entries(at)) if (this.at[id] && this.at[id] !== k && keys.has(k)) due.add(k);
     this.at = at;
     const spaceOf = {};
@@ -343,10 +343,11 @@ export default class Spaces extends View {
       const repo = common.stdout.trim();
       const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
       // Orca queries PRs by base repo and origin head (`pr-branch-lookup.ts:41-48`,
-      // `github-api-repository.ts:127-133`); repo icons use a repo image or Folder
-      // (`src/renderer/src/components/repo/repo-icon.tsx:145-177`).
+      // `github-api-repository.ts:127-133`); repo icons use Orca's owner avatar fallback
+      // (`repo-icon.ts:37-54`).
       let baseRepo = null; // the repo PRs are filed in: upstream when there is one
       let head = null; // origin's owner: who the branch must belong to
+      let owner = null;
       try {
         const origin = await exec("git", ["remote", "get-url", "origin"], { cwd, on });
         const o = origin.code === 0 ? parseRemote(origin.stdout) : null;
@@ -365,14 +366,18 @@ export default class Spaces extends View {
               const d = JSON.parse(q.stdout);
               const po = d?.parent?.owner?.login;
               const pr = d?.parent?.name;
-              if (d?.isFork && po && pr) slug = { host: o.host, owner: po, repo: pr };
-              // A fork with no `upstream` remote still files its PRs on the parent.
-              if (slug) baseRepo = `${po}/${pr}`;
+              if (d?.isFork && po && pr) {
+                slug = { host: o.host, owner: po, repo: pr };
+                // A fork with no `upstream` remote still files its PRs on the parent.
+                baseRepo = `${po}/${pr}`;
+              }
             }
           }
+          // A renamed fork keeps its own identity; a same-name fork shows the parent's.
+          owner = avatarUrlFor(slug && slug.repo !== o.repo ? o : (slug ?? o));
         }
       } catch {}
-      const info = { name, top: topDir, branch: null, base: baseRepo, head, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
+      const info = { name, top: topDir, branch: null, owner, base: baseRepo, head, repo: JSON.stringify([on, repo]), linked: repo !== `${topDir}/.git` };
       // Only the branch name is read. `# branch.ab` (ahead/behind) fed the removed gitTail,
       // and Orca's card has no such element; the flag still prints the header we parse.
       for (const line of r.stdout.split("\n")) {
@@ -470,6 +475,7 @@ export default class Spaces extends View {
         this.setPr(key, first?.number
           ? {
             number: first.number,
+            title: first.title,
             state: first.merged_at ? "merged" : first.draft ? "draft" : String(first.state ?? "").toLowerCase(),
           }
           : null);
@@ -503,9 +509,12 @@ export default class Spaces extends View {
       machine: w.machine ?? null,
       linked: g ? Boolean(g.linked) : null,
       folder: w.folder ?? g?.top ?? path,
+      unread: this.unread.has(w.id),
+      named: Boolean(w.named),
+      name: w.name ?? null,
     };
     // WorktreeContextMenuView.tsx:147 — `min-w-52` (208).
-    openOverlay({ mod: "orca-menu", kind: "popup", width: 208, height: 300, props: { tab: "space", target } });
+    openOverlay({ mod: "orca-menu", kind: "popup", width: 208, height: 320, props: { tab: "space", target } });
   }
 
   // Orca's rows are worktrees, keyed by host+path (host-qualified-identity.ts), not by open
@@ -571,10 +580,13 @@ export default class Spaces extends View {
   }
 
   // `WorktreeCardStatusSlot.tsx:230-252`'s click flips the worktree's read/unread. Mod-owned
-  // because Herdr's model has no unread state; nothing is written to the host.
+  // because Herdr's model has no unread state; writes both localStorage and shared store
+  // so orca-menu and orca-spaces stay synchronized (AGENTS.md rule 10).
   toggleUnread(id, cx) {
     this.unread.has(id) ? this.unread.delete(id) : this.unread.add(id);
-    localStorage.setItem("spaces.unread.v1", JSON.stringify([...this.unread]));
+    const updated = [...this.unread];
+    localStorage.setItem("spaces.unread.v1", JSON.stringify(updated));
+    setShared("spaces.unread.v1", updated);
     cx.notify();
   }
 
@@ -751,16 +763,17 @@ export default class Spaces extends View {
       .id(id)
       .h(28).flex_none().w_full().pl(getProjectGroupHeaderPaddingLeft(0)).pr(8).gap(6).items_center().mt(4)
       .role("button").accessibility_label(g?.name ?? w.name)
-      .on_mouse_down("right", () => this.menu(w, g))
+      // SectionHeader.tsx:355-414 & repo-header-project-actions.tsx:113: right click opens group actions menu
+      .on_mouse_down("right", () => openOverlay({ mod: "orca-menu", kind: "popup", width: 176, height: 220, props: { tab: "group", target: { id: w.id, path: g?.top ?? w.folder, machine: w.machine ?? null } } }))
       .on_click((_e, cx) => this.toggleRepo(key, cx))
       .on_hover((on, cx) => {
         if (on) this.hoveredRepo = key;
         else if (this.hoveredRepo === key) this.hoveredRepo = null;
         cx.notify();
       })
-      // Orca's RepoIconGlyph uses the repo's own image or Folder (`src/renderer/src/components/repo/repo-icon.tsx:145-177`);
-      // Herdr has no per-repo image, so repoMark draws the bundled Folder asset.
-      .child(repoMark(16))
+      // Orca's RepoIconGlyph uses the repo's own image or Folder (`SectionHeader.tsx:327-342`,
+      // `repo-icon.tsx:145-186`).
+      .child(repoMark(16, g?.owner ?? null))
       .child(div().min_w(0).flex_1().truncate().text_size(13).font_semibold().line_height("16px").text_color(t.foreground).child(g?.name ?? w.name))
       // Orca's hover cluster (`worktree-list/rows/ProjectHeaderActions.tsx:5-15`, used at
       // `rows/SectionHeader.tsx:355-399`): an ABSOLUTE overlay — `can-hover:absolute right-1
@@ -797,11 +810,11 @@ export default class Spaces extends View {
               this.menuKey = key;
               // RepoHeaderProjectActionsMenu's DropdownMenuContent has no width class, so Orca's
               // dropdown-menu.tsx:80 `min-w-[11rem]` (176) applies.
-              openOverlay({ mod: "orca-menu", kind: "popup", width: 176, height: 220, props: { tab: "group", target: { id: w.id, path: g?.top ?? w.folder } } });
+              openOverlay({ mod: "orca-menu", kind: "popup", width: 176, height: 220, props: { tab: "group", target: { id: w.id, path: g?.top ?? w.folder, machine: w.machine ?? null } } });
               cx.notify();
             })
             .child(svg("mods/orca-spaces/ellipsis.svg").size(14).flex_none()),
-          6, { enter: () => { this.menuKey = key; openOverlay({ mod: "orca-menu", kind: "popup", width: 176, height: 220, props: { tab: "group", target: { id: w.id, path: g?.top ?? w.folder } } }); } }))
+          6, { enter: () => { this.menuKey = key; openOverlay({ mod: "orca-menu", kind: "popup", width: 176, height: 220, props: { tab: "group", target: { id: w.id, path: g?.top ?? w.folder, machine: w.machine ?? null } } }); } }))
         .child(stop(this, t, `space-new-${w.id}`,
           div().size(20).flex_none().flex().items_center().justify_center().rounded(6)
             .role("button").accessibility_label("New space")
@@ -819,26 +832,21 @@ export default class Spaces extends View {
     // worktree with two open sessions is still one worktree.
     const group = [w, ...(also ?? []).map(a => a.w)];
     const on = group.some(s => s.active);
-    // Orca titles a card by its worktree's branch when the header above already says the
-    // repo/folder (`herdr-file-viewer` -> `main`), else the space's own name
-    // (`default-workspace-card.json`: `title: trim(ws.title)`).
+    // Orca's worktree card title display (use-worktree-card-linked-details.ts:94-104,
+    // worktree-card-title-display.ts:38-69, display-name-provenance.ts:9-18):
+    // 1. Explicit user rename (`w.named`) pins the label.
+    // 2. Confirmed task/review subjects (`reviewTitle`) take precedence over raw branch identity.
+    // 3. Fallback to branch, else space/folder name.
     const branch = g?.branch ?? w.branch ?? null;
-    // Orca's worktree title is the branch for an unnamed worktree; a name the user gave wins.
-    const title = !w.named && branch ? branch : w.name;
+    const review = this.reviewOf(g);
+    const title = w.named ? w.name : (review?.title || (branch || w.name));
     // `default-workspace-card.json`: folder cards print the folder's own last segment
     // (`folderInMeta`, `WorktreeCardFolderPath` = `getDirectoryName`), branch cards the branch.
     const meta = g ? branch : base(place(w, ps));
     // Orca's classic card draws the branch unconditionally (`default-workspace-card.json`
-    // `branch: "!vars.folder && len(ws.branch) > 0 && !vars.newStyle && ..."`), and an automatic
-    // worktree name IS the branch (`shared/worktree/display-name-provenance.ts:17-19`), so Orca
-    // really does print `main` twice on such a card.
-    //
-    // We briefly suppressed that repeat on a user report. It was the wrong fix: `singleLine` is
-    // derived from this value (`:912`), so nulling it collapsed EVERY card to a title-only one
-    // and the list lost Orca's two-line shape entirely. The duplicate is Orca's, and a card that
-    // matches Orca beats a card that is one line short. Reverting rather than special-casing:
-    // if the repeat is to go, it goes back as a recorded deviation that keeps the meta row's
-    // height, not by pretending the row is title-only.
+    // `branch: "!vars.folder && len(ws.branch) > 0 && !vars.newStyle && ..."`,
+    // `worktree-card-presentation.tsx:76-80`), and an automatic worktree name IS the branch
+    // (`display-name-provenance.ts:17-19`), so Orca really does print `main` twice on such a card.
     const metaText = meta;
     const metaMono = !g;
     // Orca's card lists its own agents (inlineAgents) as `AgentStateDot` rows, from agents():
@@ -1150,28 +1158,25 @@ export default class Spaces extends View {
       8, { enter: () => { if (unopened) { run("space.new", { folder: g.top, machine: w.machine ?? "" }); } else { run("space.select", { id: w.id }); } run("layout.select", { stack: "main", child: "main-terminals" }); } });
   }
 
-  // A repo is a project group: a SectionHeader, then its worktree cards. A bare folder
-  // workspace renders its folder row (folder glyph + name, `folder-row.tsx`) above its
-  // session card — hence tmp three times: folder row, card title, card path meta.
+  // A repo is a project group: a SectionHeader, then its worktree cards (SectionHeader.tsx:185-195).
+  // A bare folder workspace renders its folder row above its session card.
   row(r, t, ps) {
-    // Fold first: Orca collapses the whole repo group (SectionHeader owns the fold), and a
-    // linked worktree is still a row of that group. Checking `linked` first left the group
-    // header collapsed while its worktree cards kept drawing.
-    if (r.g && this.foldedRepos.has(r.g.repo)) return r.head ? [this.header(r, t, ps)] : [];
-    if (r.g?.linked) return [this.card(r, t, ps)];
-    if (!r.g) {
-      const key = `space:${r.w.id}`;
-      if (this.foldedRepos.has(key)) return [this.header(r, t, ps)];
-      return [this.header(r, t, ps), this.card(r, t, ps)];
-    }
-    // Only the repo's first space heads the group; its later spaces are further cards.
-    if (!r.head) return [this.card(r, t, ps)];
-    return [this.header(r, t, ps), this.card(r, t, ps)];
+    const key = foldKey(r);
+    const folded = this.foldedRepos.has(key);
+    if (folded) return r.head ? [this.header(r, t, ps)] : [];
+    return r.head ? [this.header(r, t, ps), this.card(r, t, ps)] : [this.card(r, t, ps)];
   }
 
   render(cx) {
     const t = theme();
     const sp = spaces();
+    // Unread workspace state (`spaces.unread.v1`): orca-menu writes shared store on toggle;
+    // sync this instance's set so the unread bell state updates visually on re-render
+    // (WorktreeCardStatusSlot.tsx:220-252, AGENTS.md rule 10).
+    const shUnread = shared("spaces.unread.v1");
+    if (Array.isArray(shUnread)) {
+      this.unread = new Set(shUnread);
+    }
     // `WorktreeList.tsx:285-287`: the empty state is the row plan's emptiness, not the raw
     // collection's — an unopened worktree or a group with no rows still counts as a row.
     const rows = this.ordered();
@@ -1191,6 +1196,9 @@ export default class Spaces extends View {
     // make the same call; the header cannot see the row plan itself.
     if (keys.length !== shared("projects.count")) setShared("projects.count", keys.length);
     const asks = props()?.newMenu && machines().length > 1;
+    // One fetch per repo per session; `ensureAvatar` writes the file and notifies once, so the
+    // next render draws the avatar instead of the Folder.
+    for (const g of Object.values(this.git)) if (g?.owner) ensureAvatar(g.owner, cx);
     // Fold saved-project rows: folders persisted in localStorage["projects.saved.v1"]
     // that no open space's folder covers. The folder glyph + basename row opens a space
     // in that folder; hover reveals a remove button (Orca's RepositoryRemoveProjectButton).
