@@ -1,6 +1,8 @@
-// mods/orca-pane/status.js
-// Ported from mods/orca-spaces/status.js (which ports Orca's StatusIndicator and AgentStateDot);
-// a mod draws alone, so this is a copy with this folder's asset paths (AGENTS.md rule 9).
+// Derived from Herdr App's defaults/mods/agents/main.js (Apache-2.0, Copyright Herdr App authors).
+// Modified for herdr-orca; see LICENSE and NOTICE.
+// Portions ported from Orca (MIT, Copyright (c) 2026 Lovecast Inc.); see NOTICE.
+// Orca's StatusIndicator and AgentStateDot, copied from mods/orca-spaces/status.js because a mod
+// draws alone and needs its own asset paths (AGENTS.md rule 9).
 import { div, svg, image } from "gpui-kit";
 
 // Orca's tokens (`main.css:254-258`): --agent-question orange-600, --agent-working yellow-500,
