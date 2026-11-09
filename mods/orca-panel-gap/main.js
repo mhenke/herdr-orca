@@ -44,7 +44,7 @@ const GAPS = {
   },
   mobile: {
     icon: "smartphone",
-    title: "Orca Mobile",
+    title: "Mobile",
     body: "Orca pairs a phone to the desktop app (MobileHero.tsx pairing flow), while Herdr's remote surface is hc machine over SSH (machines.rs) and there is no web/pairing client."
   }
 };

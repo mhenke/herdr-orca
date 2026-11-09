@@ -192,7 +192,7 @@ export default class Nav extends View {
       .child(search)
       .child(pageRow("nav-tasks", "list", "Tasks", "page-tasks"))
       .child(pageRow("nav-automations", "calendar-clock", "Automations", "page-automations"))
-      .child(pageRow("nav-mobile", "smartphone", "Orca Mobile", "page-mobile"))
+      .child(pageRow("nav-mobile", "smartphone", "Mobile", "page-mobile"))
       // Projects header — SidebarHeader.tsx:60-63: `group/sidebar-header mt-2 flex h-8 min-w-0
       // shrink-0 items-center justify-between gap-1.5 px-2`; title `pl-2 pr-0.5 text-xs
       // font-semibold text-muted-foreground/80`; actions group `flex shrink-0 items-center gap-1`.
