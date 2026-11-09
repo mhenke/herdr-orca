@@ -78,7 +78,7 @@ export default class OrcaStatus extends View {
           .child(
             h_flex().gap(12).items_center().px(4).py(2).rounded(4).text_size(11)
               .role("button").cursor_pointer().hover(s => s.bg("#404040b3"))
-              // UsageUnitLabel.tsx:32-50: "Used" in muted text
+              // usage-unit-label.tsx:32-50: "Used" in muted text
               .child(div().text_color(t.muted).child("Used"))
               // Pending initial loading state: ProviderIcon + ··· (StatusBarProviderSegment.tsx:267-274)
               .when(!usage, el => el

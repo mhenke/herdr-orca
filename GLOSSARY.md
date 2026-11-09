@@ -28,6 +28,18 @@ exactly one thing here.
 - **Pane menu** — the context menu opened from a pane's header or surface. Evaluates the pane
   and terminal identity, providing clipboard, screen maintenance, split, and agent continuation actions.
   _Avoid_: terminal menu, terminal context menu, buffer menu, right-click popup.
+- **Tab menu** — the context menu opened by right-clicking a tab in the top tab strip (`SortableTabContextMenu.tsx`).
+  Evaluates tab identity, controlling tab splitting, settling (pinning), bulk closure, title renaming, and tab color tinting.
+  _Avoid_: tab bar menu, tab popup, tab right-click.
+- **Group header menu** — the context menu opened from a project group header row (`repo-header-project-actions.tsx`).
+  Evaluates repository identity, providing worktree provisioning, repository path copying, and workspace lifecycle actions across the repo.
+  _Avoid_: repo menu, project menu, group context menu.
+- **Explorer menu** — the context menu opened from an entry row in the File Explorer (`file-explorer-row-context-menu.tsx`).
+  Actions adapt strictly to entry kind: directories provide creation, navigation, and terminal launching; files provide duplication, in-place viewing, and relative path copying.
+  _Avoid_: file menu, directory menu, tree context menu.
+- **Change entry menu** — the context menu opened from an uncommitted file row in the Changes panel (`entry-context-menu.tsx`).
+  Provides diff and file viewing, conflict resolution choices, clipboard path copying, file manager reveal, and cross-navigation to the file explorer.
+  _Avoid_: diff menu, git context menu, change row menu.
 - **Space-born action** — a menu action that needs a live Herdr space to name its target, as
   opposed to a worktree action, which needs only the checkout's facts. `Update` and `Close` are
   space-born; everything else on a card is worktree-born.
@@ -74,10 +86,21 @@ exactly one thing here.
   `Down`, or `Up`.
   _Avoid_: split orientation, layout direction, axis.
 - **Drop quadrant** — one of four peripheral zones on a target pane (`Left`, `Right`, `Bottom`,
-  `Top`) where releasing a dragged pane grip moves or splits the pane into that quadrant. Belongs
-  strictly to pane drag operations within the workspace canvas; tabs in the tab strip cannot drop into
-  pane quadrants.
+  `Top`) where releasing either a dragged tab or a dragged pane grip splits or swaps the pane in that
+  direction.
   _Avoid_: drop zone, pane quadrant, split area.
+- **Center drop zone** — the central region of a pane body inside the outer 20% peripheral split
+  bands. In Orca, dropping a tab here merges it into that pane's tab group. In Herdr, because panes
+  cannot host multiple tabs, center drops fall back to the nearest peripheral drop quadrant (ADR 0012).
+  _Avoid_: middle zone, merge area, inner quadrant.
+- **Attached tab strip** — the persistent 32px header bar on an individual split pane (`TabGroupPanel`).
+  Displays that pane's tab pill, prompt icon (`>`), add button (`+`), command button (`> Command`), and
+  pane actions (`...`, split, close). Rendered only when multiple panes exist (`paneCount > 1`).
+  _Avoid_: split header, pane titlebar, pane bar.
+- **Unsplit** — the operation of detaching a split pane from its parent tab and converting it back into
+  an independent top-level tab. Triggered by dragging the pane's header to the tab strip area or via the
+  *"Move to New Tab"* context menu action.
+  _Avoid_: extract tab, detach split, promote pane, pop out.
 - **Drop indicator** — the accent-colored preview overlay highlighting where an item will land.
   For tab reordering, it is a 2px vertical blue line at the insertion edge (`SortableTab.tsx:213`).
   For pane dragging, it is a blue bounding box highlighting the target quadrant or center swap area (`pane_drag.rs:157`).
@@ -136,6 +159,11 @@ exactly one thing here.
 - **Card title** — the 13px line a card leads with: the worktree's display name. Orca derives
   an unpinned display name from the branch, so on an
   untouched worktree the title *is* the branch. Named worktrees keep their name.
+- **Display name precedence** — the strict resolution order determining a worktree's title:
+  (1) user-assigned custom name, (2) git branch label, (3) checkout folder basename. An open space
+  whose title has not been explicitly renamed by the user is *unnamed* and resolves to its git branch,
+  never defaulting to the folder basename when a branch is present.
+  _Avoid_: name resolution, title fallback, card name hierarchy.
 - **Card meta** — the 11px line under the title: the branch for a git worktree, or the folder's last segment for a folder workspace. Dropped when its text equals the title, so the same string never appears twice.
 - **Review** — the pull request for a worktree's own branch, shown as a mark at the end of the card's meta row. A review belongs to a branch, not a repo, so two worktrees of one repo can have different reviews. Read from a cache, never fetched while rendering. Creating a pull request updates the badge.
 - **Port** — reproduce Orca's behaviour and result using Herdr's primitives. Not *transcribe*
@@ -162,6 +190,10 @@ exactly one thing here.
   **Contents** searches file text. One panel, two modes, not two panels: switching keeps both
   query rows mounted, does not run a search, and does not move focus. A search runs only when
   the user types in the Contents row or submits it.
+- **Mutation target** — the directory path where an explorer creation action (`New File`, `New Folder`)
+  takes effect: the selected folder itself when triggered on a directory, or the parent directory when
+  triggered on a file row (`targetDir`).
+  _Avoid_: creation path, parent folder, target folder.
 - **Search result** — a Contents-mode answer, grouped by file: the file, its match count and its
   matching lines. A result belongs to a file, and the summary counts matches *and* files, so
   "no results" means no matching text, not an empty tree.
@@ -187,3 +219,17 @@ exactly one thing here.
   _Avoid_: command result, quick action row.
 - **Create target** — a fallback jump target offering to create a new workspace from the typed query when no exact workspace matches.
   _Avoid_: new workspace row, create action.
+- **Usage cluster** — the status bar area displaying AI provider quota chips and refresh actions (`StatusBarUsageCluster`). Sits between space actions and system metrics.
+  _Avoid_: quota bar, provider bar, usage bar, rate limit cluster.
+- **Usage chip** — the compact status bar pill representing an AI provider's current quota consumption or error state. Displays the provider mark, percentage, and window label, or an error summary with a warning mark.
+  _Avoid_: quota badge, provider tag, usage pill, status chip.
+- **Unit label** — the leading indicator text in the usage cluster (`Used` or `Remaining`) designating whether displayed percentages represent consumed or remaining capacity.
+  _Avoid_: metric label, mode indicator, quota prefix.
+- **Quota pool** — a distinct rate limit bucket or model grouping allocated by an AI provider with its own reset window and capacity limit.
+  _Avoid_: rate limit group, quota bucket, usage tier, model allowance.
+- **Tightest window** — the quota pool window within a provider that has the highest percentage consumed, selected for compact summary display on a usage chip.
+  _Avoid_: bottleneck window, active window, primary limit.
+- **Provider quota error** — a failure to probe or retrieve an AI provider's quota (such as an unauthenticated CLI or network timeout), displayed on a usage chip with a warning indicator. Distinct from an agent, space, or tab status.
+  _Avoid_: agent error, provider status, blocked provider, rate limit failure.
+- **Usage refresh trigger** — the icon button (`refresh-cw`) in the usage cluster that requests an immediate re-probe of all provider quotas. Displays a spinning animation while probing is active.
+  _Avoid_: reload button, sync button, poll trigger.
