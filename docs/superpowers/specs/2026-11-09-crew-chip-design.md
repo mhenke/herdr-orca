@@ -64,11 +64,17 @@ with `, `.
 ```js
 const pane = panes().find((p) => p.pane === props().pane);
 const address = pane?.terminal;                       // null for mod panes
-const all = terminals();                              // any[]; `parent`, `status`, `report.app`, `program`
-const managing = all.filter((t) => t.parent === address && t.status);
+const all = terminals();                              // any[]; `parent`, `status`, `state`, `report.app`, `program`
+const children = all.filter((t) => t.parent === address && t.state === "live");
+const managing = children.filter((t) => t.status);
 const parentAddr = all.find((t) => t.address === address)?.parent ?? null;
 const managedBy = parentAddr ? all.find((t) => t.address === parentAddr && t.status) : null;
 ```
+
+- `state === "live"` is Herdr's own rule for the same walk: its shipped `agents`
+  mod builds the sub-agent tree with `all.filter((k) => k.parent === addr && k.state === "live")`
+  (`herdr-app/defaults/mods/agents/main.js:176`, where `all = terminals()`). That is
+  also the runtime proof that a mod sees `parent` — the stock mod already relies on it.
 
 - `terminals()` is documented at `gpui-kit.d.ts:22404-22407`; its fixture
   (`herdr-app/src/mods/render_tests.rs:99`) confirms `parent` is an address and
