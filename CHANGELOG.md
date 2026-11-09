@@ -5,12 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2026-11-09
+
+### Bug Fixes
+
+- **clip:** Write the clipboard through GPUI instead of CLI daemons
+- **orca-handoff:** Use the callback timer and await the clipboard write
+
+### Documentation
+
+- Record NOTICE provenance for ported status bar usage cluster
+- Formalize usage cluster domain terms and record ADR-0014
+- Sync README, RECIPE, glossary and ADR index with the shipped mods
 
 ### Features
 
-- **orca-status:** Port Orca's status bar provider quota and usage cluster (Used label, Antigravity, Claude, Codex, Cursor chips, and click-to-refresh)
+- **orca-status:** Add standalone provider icon assets
+- **orca-status:** Port quota parsing, bucket selection, and pool label formatting
+- **orca-status:** Add provider probing for antigravity, claude, codex, cursor
+- **orca-status:** Render orca status bar usage cluster with live refresh
+- **orca-pane:** Attach Orca's 32px split-group header with drag-to-new-tab
+- **orca-tabs:** Resolve tab drops from the shared record
+- **orca-changes:** Add the uncommitted-entry context menu
+- **orca-files:** Port Orca's file row context menu
+- **orca-menu:** Gate agent rows and add Move to New Tab
+- **orca-spaces:** Group rows by project section and draw owner avatars
 
+### Miscellaneous
+
+- **verify:** Allow usage.js as a mod-owned module
 ## [0.8.0] - 2026-11-08
 
 ### Bug Fixes
@@ -249,6 +272,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stroke width, and the group header's missing plus
 - The palette was invented; the drop indicator was the wrong shape
 - Refresh the raster after the row-order fix
+[0.9.0]: https://github.com/mhenke/herdr-orca/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/mhenke/herdr-orca/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mhenke/herdr-orca/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mhenke/herdr-orca/compare/v0.5.0...v0.6.0
