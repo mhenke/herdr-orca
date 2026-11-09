@@ -161,7 +161,7 @@ A missing token paints **magenta** (`hsla(0.83, 1.0, 0.5, 1.0)` by design; `sett
   - `mods/orca-agents`: Agent session history list.
   - `mods/orca-panel-gap`: Clean placeholder views for unopened secondary tabs.
   - `mods/orca-status`: 24px bottom status bar spanning the full window width.
-  - `mods/orca-menu`: 208px / 176px / 240px context menu overlay for cards, spaces, tabs and terminal panes; clipboard writes go through GPUI's native clipboard (`cx.write_to_clipboard`), file reveals through the desktop opener.
+  - `mods/orca-menu`: 208px / 176px / 240px context menu overlay for cards, spaces, tabs and terminal panes; clipboard writes land in GPUI's in-app clipboard and on the host display server (`wl-copy` / `xclip` / `pbcopy` / `powershell.exe`, text on argv, no temp files), file reveals through the desktop opener.
   - `mods/new-menu`: 288px create dropdown overlay for creating terminals and worktrees.
   - `mods/orca-float`: Bottom-right floating workspace panel (`ctrl-alt-a`) listing live agent
     sessions; named divergence documented in
@@ -177,6 +177,7 @@ A missing token paints **magenta** (`hsla(0.83, 1.0, 0.5, 1.0)` by design; `sett
 - **External programs executed**:
   - `git worktree list --porcelain`, `git status --porcelain=v1`, `git rev-parse --show-toplevel --git-common-dir`, `git branch --show-current`, `git diff`, `git add`, `git commit`. All git invocations pass `--no-optional-locks -c core.fsmonitor=false`.
   - `gh pr view` / read-only cached GitHub REST checks via background worker.
+  - `wl-copy`, `xclip`, `pbcopy` or `powershell.exe` — whichever exists — to place copied text on the host clipboard (`mods/*/clip.js`, ADR 0013); `xdg-open`, `open` or `explorer.exe` for Reveal.
 
 - **Art & assets**:
   - Lucide SVG icons in each mod folder (at stroke 2.25 and 1.75).

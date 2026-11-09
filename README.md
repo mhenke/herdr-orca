@@ -65,6 +65,8 @@ These are defined in the `layout:orca` section of `keys.json` and activate whene
 
 `ctrl-shift-s` opens the split menu as a popup. The pane header's 6-dot grip and the right-click menus reach the same splits without a key.
 
+While a terminal has focus, `ctrl-v` pastes the clipboard (`terminal.paste`). That overrides Herdr's default `terminal.paste_image`, which hands `^V` to the program when the clipboard holds no image; Herdr's `ctrl-shift-v` still pastes text as well.
+
 All of Herdr's default shortcuts still work as expected (`alt-1` through `alt-9` for spaces, `ctrl-1` through `ctrl-9` for tabs, and `alt-h/j/k/l` to move between panes).
 
 ## Settings
@@ -95,7 +97,7 @@ We keep things lightweight and local:
 - `orca-changes`: Handles Git status, diff views, staging, conflict resolution, and commits (`git status`, `git diff`, `git add`, `git restore`, `git commit`).
 - `orca-agents`: Runs `sh` through `exec` in your own environment to list and read OMP's JSONL sessions under `$HOME`, and resumes one with `omp --resume=<path>` in the folder that session recorded. It is the only panel that reads files outside a repository.
 - `orca-status`: Probes provider rate-limit usage every 120s (`agy`, Claude, Codex and Cursor credentials) and reads Herdr's update and machine state for its maintenance segments.
-- `orca-menu`: Clipboard writes through GPUI's native clipboard (`cx.write_to_clipboard`) and file reveals through the desktop opener (`xdg-open`, `open`, `explorer.exe`).
+- `orca-menu`: Clipboard writes go to GPUI's in-app clipboard and to the host display server (`wl-copy`, `xclip`, `pbcopy`, `powershell.exe`), so copied text pastes inside Herdr and into other programs. File reveals go through the desktop opener (`xdg-open`, `open`, `explorer.exe`).
 
 Every Git command passes `--no-optional-locks -c core.fsmonitor=false` so we never lock your repository index or trigger file watcher feedback loops.
 
