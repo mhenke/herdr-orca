@@ -17,6 +17,7 @@ function location() {
   const space = (spaces() ?? []).find(s => s.active);
   return { cwd: space?.folder ?? null, on: space?.machine ?? null, space: space?.id };
 }
+let mainFilesView = null;
 const key = () => JSON.stringify(location());
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
 const PER_FOLDER = 500, TOTAL = 5000;
@@ -165,6 +166,7 @@ function statusLetter(char) {
 
 export default class Files extends View {
   init(_props, cx) {
+    if (!props()?.tab) mainFilesView = this;
     this.saved = new Map();
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {};
     this.ignored = new Set(); this.git = false; this.folderMarks = {}; this.folderErrors = {};
@@ -509,7 +511,7 @@ export default class Files extends View {
   // New/Rename ask in the popup's own prompt because run("<mod>.<cmd>") delivers only
   // the command name to nextCommand(), so typed text cannot cross mods.
   menu(path, entry) {
-    openOverlay({ mod: "orca-files", kind: "popup", width: 230, height: 300,
+    openOverlay({ mod: "orca-files", kind: "popup", width: 230,
       props: { tab: "file", target: { path, dir: entry.dir } } });
   }
 
@@ -539,10 +541,45 @@ export default class Files extends View {
     switch (name) {
       case "new-file": return ask("touch", "New File", null, parent);
       case "new-folder": return ask("mkdir", "New Folder", null, parent);
-      case "copy-path": void copyText(full); return close();
-      case "copy-rel": void copyText(path); return close();
+      case "copy-path": void copyText(full, cx); return close();
+      case "copy-rel": void copyText(path, cx); return close();
+      // Duplicate — file-explorer-row-context-menu.tsx:197-202 & useFileDuplicate.ts:34-63,89-91
+      case "duplicate": {
+        close();
+        const on = this.on;
+        cx.spawn(async (cx) => {
+          const dir = full.includes("/") ? full.replace(/\/[^/]*$/, "") : ".";
+          const name = full.includes("/") ? full.slice(full.lastIndexOf("/") + 1) : full;
+          const dot = name.lastIndexOf(".");
+          const stem = dot > 0 ? name.slice(0, dot) : name;
+          const ext = dot > 0 ? name.slice(dot) : "";
+          const script = `
+dir="$1"; stem="$2"; ext="$3"; src="$4"
+cand="$dir/\${stem} copy\${ext}"
+n=2
+while [ -e "$cand" ]; do
+  cand="$dir/\${stem} copy \${n}\${ext}"
+  n=$((n + 1))
+done
+cp -r "$src" "$cand"
+`;
+          await exec("sh", ["-c", script, "duplicate", dir, stem, ext, full], { on });
+          if (mainFilesView) mainFilesView.refresh(cx);
+          run("orca-files.refresh");
+        });
+        return;
+      }
+      // Open in Terminal — file-explorer-row-context-menu.tsx:210 (directories only)
       case "terminal": run("terminal.open", { folder: dir ? full : this.root }); return close();
-      case "reveal": void reveal(full); return close();
+      // View File — file-explorer-row-context-menu.tsx:220-225: show file in preview pane
+      case "view-file": {
+        setShared("orca-files.viewFile", path);
+        run("orca-files.view");
+        if (mainFilesView) mainFilesView.show(path, cx);
+        return close();
+      }
+      // Reveal in File Manager / Open Containing Folder — file-explorer-row-context-menu.tsx:254-263
+      case "reveal": void reveal(full, Boolean(dir)); return close();
       case "rename": return ask("mv", "Rename", path.replace(/^.*\//, ""));
       case "delete":
         close();
@@ -555,31 +592,44 @@ export default class Files extends View {
   // The pending New/Rename, applied here because typed text cannot cross mods.
   // `cx` is a click or submit context, so the writes run in a task whose own
   // `cx` is what `refresh` gets: the caller's would be stale after the awaits.
+  // Ported from Orca file-explorer-row-context-menu.tsx:153-164,289-296
   apply(name, cx) {
     const p = this.prompt;
     this.prompt = null;
     if (p?.overlay) closeOverlay(p.overlay);
     if (!p || !name) return;
     const parent = p.full.replace(/\/[^/]*$/, "");
+    const on = this.on;
     cx.spawn(async (cx) => {
       if (p.mode === "touch") await writeTextFile(`${p.full}/${name}`, "", null);
-      if (p.mode === "mkdir") await exec("mkdir", ["-p", `${p.full}/${name}`]);
-      if (p.mode === "mv") await exec("mv", [p.full, `${parent}/${name}`]);
-      this.refresh(cx);
+      if (p.mode === "mkdir") await exec("mkdir", ["-p", `${p.full}/${name}`], { on });
+      if (p.mode === "mv") await exec("mv", [p.full, `${parent}/${name}`], { on });
+      if (mainFilesView) mainFilesView.refresh(cx);
+      run("orca-files.refresh");
     });
   }
 
   // Delete needs no typed text, so the shipped confirm mod can drive it.
   // `cx` is the `nextCommand` loop's AsyncContext (see `command`), which stays
-  // valid across awaits.
+  // valid across awaits. Ported from Orca file-explorer-row-context-menu.tsx:298-302
   async remove(cx) {
     const full = shared("orca-files.target");
     setShared("orca-files.target", null);
-    if (full) await exec("rm", ["-rf", full]);
+    if (full) await exec("rm", ["-rf", full], { on: this.on });
     this.refresh(cx);
   }
 
-  command(c, cx) { if (c === "remove") return this.remove(cx); }
+  // command loop dispatch: handles delete confirmation, refresh requests, and cross-mod view requests
+  // (src/renderer/src/components/right-sidebar/file-explorer/panel/file-explorer-row-context-menu.tsx:220-225,298-302)
+  command(c, cx) {
+    if (c === "remove") return this.remove(cx);
+    if (c === "refresh") return this.refresh(cx);
+    if (c === "view") {
+      const file = shared("orca-files.viewFile");
+      setShared("orca-files.viewFile", null);
+      if (file) this.show(file, cx);
+    }
+  }
 
   // useFileSearchPanel.ts:276-300 — flipping a toggle or editing a filter reruns the
   // current query; both paths share the input's 200 ms debounce, so a filter typed a
@@ -739,20 +789,36 @@ export default class Files extends View {
   }
 
   menuView(t) {
-    const item = (i, label, icon, name) => h_flex().id(`fx-${i}`).h(30).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer()
+    const target = props()?.target ?? {};
+    const { path, dir } = target;
+    const plat = typeof window !== "undefined" && typeof window === "function" ? window()?.platform : null;
+    const revealLabel = plat === "macos" ? "Reveal in Finder" : plat === "windows" ? "Reveal in File Explorer" : "Open Containing Folder";
+
+    const item = (i, label, icon, name, destructive = false) => h_flex().id(`fx-${i}`).h(30).flex_none().px(8).gap(8).items_center().rounded(6).cursor_pointer()
       .hover(s => s.bg(t.hover)).on_click((_e, cx) => this.act(name, cx))
-      .child(svg(`mods/orca-files/${icon}.svg`).size(14).flex_none().text_color(t.muted))
-      .child(div().child(label));
+      .child(svg(`mods/orca-files/${icon}.svg`).size(14).flex_none().text_color(destructive ? "#ff6568" : t.muted))
+      .child(div().text_color(destructive ? "#ff6568" : t.foreground).child(label));
+    const sep = () => div().h(1).my(3).mx(4).bg(t.border);
+
     return v_flex().id("orca-files-menu").w_full().min_h(0).p(5).bg(t.popover).text_size(12.8).text_color(t.foreground)
-      .child(div().px(8).py(4).text_size(11).text_color(t.dim).child(props()?.target?.path ?? ""))
+      .child(div().px(8).py(4).text_size(11).text_color(t.dim).child(path ?? ""))
       .child(item(0, "New File", "plus", "new-file"))
       .child(item(1, "New Folder", "folder", "new-folder"))
+      .child(sep())
       .child(item(2, "Copy Path", "copy", "copy-path"))
       .child(item(3, "Copy Relative Path", "copy", "copy-rel"))
-      .child(item(4, "Open in Terminal", "terminal", "terminal"))
-      .child(item(5, "Reveal", "file", "reveal"))
-      .child(item(6, "Rename", "square-pen", "rename"))
-      .child(item(7, "Delete", "x", "delete"));
+      // Duplicate — file-explorer-row-context-menu.tsx:197-202 (files only)
+      .when(!dir, el => el.child(item(4, "Duplicate", "files", "duplicate")))
+      // Open in Terminal — file-explorer-row-context-menu.tsx:210 (directories only)
+      .when(Boolean(dir), el => el.child(item(5, "Open in Terminal", "terminal", "terminal")))
+      // View File — file-explorer-row-context-menu.tsx:216-221 (files only)
+      .when(!dir, el => el.child(item(6, "View File", "file", "view-file")))
+      // Reveal in File Manager / Open Containing Folder — file-explorer-row-context-menu.tsx:254-263
+      .child(item(7, revealLabel, "external-link", "reveal"))
+      .child(sep())
+      // Rename & Delete — file-explorer-row-context-menu.tsx:265-276
+      .child(item(8, "Rename", "square-pen", "rename"))
+      .child(item(9, "Delete", "trash", "delete", true));
   }
 
   // FileExplorerToolbar.tsx:66 — `flex h-8 min-h-8 items-center gap-2 border-b border-border px-2`;
