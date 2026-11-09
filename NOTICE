@@ -16,6 +16,7 @@ from a source carries a header naming that source.
      mods/orca-handoff/transcript.js
      mods/orca-spaces/indentation.js
      mods/new-menu/models.js
+     mods/orca-status/usage.js
    They are distributed under the MIT License below.
 
    MIT License
@@ -52,4 +53,6 @@ from a source carries a header naming that source.
    mods/orca-spaces/main.js comment that uses it.
    mods/orca-spaces/omp.svg, mods/orca-tabs/omp.svg,
    mods/orca-spaces/agent-icons/{droid,kilo,aider}.svg,
-   mods/orca-spaces/agent-icons/{gemini,cursor,grok,qoder,hermes,dsh}.png
+   mods/orca-spaces/agent-icons/{gemini,cursor,grok,qoder,hermes,dsh}.png,
+   mods/orca-status/{antigravity,cursor}.png,
+   mods/orca-status/{claude,codex}.svg
