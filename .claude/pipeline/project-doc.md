@@ -1,5 +1,5 @@
 # Project Documentation
-> Generated: 2026-11-09T18:50:45Z | Mode: DELTA (updated from 2026-11-09T18:46:02Z)
+> Generated: 2026-11-09T19:56:40Z | Mode: DELTA (updated from 2026-11-09T18:50:45Z)
 
 ## Tech Stack
 
@@ -48,7 +48,7 @@ Eighteen mods, all `"place": "none"` (composed into blocks rather than floated):
 | `orca-pane-status` | the agent mark drawn in a pane header | 37 |
 | `orca-panel-head` | the right panel's activity switcher | 118 |
 | `orca-panel-gap` | the honest body for a panel or page Herdr has no backend for | 61 |
-| `orca-files` | the file tree (virtualized), preview, name/content search, row context menu; opens a file from `props.file` | 1090 |
+| `orca-files` | the file tree (virtualized), preview, name/content search, row context menu; opens a file from `props.file` | 1100 |
 | `orca-changes` | the source-control list, split commit actions, conflict resolution, PR creation, uncommitted-entry context menu | 788 |
 | `orca-agents` | the agents panel: live scopes, search, and session history with resume | 546 |
 | `orca-status` | the bottom status bar: one usage chip per meterable provider (`agy`, `omp usage`), updates, hosts, float toggle | 199 |
@@ -146,7 +146,7 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 - **Overall coverage**: one unit suite, `mods/orca-status/usage.test.js` (13 cases, `node --test`), covering quota parsing, tightest-window selection, label formatting and probe failure shapes. The rest of the package is covered by `scripts/verify.py` only.
 - **Testing framework**: Node's built-in `node:test` for `usage.js` (no `package.json`, no dependency install); `scripts/verify.py` remains an audit, not a suite.
 - **Rationale**: the defects this project actually shipped were four runtime throws, three invented values and three fabricated citations. None is visible to a unit test; the oracle for a value is `~/Projects/orca`, which is not a JS dependency. So the audit checks what would have caught them, and it did — it found three fabricated line citations in its first run.
-- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (836 citations checked); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
+- **What `verify.py` checks**: every `file.ext:NN` in a mod comment resolves to a real file in Orca with at least that many lines (837 citations checked); every mod script parses (`node --check`); every mod folder passes `herdr-app check`; and with `--smoke`, the app restarts and the run fails on any script error in the log.
 - **Known untested areas**: pointer interaction. Keys are injectable — this build's `hyprctl` speaks the Lua dispatcher, and `hl.dsp.send_key_state({mods="", state="down", key="f"})` reaches the focused window (a programmatically focused `Input` accepted typed text this way). Pointer is not: `hl.dsp.cursor` exposes only `move` and `move_to_corner`, and `xdotool`, `ydotool`, `wlrctl` are absent while `/dev/uinput` is root-only. So hover, click and drag stay code-verified; typing is verifiable when a probe can focus an element.
 
 ## Entry Points
@@ -175,7 +175,8 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 - `README.md`, `RECIPE.md`: status bar documented as one chip per meterable provider via `agy` and `omp usage`; new-menu catalog caching and CLI resolution noted.
 - `docs/superpowers/plans/2026-11-09-crew-chip.md` (new): five-task implementation plan — `crew.js` + `crew.test.js` (pure derivation, `node --test`), `status.js` + asset copies, `main.js` chip/popup branch, `mod.json` overlay declaration, docs/`NOTICE` updates. Crew rule: live children with a `status` plus the parent when it has one (`herdr-app/defaults/mods/agents/main.js:176`).
 - `mods/orca-nav/main.js`, `mods/orca-panel-gap/main.js`: the sidebar row and gap page now read "Mobile" instead of "Orca Mobile" (icon, page id, and gap body unchanged).
+- `mods/orca-files/main.js`: Collapse All needs the Names mode with no name filter and Refresh needs the Names mode, as `canCollapseAll` (`FileExplorer.tsx:150`) and `canRefresh` (`:260`) do; the More menu's dotfile/gitignored toggles now rebuild the cached name projection instead of leaving stale rows.
 
 ## Last Scanned
 
-2026-11-09T18:50:45Z
+2026-11-09T19:56:40Z
