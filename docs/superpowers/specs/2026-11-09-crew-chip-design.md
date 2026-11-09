@@ -73,6 +73,10 @@ const managedBy = parentAddr ? all.find((t) => t.address === parentAddr && t.sta
 - `terminals()` is documented at `gpui-kit.d.ts:22404-22407`; its fixture
   (`herdr-app/src/mods/render_tests.rs:99`) confirms `parent` is an address and
   `status` is the plain word.
+- Verified live, 2026-11-09: `hc run --parent t15 --bg --no-notify --name crewwire sleep 20`
+  answered `"parent":"t15"`, and `herdr-app ls` then showed `sub_agents: ["t3d"]` on
+  `t15`; the child had `status: null`, confirming a status-less helper stays out of
+  the crew. The probe terminal was killed after the check.
 - The agent's app key is `t.report?.app` here, not `t.app` — `agents()` has `app`,
   `terminals()` does not.
 - Group order: `blocked`, `working`, `done`, `idle` — `Model::rollup`
