@@ -35,9 +35,9 @@ function find(node, id) {
 // that paints the quadrant and takes the release.
 const STATUS_BAR_HEIGHT = 24; // `orca-status` draws this (`layouts/orca.json` node `status`).
 const TAB_STRIP_FALLBACK = 32; // `TAB_GROUP_TAB_STRIP_HEIGHT_PX` (tab-drop-zone.ts:4), the fallback.
-const DROP_STILL_TICKS = 8; // ~130ms of a motionless pointer is the release, since the host has no button state.
+const DROP_STILL_TICKS = 20; // ~320ms of a motionless pointer is the release fallback, since the host has no button state.
 const TAB_DRAG_DISTANCE = 12; // `useTabDragSplit.ts:42` — dnd-kit activation distance, and how far down a press must travel before it is a split.
-const DROP_REV = 9; // bumped every time the instrumentation changes
+const DROP_REV = 13; // bumped every time the instrumentation changes
 let dropSeq = 0;
 function dropTrace(event, detail) {
   const path = `/tmp/drop-${String(Date.now())}-${dropSeq++}-${event}.json`;
@@ -69,26 +69,49 @@ function panelRect(top, stripHeight) {
 
 
 let dropDrag = null;
+let pollTimer = null;
 // `mods.rs:432` — `shared()` is the host's per-key store, one value every mod instance reads,
 // and `set_shared` refreshes the views. Module memory is NOT shared: an overlay copy of this mod
 // runs in its own realm, which is why the record lives here.
 const DROP_KEY = "orca-tabs.drop";
 function dragRecord() {
-  return dropDrag ?? shared(DROP_KEY) ?? null;
+  const s = shared(DROP_KEY);
+  return dropDrag ?? (s?.tab ? s : null);
 }
 function setDragRecord(value) {
   dropDrag = value;
-  // `null` is a value too: it would leave the key in the host's shared store and block the next drag's
-  // `!dragRecord()` guard after a restart. Clearing it with `undefined` drops the key.
-  setShared(DROP_KEY, value ?? undefined);
+  if (!value && pollTimer) {
+    try { pollTimer.cancel(); } catch {}
+    pollTimer = null;
+  }
+  // `null` or `undefined` clears the record in the host's shared store.
+  setShared(DROP_KEY, value ?? null);
 }
 
 // The poll writes here; the overlay's view reads it on its own tick and repaints. Two views of
 // one module share `dropDrag`, and neither needs the other's `cx`.
 function pollDrop(cx) {
-  let last = null;
-  cx.timer.every(16, (cx) => {
-    if (!dropDrag) return;
+  let lastZone = null;
+  let pollSeq = 0;
+  if (pollTimer) {
+    try { pollTimer.cancel(); } catch {}
+    pollTimer = null;
+  }
+  pollTimer = cx.timer.every(16, (cx) => {
+    if (!dropDrag || !shared(DROP_KEY)) {
+      dropDrag = null;
+      if (pollTimer) {
+        try { pollTimer.cancel(); } catch {}
+        pollTimer = null;
+      }
+      return;
+    }
+    const sharedDrag = shared(DROP_KEY);
+    const releasedZone = dropDrag.released || sharedDrag?.released;
+    if (releasedZone) {
+      dropResolve(releasedZone, cx);
+      return;
+    }
     const at = typeof window !== "undefined" ? window.mouse_position() : null;
     if (!at) return;
     const s = dropDrag.strip;
@@ -98,38 +121,134 @@ function pollDrop(cx) {
     const inside = at.x >= panel.left && at.x <= panel.left + panel.width
       && at.y >= panel.top && at.y <= panel.top + panel.height;
     const zone = inside ? edgeZone(panel, at, s.stripHeight) : null;
-    if (dropSeq < 6) dropTrace("poll", { at, zone });
-    const moved = !last || last.x !== at.x || last.y !== at.y;
+    if (pollSeq++ < 8 || zone !== lastZone) dropTrace("poll", { at, zone, inside });
+    const moved = !dropDrag.lastPos || dropDrag.lastPos.x !== at.x || dropDrag.lastPos.y !== at.y;
+    dropDrag.lastPos = { x: at.x, y: at.y };
     // The overlay takes no pointer events for a press that started elsewhere (measured: no
     // `drop-move`, no `drop-up` for a real drag) and the host exposes no button state, so the
     // release is inferred: a pointer that stops moving, below the strip, is where it was let go.
     dropDrag.still = moved ? 0 : (dropDrag.still ?? 0) + 1;
-    if (moved) {
-      last = { x: at.x, y: at.y, zone };
+    if (zone !== lastZone) {
+      lastZone = zone;
       dropDrag.zone = zone;
-      setShared(DROP_KEY, { ...dropDrag, pointer: { x: at.x, y: at.y } });
+      setShared(DROP_KEY, { ...dropDrag });
     }
     if (dropDrag.still >= DROP_STILL_TICKS && at.y > panel.top + s.stripHeight) {
       dropDrag.still = 0;
-      dropResolve(zone);
+      dropResolve(zone, cx);
     }
   });
 }
 
-// The drop, resolved by the view that saw the gesture (`tab-group-panel-split-target.ts:212-246`).
-function dropResolve(zone) {
+// In Orca (`tabs-drop-actions.ts:26-170` and `tab-move-to-pane-column.ts:45-84`), moving a tab
+// into a split column moves the dragged/selected tab into the split group and removes it from
+// the source group. If sourceTabCount <= 1 on its own matching panel, it is a no-op (`pane-column-split-drop-no-op.ts:60-62`
+// & `tab-drag-data.ts:46`). In Herdr, we port this behavior:
+// 1. If shown.length <= 1, do nothing (`isPaneColumnSplitDropNoOp`).
+// 2. Take the dragged tab's terminal, park it via `terminal.park` (`commands.rs:46`, `window.rs:2569-2607`),
+//    which detaches its pane and closes the tab once empty (`model.rs:350-388`).
+// 3. Once parking finishes, place it into the active tab via `terminal.keep` (`commands.rs:45`, `window.rs:2541-2635`).
+// 4. If the split was "left" or "up", swap the new pane with its neighbor via `pane.swap` (`window.rs:3026-3042`).
+function moveTabToSplit(fromTabId, zone, cx, fromTerminalHint) {
+  const space = (spaces() ?? []).find((s) => s.active);
+  const shown = space?.tabs ?? [];
+  // `pane-column-split-drop-no-op.ts:60-62` & `tab-drag-data.ts:46`:
+  // Dropping a group's last tab on its own matching panel is a no-op.
+  if (shown.length <= 1) return;
+
+  const allPanes = panes() ?? [];
+  const fromTerminal = fromTerminalHint
+    ?? allPanes.find((p) => p.tab === fromTabId && p.focused)?.terminal
+    ?? allPanes.find((p) => p.tab === fromTabId)?.terminal;
+  if (!fromTerminal) return;
+
+  run("terminal.park", { terminal: fromTerminal });
+  dropTrace("move-park", { terminal: fromTerminal, fromTab: fromTabId, zone });
+
+  if (!cx) return;
+
+  const place = (zone === "left" || zone === "right") ? "right" : "down";
+  let parkTicks = 0;
+  const keepTimer = cx.timer.every(16, (cx) => {
+    parkTicks++;
+    const current = panes() ?? [];
+    const stillHasPane = current.some((p) => p.terminal === fromTerminal);
+    if (stillHasPane && parkTicks < 60) return;
+    try { keepTimer.cancel(); } catch {}
+    if (stillHasPane) {
+      dropTrace("move-park-timeout", { terminal: fromTerminal });
+      return;
+    }
+    const res = run("terminal.keep", { terminal: fromTerminal, place });
+    dropTrace("move-keep", { terminal: fromTerminal, place, res });
+
+    if (zone === "left" || zone === "up") {
+      let swapTicks = 0;
+      const targetPane = res?.pane;
+      const swapTimer = cx.timer.every(16, (cx) => {
+        swapTicks++;
+        const pList = panes() ?? [];
+        const hasMounted = targetPane
+          ? pList.some((p) => p.pane === targetPane)
+          : pList.some((p) => p.terminal === fromTerminal);
+        if (!hasMounted && swapTicks < 60) return;
+        try { swapTimer.cancel(); } catch {}
+        if (!hasMounted) return;
+        const paneId = targetPane ?? pList.find((p) => p.terminal === fromTerminal)?.pane;
+        if (paneId) {
+          run("pane.swap", { direction: zone, pane: paneId });
+          dropTrace("move-swap", { pane: paneId, direction: zone });
+        }
+      });
+    }
+  });
+}
+
+// In Orca (`tab-drag-drop-commit.ts:147-175`, `tab-drag-drop-commit.ts:184-210`, and `tabs-drop-actions.ts:149-158`),
+// moving a tab from a split group into another group's tab strip or center collapses the source group
+// once empty (unsplits). In Herdr, a tab contains multiple panes when split. Moving a split pane to a
+// separate tab unsplits the original tab and gives the pane its own top-level tab:
+// 1. Park the terminal via `terminal.park` (`commands.rs:46`), detaching its pane from the split tab.
+// 2. The remaining panes in the tab expand to fill the tab (unsplit).
+// 3. Once parking finishes, place the terminal into its own tab via `terminal.keep` (`commands.rs:45`, `window.rs:3059`).
+function unsplitPaneToTab(terminal, cx, paneId) {
+  const allPanes = panes() ?? [];
+  const targetTerminal = terminal ?? allPanes.find((p) => p.pane === paneId)?.terminal;
+  if (!targetTerminal) return;
+
+  run("terminal.park", { terminal: targetTerminal });
+  dropTrace("unsplit-park", { terminal: targetTerminal });
+
+  if (!cx) return;
+
+  let parkTicks = 0;
+  const keepTimer = cx.timer.every(16, (cx) => {
+    parkTicks++;
+    const current = panes() ?? [];
+    const stillHasPane = current.some((p) => p.terminal === targetTerminal);
+    if (stillHasPane && parkTicks < 60) return;
+    try { keepTimer.cancel(); } catch {}
+    if (stillHasPane) {
+      dropTrace("unsplit-park-timeout", { terminal: targetTerminal });
+      return;
+    }
+    const res = run("terminal.keep", { terminal: targetTerminal, place: "tab" });
+    dropTrace("unsplit-keep", { terminal: targetTerminal, res });
+  });
+}
+
+function dropResolve(zone, cx) {
   dropTrace("resolve", { zone });
-  const drag = dropDrag;
+  const drag = dropDrag ?? shared(DROP_KEY);
   if (!drag) return;
   const overlay = drag.overlay;
+  const fromTabId = drag.tab;
+  const fromTerminal = drag.terminal;
   setDragRecord(null);
   if (overlay) closeOverlay(overlay);
-  if (!zone || !drag.pane) return;
-  const before = new Set((panes() ?? []).map((p) => p.pane));
-  run("pane.split", { direction: zone === "left" || zone === "right" ? "right" : "down", pane: drag.pane });
-  if (zone === "left" || zone === "up") run("pane.swap", { direction: zone });
-  const made = (panes() ?? []).find((p) => !before.has(p.pane));
-  if (made && drag.terminal) run("terminal.show", { terminal: drag.terminal, pane: made.pane });
+  if (!zone || !fromTabId) return;
+
+  moveTabToSplit(fromTabId, zone, cx, fromTerminal);
 }
 
 // The drag in flight: the tab it started from and the panel it aims at. Written through
@@ -138,12 +257,12 @@ function dropResolve(zone) {
 // `tab-drop-zone.ts:38-88`, ported: a zone only in the outer bands, the strip left to
 // reordering, and the middle of the panel meaning "no split".
 function edgeZone(panel, point, stripHeight) {
+  const stripBottom = panel.top + stripHeight;
+  if (point.y < stripBottom) return null;
   const localX = point.x - panel.left;
   const horizontalEdge = panel.width * 0.2;
   if (localX < horizontalEdge) return "left";
   if (localX > panel.width - horizontalEdge) return "right";
-  const stripBottom = panel.top + stripHeight;
-  if (point.y < stripBottom) return null;
   const bodyHeight = Math.max(0, panel.height - stripHeight);
   if (bodyHeight <= 0) return null;
   const bodyLocalY = point.y - stripBottom;
@@ -171,11 +290,8 @@ export default class Tabs extends View {
       rev: DROP_REV,
       drop: Boolean(p?.drop),
       stale: Boolean(shared(DROP_KEY)),
-      // The epoch the strip's copy loaded at, so a trace can be matched to a sync instead of
-      // "some copy once loaded rev 8".
-      from: "strip",
+      from: p?.drop ? "overlay" : "strip",
     });
-    if (!p?.drop && shared(DROP_KEY)) setDragRecord(null);
     if (p?.confirmClose) {
       this.isDialog = true;
       this.dontAskAgain = false;
@@ -236,6 +352,46 @@ export default class Tabs extends View {
       if (tries > 0) cx.timer.after(50, (cx) => seed(cx, tries - 1));
     };
     if (!this.windowState) cx.timer.after(0, (cx) => seed(cx, 20));
+  }
+
+  // useTabDragSplit.ts:42 — TAB_DRAG_ACTIVATION_DISTANCE_PX = 12. Once downward travel reaches
+  // 12px, hand the drag to a popup overlay positioned over the terminal area.
+  triggerSplit(box, at, cx) {
+    if (this.pressed === null || dragRecord() || !this.pressAt) return false;
+    const space = (spaces() ?? []).find(s => s.active);
+    const shown = space?.tabs ?? [];
+    // `pane-column-split-drop-no-op.ts:60-62` & `tab-drag-data.ts:46`:
+    // Dropping a group's last tab on its own matching panel is a no-op;
+    // Orca requires overGroup.tabOrder.length > 1 before allowing a pane-body drop split.
+    if (shown.length <= 1) return false;
+    const rect = box?.width ? panelRect(box.y, box.height) : null;
+    if (!rect || at.y - this.pressAt.y < TAB_DRAG_DISTANCE) return false;
+    const bodyTop = rect.top + rect.stripHeight;
+    const bodyHeight = Math.max(1, rect.height - rect.stripHeight);
+    setDragRecord({
+      tab: this.dragTab,
+      terminal: this.dragTerminal,
+      pane: this.dragPane,
+      strip: { x: rect.left, y: rect.top, width: rect.width, height: rect.height, stripHeight: rect.stripHeight },
+    });
+    this.pressed = null;
+    this.overTab = null;
+    this.overSide = null;
+    dropTrace("handoff", { press: this.pressAt, at, rect });
+    const overlayId = openOverlay({
+      mod: "orca-tabs",
+      kind: "popup",
+      frame: "none",
+      at: { x: rect.left, y: bodyTop },
+      width: rect.width,
+      height: bodyHeight,
+      props: { drop: true },
+    });
+    dropDrag.overlay = overlayId;
+    setShared(DROP_KEY, { ...dropDrag });
+    pollDrop(cx);
+    cx.notify();
+    return true;
   }
 
   // The side panel is remembered per space: switching shows that space's choice
@@ -499,30 +655,32 @@ export default class Tabs extends View {
   // `TabPaneColumnSplitDragOverlay.tsx:11-38` paints half the panel — a column half for
   // left/right, a row half for up/down — with `.tab-drop-overlay` (`terminal.css:205-213`):
   // an rgba(59,130,246,0.2) fill, a 2px rgba(59,130,246,0.5) border, 4px radius, no
-  // transition. This window spans the whole app, so the half is drawn inside the panel column
-  // the strip reported when the drag began.
+  // transition. This window covers the terminal body below the strip.
   renderDrop(cx) {
     const t = theme();
     const drag = dragRecord() ?? this.drag;
     if (drag && this.zone !== drag.zone) this.zone = drag.zone;
     const box = drag?.strip;
     if (!box) return div().size_full();
-    // The rect the strip measured: its top and height, the rails from the layout tree. The
-    // overlay's own box is the whole window, so it is not asked for a size.
+    const bodyWidth = box.width;
+    const bodyHeight = Math.max(1, box.height - box.stripHeight);
     const panel = { left: box.x, top: box.y, width: box.width, height: box.height };
     const zone = this.zone;
-    // `TabPaneColumnSplitDragOverlay.tsx:11-38`, in the panel's own coordinates: the overlay is
-    // the whole window here, so the half starts at the panel's origin instead of 0.
+    const wHalf = Math.round(bodyWidth / 2);
+    const hHalf = Math.round(bodyHeight / 2);
+    // `TabPaneColumnSplitDragOverlay.tsx:11-38`, in the panel body's coordinates:
     const half = !zone ? null
-      : zone === "up" ? { left: 0, top: 0, width: panel.width, height: panel.height / 2 }
-      : zone === "down" ? { left: 0, top: panel.height / 2, width: panel.width, height: panel.height / 2 }
-      : zone === "left" ? { left: 0, top: 0, width: panel.width / 2, height: panel.height }
-      : { left: panel.width / 2, top: 0, width: panel.width / 2, height: panel.height };
-    const at = half && { left: panel.left + half.left, top: panel.top + half.top };
+      : zone === "up" ? { left: 0, top: 0, width: bodyWidth, height: hHalf }
+      : zone === "down" ? { left: 0, top: hHalf, width: bodyWidth, height: bodyHeight - hHalf }
+      : zone === "left" ? { left: 0, top: 0, width: wHalf, height: bodyHeight }
+      : { left: wHalf, top: 0, width: bodyWidth - wHalf, height: bodyHeight };
     return div()
       .id("tab-drop")
       .track_focus(this.handle)
-      .size_full()
+      .w(bodyWidth)
+      .h(bodyHeight)
+      .relative()
+      .overflow_hidden()
       // A window would follow any press it isn't told to stop (herdr.d.ts OverlaySpec).
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_mouse_move((e, cx) => {
@@ -532,7 +690,10 @@ export default class Tabs extends View {
         this.zone = next;
         cx.notify();
       })
-      .on_mouse_up("left", (e) => { dropTrace("drop-up", { panel, at: e.position, zone: this.zone }); this.drop(); })
+      .on_mouse_up("left", (e) => {
+        dropTrace("drop-up", { at: e.position, zone: this.zone });
+        this.drop();
+      })
       .on_key_down((e, cx) => {
         if (e.key !== "escape") return;
         setDragRecord(null);
@@ -540,7 +701,7 @@ export default class Tabs extends View {
         cx.notify();
       })
       .when(Boolean(half), (el) => el.child(div()
-        .absolute().left(at.left).top(at.top).w(half.width).h(half.height)
+        .absolute().left(half.left).top(half.top).w(half.width).h(half.height)
         .bg("#3b82f633").border_2().border_color("#3b82f680").rounded(4)
         // `TabGroupDropOverlay.tsx:31-39` — the "New split" label, bottom-left.
         .child(div().absolute().bottom(8).left(8).px(6).py(2).rounded(2)
@@ -548,17 +709,19 @@ export default class Tabs extends View {
           .child("New split"))));
   }
 
-  // Herdr splits right and down only, so a left or up drop splits the other way and swaps the
-  // new pane into place — the same pair `orca-split-menu` uses for its four directions
-  // (`mods/orca-split-menu/main.js:52-70`). The dragged tab's terminal then fills that pane:
-  // Herdr cannot move a tab into a tab (a tab *is* its panes), so `terminal.show` puts it
-  // there while the source tab keeps running (commands.rs).
-  // A release that reaches this layer resolves it directly; otherwise the strip's timer does
-  // (`dropResolve`), because a press that began outside a window does not deliver here.
+  // `tabs-drop-actions.ts:26-170` — committing the split moves the dragged tab into the new group.
+  // The overlay's pointer release writes `released = zone` to the shared drag record so the
+  // strip's permanent poll timer drives `terminal.park` -> `terminal.keep` on a lasting `cx`.
   drop() {
     const zone = this.zone;
-    if (zone) dropResolve(zone);
-    else { setDragRecord(null); closeOverlay(props()?.overlay); }
+    const drag = dragRecord();
+    if (drag && zone) {
+      drag.released = zone;
+      setShared(DROP_KEY, { ...drag });
+    } else {
+      setDragRecord(null);
+      closeOverlay(props()?.overlay);
+    }
   }
 
   render(cx) {
@@ -569,6 +732,19 @@ export default class Tabs extends View {
     if (this.isDropOverlay || p?.drop) {
       return this.renderDrop(cx);
     }
+
+    // Process actions dispatched from orca-menu on this lasting cx.
+    const action = shared("orca-tabs.action");
+    if (action && typeof action === "object") {
+      setShared("orca-tabs.action", null);
+      if (action.kind === "move-tab-split" && action.tab && action.direction) {
+        moveTabToSplit(action.tab, action.direction, cx);
+      } else if (action.kind === "unsplit-to-tab" && (action.terminal || action.pane)) {
+        unsplitPaneToTab(action.terminal, cx, action.pane);
+      }
+    }
+
+    const paneDrag = shared("orca-tabs.pane-drag");
     const t = theme();
     const space = (spaces() ?? []).find(p => p.active);
     const shown = space?.tabs ?? [];
@@ -700,6 +876,7 @@ export default class Tabs extends View {
           this.pressed = i;
           this.overTab = c.id;
           this.overSide = null;
+          this.stripBounds = e.bounds;
           // What a drop past the strip would carry, and where the press began.
           this.pressAt = e.position;
           this.dragTab = c.id;
@@ -716,44 +893,11 @@ export default class Tabs extends View {
               busy: Boolean(dropDrag), hasBounds: Boolean(e.bounds?.width),
             });
           }
-          // A press on this tab that travels down past Orca's activation distance becomes a
-          // panel drop. The pointer is about to leave this block, so a frame-less overlay over
-          // the whole app takes over: it paints the quadrant and receives the release.
-          if (this.pressed === i && !dragRecord() && this.pressAt) {
-            const box = e.bounds;
-            const rect = box?.width ? panelRect(box.y, box.height) : null;
-            if (box && rect && e.position.y - this.pressAt.y >= TAB_DRAG_DISTANCE) {
-              setDragRecord({
-                tab: c.id,
-                terminal: this.dragTerminal,
-                pane: this.dragPane,
-                strip: { x: rect.left, y: rect.top, width: rect.width, height: rect.stripHeight },
-              });
-              this.pressed = null;
-              this.overTab = null;
-              this.overSide = null;
-              dropTrace("handoff", { press: this.pressAt, at: e.position, rect });
-              dropDrag.overlay = openOverlay({
-                mod: "orca-tabs",
-                // `popup`, not `window`: a popup accepts Esc and `overlay.close`
-                // (OverlayKind::modal_keys), so a release this layer misses can never leave a
-                // full-window sheet over the app.
-                kind: "popup",
-                frame: "none",
-                at: { x: 0, y: 0 },
-                width: 1,
-                height: 1,
-                props: { drop: true },
-              });
-              setShared(DROP_KEY, { ...dropDrag });
-              // The pointer, not the element: this view's own timer keeps running after the
-              // pointer leaves the strip (measured), and `window.mouse_position()` keeps
-              // reporting. That is this host's stand-in for Orca's `document` listener
-              // (`tab-drag-pointer-sensor.ts:174-176`).
-              pollDrop(cx);
-              cx.notify();
-              return;
-            }
+          // A press on any tab that travels down past Orca's activation distance becomes a
+          // panel drop. The pointer is about to leave this block, so a frame-less popup overlay over
+          // the terminal area takes over: it paints the quadrant and receives the release.
+          if (this.triggerSplit(e.bounds ?? this.stripBounds, e.position, cx)) {
+            return;
           }
           if (this.pressed !== null) {
             const width = e.bounds?.width ?? 144;
@@ -773,7 +917,9 @@ export default class Tabs extends View {
           this.overTab = null;
           this.overSide = null;
 
-          if (from !== null && from !== i) {
+          if (from === null) return;
+
+          if (from !== i) {
             // Orca tab-drag-drop-commit.ts:116-126 insertion algorithm
             const oldIndex = from;
             const rawInsertIndex = i + (overSide === "right" ? 1 : 0);
@@ -814,12 +960,14 @@ export default class Tabs extends View {
         .when(c.status === "idle", el => el.child(div().size(12).flex_none().flex().items_center().justify_center()
           .child(div().size(8).rounded(4).bg("#73737366"))))
         .when(Boolean(identity), el => el.child(c.active ? identity : identity.opacity(0.7)))
+        // Pin — SortableTab.tsx:258-259: size-3 (12px), mr-1 (4px), shrink-0, text-muted-foreground.
+        .when(Boolean(c.settled), el => el.child(svg("mods/orca-tabs/pin.svg").size(12).flex_none().mr(4).text_color(t.muted)))
         // `TAB_LABEL_WIDTH_CLASSES` (tab-width-rules.ts:4) — `tab-label min-w-0 flex-1 truncate`.
         // Orca never marks an expanded pane in the title (SortableTab.tsx:130-131); the
         // Minimize2 button below is the only indicator.
         .child(div().flex_1().min_w(0).truncate().child(label))
         // Colour dot — SortableTab.tsx:293-297: size-2 rounded-full dot, shown only when tab has a colour. Orca reads tab.color; Herdr has no colour field, so the value comes from localStorage["tab.colors.v1"] written by orca-menu. No !isEditing guard exists in this port.
-        .when(tabColour !== null, el => el.child(div().size(8).flex_none().rounded(4).mr(6).bg(tabColour)))
+        .when(Boolean(tabColour), el => el.child(div().size(8).flex_none().rounded(4).mr(6).bg(tabColour)))
         // Collapse pane — SortableTab.tsx:298-316: shown while the pane is expanded, a 16px box
         // with a 12px `Minimize2`; active tabs always show it, inactive ones on TAB hover
         // (`text-transparent group-hover:text-muted-foreground`). `pane.zoom` collapses.
@@ -870,7 +1018,20 @@ export default class Tabs extends View {
     // bar only inside the right sidebar (`right-sidebar-top-activity-bar.tsx:40`), which
     // `orca-panel-head` owns. Drawing them twice put two strip icons in the titlebar corner.
     return h_flex().size_full().min_w(0).pl(leftPad).gap(0).items_center().bg(t.surface).border_b(1).border_color(t.border)
+      .on_mouse_move((e, cx) => {
+        if (this.pressed !== null && this.stripBounds) {
+          this.triggerSplit(this.stripBounds, e.position, cx);
+        }
+      })
       .on_mouse_up("left", (_e, cx) => {
+        // Orca use-terminal-pane-tab-detach-actions.ts:61-73: dropping a dragged pane on the tab strip.
+        const paneDrag = shared("orca-tabs.pane-drag");
+        if (paneDrag?.active) {
+          setShared("orca-tabs.pane-drag", null);
+          unsplitPaneToTab(paneDrag.terminal, cx, paneDrag.pane);
+          cx.notify();
+          return;
+        }
         // A release back over the strip cancels a drop the overlay never took.
         const live = dragRecord();
         if (live?.overlay) closeOverlay(live.overlay);
@@ -899,6 +1060,23 @@ export default class Tabs extends View {
       // `tab-bar-surface.tsx:164-170` — the strip is `w-max … max-w-full shrink`: content-wide,
       // never stretched, so the `+` that follows it sits directly after the last tab.
       .child(h_flex().id("tab-scroll").flex_none().max_w("100%").min_w(0).h_full().items_center().gap(0).overflow_x_scroll().children(shown.map(item)))
+      // Orca terminal-tab-strip-drop-target.ts:39-52 — visual drop indicator when a pane is dragged to the tab strip.
+      .when(Boolean(paneDrag?.inTabStrip), el =>
+        el.child(
+          h_flex()
+            .id("pane-drop-strip-indicator")
+            .h(28)
+            .px(8)
+            .ml(4)
+            .items_center()
+            .justify_center()
+            .rounded(6)
+            .border_2()
+            .border_color("#3b82f6")
+            .bg("#3b82f626")
+            .child(div().text_size(12).font_medium().text_color(t.foreground).child("+ Move to Tab"))
+        )
+      )
       // tab-bar-surface.tsx:232 — the create menu is `w-72` (288).
       .child(tabNew(() => openOverlay({ mod: "new-menu", kind: "popup", width: 288, height: 512 })))
       .child(div().flex_1())
