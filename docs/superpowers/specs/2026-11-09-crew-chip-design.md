@@ -99,8 +99,7 @@ const managedBy = parentAddr ? all.find((t) => t.address === parentAddr && t.sta
 
 `terminals()` is live but does not notify a mod — the reason `orca-float` runs a
 timer (`mods/orca-float/main.js:98-106`). The header keeps a 1s timer, builds the
-signature `address:status:parent` for every crew member, and repaints only when it
-changes.
+signature `address:status` for every crew member, and repaints only when it changes.
 
 ### Popup
 
@@ -108,13 +107,16 @@ The chip's `on_click`: `cx.stop_propagation()` (as every other header button doe
 then
 
 ```js
-openOverlay({ mod: "orca-pane", kind: "popup", width: 300, props: { pane, crew: true } });
+openOverlay({ mod: "orca-pane", kind: "popup", width: 300, props: { pane } });
 ```
 
 `kind: "popup"` opens at the pointer and closes on a click beside it; Esc closes it
 (`gpui-kit.d.ts:22527-22544`). No dismissal code of ours. The popup instance is the
-same mod: `render` checks `props().crew` first and draws the card instead of the
-header, the pattern `new-menu` uses for its overlay copy.
+same mod, and `props().overlay` exists only in that instance — `render` checks it first
+and draws the card instead of the header, the pattern `new-menu` uses for its overlay
+copy. `mod.json` gains `"overlay": { "kind": "popup", "width": 300 }` so
+`herdr-app do mod.open --name orca-pane` renders the card for the focused pane; that
+is also how the card is proven without pointer automation.
 
 Card:
 
