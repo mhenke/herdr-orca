@@ -127,23 +127,22 @@ export default class FloatWorkspace extends View {
   }
 
   row(a, t) {
-    // Orca's compact row draws the state mark, then the agent's identity mark, then the title
-    // (`worktree-card-compact-agent-row.tsx:233-242`).
+    // Orca's compact agent row (`worktree-card-compact-agent-row.tsx:301-305,233-242`, already
+    // ported in orca-spaces/main.js): one `h-6` line, `px-1 gap-1`, 11px muted text,
+    // `leading-none`, state mark then identity mark then title. The row's 4px inset assumes the
+    // card's own padding; here it takes the list bar's 12px so the marks line up with it.
+    // Space and tab are not fields of that row, so they stay in the accessible name instead of
+    // a second line that doubled the row's height.
     const mark = agentMark(a, t);
-    return h_flex().id(`float-agent-${a.address}`).w_full().min_w(0).flex_none().px(12).py(8).gap(6).items_start()
-      .border_b(1).border_color(t.border).cursor_pointer().hover((s) => s.bg(t.hover))
-      .role("button").accessibility_label(`${title(a)} — ${a.status}`)
+    return h_flex().id(`float-agent-${a.address}`).h(24).w_full().min_w(0).flex_none().pl(12).pr(6).gap(4).items_center()
+      .text_size(11).line_height("11px").text_color(t.muted)
+      .cursor_pointer().hover((s) => s.bg("#4040402e"))
+      .role("button")
+      .accessibility_label(`${title(a)} — ${a.status} — ${a.app || a.program?.name || "agent"}, ${a.space_name || a.space || "space"}, ${a.tab_name || `tab ${a.tab_index}`}`)
       .on_click(() => run("agent.focus", { terminal: a.address }))
       .child(stateDot(a.status, t))
       .when(Boolean(mark), (el) => el.child(mark))
-      .child(v_flex().flex_1().min_w(0)
-        .child(div().min_w(0).truncate().text_size(13).font_medium().line_height("20px").text_color(t.foreground).child(title(a)))
-        .child(h_flex().mt(2).gap(4).items_center().text_size(11).line_height("16px").text_color(t.muted)
-          .child(div().min_w(0).truncate().child(a.app || a.program?.name || "agent"))
-          .child(div().flex_none().text_color(t.dim).child("·"))
-          .child(div().min_w(0).truncate().child(a.space_name || a.space || "space"))
-          .child(div().flex_none().text_color(t.dim).child("·"))
-          .child(div().min_w(0).truncate().child(a.tab_name || `tab ${a.tab_index}`))));
+      .child(div().min_w(0).flex_1().truncate().child(title(a)));
   }
 
   render() {

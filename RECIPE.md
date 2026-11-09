@@ -60,9 +60,9 @@ Left to right, divider 1px `border` (`#2e2e2e`):
   - Mod `orca-float`: Orca's `Mod+Alt+A` panel, toggled here by `ctrl-alt-a` →
     `orca-float.toggle` (`keys.json`). Opens a 920x560 panel (min 420x280, clamped to the
     viewport as `floating-terminal-panel-bounds.ts:89-97` does) at bottom-right, listing the
-    live agent sessions; a row shows the state mark then the agent's identity mark
-    (`worktree-card-compact-agent-row.tsx:233-242`), focuses its agent, and `×` hides the
-    panel. The header's `+` opens the `new-menu` agent launcher: Orca's first header button
+    live agent sessions on one 24px row each — state mark, identity mark, then the name
+    (`worktree-card-compact-agent-row.tsx:233-242,301-305`) — focuses its agent, and `×` hides
+    the panel. The header's `+` opens the `new-menu` agent launcher: Orca's first header button
     launches the person's `defaultTuiAgent`, and Herdr has no such setting.
   - Named divergence: Herdr cannot toggle a float's visibility by command (`layout.toggle`
     walks nodes, not floats) and a mod cannot host a terminal, so the panel floats agents
