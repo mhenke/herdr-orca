@@ -99,6 +99,17 @@ exactly one thing here.
   Displays that pane's tab pill, prompt icon (`>`), add button (`+`), command button (`> Command`), and
   pane actions (`...`, split, close). Rendered only when multiple panes exist (`paneCount > 1`).
   _Avoid_: split header, pane titlebar, pane bar.
+- **Crew** — the agents a terminal relates to through Herdr's one parent link: the live agents that name
+  it as their parent, plus the agent its own terminal names as parent. Ordered blocked, working, done,
+  idle.
+  _Avoid_: team, roster, squad, group.
+- **Crew chip** — the collapsed control left of `▷ Command` in an attached tab strip, drawn when the
+  pane's agent has a crew: workflow glyph, the managed count when it manages anyone, then one status
+  mark and agent stack per status group. Clicking it opens the crew card.
+  _Avoid_: crew panel, orchestration badge, agent stack.
+- **Crew card** — the 300px popup listing a pane's crew in two sections, Managing and Managed by.
+  Clicking a row focuses that agent. Orca's row previews, collapse button and per-row menus are absent.
+  _Avoid_: crew popup, orchestration panel, agent list.
 - **Unsplit** — the operation of detaching a split pane from its parent tab and converting it back into
   an independent top-level tab. Triggered by dragging the pane's header to the tab strip area or via the
   *"Move to New Tab"* context menu action.
