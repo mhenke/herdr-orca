@@ -51,6 +51,7 @@ filter_unconventional = false
 split_commits = false
 commit_parsers = [
     { message = "^chore\\(release\\)", skip = true },
+    { message = "^Merge ", skip = true },
     { message = "^(update|small updates|small update)$", skip = true },
     { message = "^feat(\\((.*)\\))?:", group = "Features" },
     { message = "^fix(\\((.*)\\))?:", group = "Bug Fixes" },
