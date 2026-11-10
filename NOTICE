@@ -59,6 +59,8 @@ from a source carries a header naming that source.
    mods/orca-tabs/agent-icons/{gemini,cursor,grok,qoder,hermes,dsh}.png,
    mods/orca-float/agent-icons/{omp,droid,kilo,aider}.svg,
    mods/orca-float/agent-icons/{gemini,cursor,grok,qoder,hermes,dsh}.png,
+   mods/orca-pane/agent-icons/{omp,droid,kilo,aider}.svg,
+   mods/orca-pane/agent-icons/{gemini,cursor,grok,qoder,hermes,dsh}.png,
    mods/orca-status/{antigravity,cursor}.png,
    mods/orca-status/{claude,codex}.svg
 
