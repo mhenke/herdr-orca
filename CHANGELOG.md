@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-11-10
+
+### Bug Fixes
+
+- **orca-pane:** Omit the crew count when no agent is managed
+- **release:** Skip merge commits in the changelog
+
+### Documentation
+
+- **plan:** Add the popup branch in the task that defines its card
+- **provenance:** List orca-pane's icons, its status port and the crew chip
+- **readme:** Trigger the crew chip on any crew, not only managed agents
+
+### Features
+
+- **orca-pane:** Derive a pane's crew from terminal parent links
+- **orca-pane:** Status and agent marks with their own asset copies
+- **orca-pane:** Draw the crew chip and open its list
+
+### Testing
+
+- **verify:** Treat orca-pane crew modules as local, not Orca citations
 ## [0.10.2] - 2026-11-09
 
 ### Bug Fixes
@@ -311,6 +333,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stroke width, and the group header's missing plus
 - The palette was invented; the drop indicator was the wrong shape
 - Refresh the raster after the row-order fix
+[0.11.0]: https://github.com/mhenke/herdr-orca/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/mhenke/herdr-orca/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/mhenke/herdr-orca/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/mhenke/herdr-orca/compare/v0.9.0...v0.10.0
