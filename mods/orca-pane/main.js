@@ -234,7 +234,9 @@ export default class Pane extends View {
         openOverlay({ mod: "orca-pane", kind: "popup", width: 300, props: { pane } });
       })
       .child(svg("mods/orca-pane/workflow.svg").size(12).flex_none())
-      .child(div().text_size(11).child(String(this.crew.managing.length)))
+      // OrchestrationCrewPanel.tsx:363-365: the count exists only when something is managed.
+      .when(this.crew.managing.length > 0, (el) =>
+        el.child(div().text_size(11).child(String(this.crew.managing.length))))
       .children(groups.map((g) => h_flex().gap(2).items_center().flex_none()
         .child(statusMark(g.status, 12, t))
         .child(this.agentStack(g.members, t))));
