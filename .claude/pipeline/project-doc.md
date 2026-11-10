@@ -1,5 +1,5 @@
 # Project Documentation
-> Generated: 2026-11-09T19:56:40Z | Mode: DELTA (updated from 2026-11-09T18:50:45Z)
+> Generated: 2026-11-10T13:47:49Z | Mode: DELTA (updated from 2026-11-09T19:56:40Z)
 
 ## Tech Stack
 
@@ -44,7 +44,7 @@ Eighteen mods, all `"place": "none"` (composed into blocks rather than floated):
 | `orca-nav` | Search, Tasks/Automations/Mobile rows, history arrows, Projects header and its options menu | 431 |
 | `orca-spaces` | the project tree: repo-anchored groups, worktrees, cards, status, reviews, owner avatars, saved folders | 1300 |
 | `orca-tabs` | the tab rail, window controls, right-sidebar toggle, close guards, drag reorder, drop-to-split indicators | 1110 |
-| `orca-pane` | the attached 32px pane header: tab pill, command/ellipsis menu, split controls, drag-to-unsplit | 350 |
+| `orca-pane` | the attached 32px pane header: tab pill, command/ellipsis menu, split controls, drag-to-unsplit, and the crew chip with its crew card (`crew.js`, `status.js`) | 512 |
 | `orca-pane-status` | the agent mark drawn in a pane header | 37 |
 | `orca-panel-head` | the right panel's activity switcher | 118 |
 | `orca-panel-gap` | the honest body for a panel or page Herdr has no backend for | 61 |
@@ -176,7 +176,9 @@ All outbound work is `exec` against host binaries; there is no HTTP client of th
 - `docs/superpowers/plans/2026-11-09-crew-chip.md` (new): five-task implementation plan — `crew.js` + `crew.test.js` (pure derivation, `node --test`), `status.js` + asset copies, `main.js` chip/popup branch, `mod.json` overlay declaration, docs/`NOTICE` updates. Crew rule: live children with a `status` plus the parent when it has one (`herdr-app/defaults/mods/agents/main.js:176`).
 - `mods/orca-nav/main.js`, `mods/orca-panel-gap/main.js`: the sidebar row and gap page now read "Mobile" instead of "Orca Mobile" (icon, page id, and gap body unchanged).
 - `mods/orca-files/main.js`: Collapse All needs the Names mode with no name filter and Refresh needs the Names mode, as `canCollapseAll` (`FileExplorer.tsx:150`) and `canRefresh` (`:260`) do; the More menu's dotfile/gitignored toggles now rebuild the cached name projection instead of leaving stale rows.
+- `mods/orca-pane/{crew.js,status.js,main.js}`, `crew.test.js`: the crew chip and its card. The crew walks Herdr's one parent link (`herdr-app/defaults/mods/agents/main.js:176`); statuses are Herdr's four in display order (blocked, working, done, idle), and every mark draws from asset copies inside the mod (Rule 9). The chip's count is drawn only above zero (`OrchestrationCrewPanel.tsx:363-365`); a Herdr popup is window-level, so the card closes when its pane leaves the screen.
+- `README.md`, `GLOSSARY.md`, `cliff.toml`: the pane bullet now states the header appears on split tabs and what opens the crew card; **Crew**, **Crew chip** and **Crew card** defined; changelog parsers skip merge commits.
 
 ## Last Scanned
 
-2026-11-09T19:56:40Z
+2026-11-10T13:47:49Z
